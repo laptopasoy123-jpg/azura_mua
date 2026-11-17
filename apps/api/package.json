@@ -1,0 +1,25 @@
+{
+  "name": "@azura/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8181",
+    "deploy": "wrangler deploy --env production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@azura/contracts": "*",
+    "@hono/zod-validator": "^0.7.2",
+    "@supabase/supabase-js": "^2.81.1",
+    "hono": "^4.10.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261115.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.9",
+    "wrangler": "^4.47.0"
+  }
+}

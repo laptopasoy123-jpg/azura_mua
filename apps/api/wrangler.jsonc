@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "azura-mua-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "APP_ENV": "development",
+    "ALLOWED_ORIGIN": "http://localhost:8080"
+  },
+  "r2_buckets": [
+    {
+      "binding": "PUBLIC_BUCKET",
+      "bucket_name": "azura-mua-public"
+    },
+    {
+      "binding": "PRIVATE_BUCKET",
+      "bucket_name": "azura-mua-private"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "env": {
+    "production": {
+      "name": "azura-mua-api-production",
+      "vars": {
+        "APP_ENV": "production",
+        "ALLOWED_ORIGIN": "https://crm.example.com"
+      },
+      "r2_buckets": [
+        {
+          "binding": "PUBLIC_BUCKET",
+          "bucket_name": "azura-mua-public"
+        },
+        {
+          "binding": "PRIVATE_BUCKET",
+          "bucket_name": "azura-mua-private"
+        }
+      ]
+    }
+  }
+}
