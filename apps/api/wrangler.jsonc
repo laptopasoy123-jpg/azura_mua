@@ -6,7 +6,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "APP_ENV": "development",
-    "ALLOWED_ORIGIN": "http://localhost:8080"
+    "ALLOWED_ORIGIN": "http://localhost:8080",
+    "REQUIRE_AUTH": "false"
   },
   "r2_buckets": [
     {
@@ -26,7 +27,8 @@
       "name": "azura-mua-api-production",
       "vars": {
         "APP_ENV": "production",
-        "ALLOWED_ORIGIN": "https://crm.example.com"
+        "ALLOWED_ORIGIN": "https://azura.daysheet.id",
+        "REQUIRE_AUTH": "false"
       },
       "r2_buckets": [
         {

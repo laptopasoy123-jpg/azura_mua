@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { secureHeaders } from 'hono/secure-headers'
@@ -9,6 +9,8 @@ import { filePurposeSchema, type FilePurpose } from '@azura/contracts'
 type Bindings = {
   APP_ENV: 'development' | 'production'
   ALLOWED_ORIGIN: string
+  REQUIRE_AUTH?: string
+  PUBLIC_BASE_URL?: string
   SUPABASE_URL?: string
   SUPABASE_PUBLISHABLE_KEY?: string
   SUPABASE_SECRET_KEY?: string
@@ -17,9 +19,11 @@ type Bindings = {
 }
 
 type Variables = {
-  userId: string
+  userId?: string
   userEmail?: string
 }
+
+type AppContext = Context<{ Bindings: Bindings; Variables: Variables }>
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 const allowedMimeTypes = new Set([
@@ -29,13 +33,56 @@ const allowedMimeTypes = new Set([
   'application/pdf',
 ])
 
+function parseAllowedOrigins(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((item) => item.trim().replace(/\/+$/, ''))
+    .filter(Boolean)
+}
+
+async function verifyBearerToken(c: AppContext, token: string): Promise<Response | null> {
+  if (!c.env.SUPABASE_URL || !c.env.SUPABASE_PUBLISHABLE_KEY) {
+    return c.json({ ok: false, error: { code: 'SERVER_CONFIG', message: 'Konfigurasi autentikasi belum tersedia.' } }, 500)
+  }
+
+  const response = await fetch(`${c.env.SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      apikey: c.env.SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    return c.json({ ok: false, error: { code: 'INVALID_SESSION', message: 'Sesi tidak valid atau sudah berakhir.' } }, 401)
+  }
+
+  const user = (await response.json()) as { id: string; email?: string }
+  c.set('userId', user.id)
+  c.set('userEmail', user.email)
+  return null
+}
+
+function parseFileRouteParams(c: AppContext): { visibility: 'public' | 'private'; key: string } | null {
+  const visibility = c.req.param('visibility')
+  if (visibility !== 'public' && visibility !== 'private') return null
+  const prefix = `/api/files/${visibility}/`
+  try {
+    const key = decodeURIComponent(c.req.path.slice(prefix.length))
+    if (!key || key.startsWith('/') || key.includes('..')) return null
+    return { visibility, key }
+  } catch {
+    return null
+  }
+}
+
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 
 app.use('*', logger())
-app.use('*', secureHeaders())
+app.use('*', secureHeaders({ crossOriginResourcePolicy: 'cross-origin' }))
 app.use('*', async (c, next) => {
+  const allowedOrigins = parseAllowedOrigins(c.env.ALLOWED_ORIGIN)
   const middleware = cors({
-    origin: c.env.ALLOWED_ORIGIN,
+    origin: allowedOrigins,
     allowHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     exposeHeaders: ['Content-Length', 'ETag'],
@@ -55,42 +102,36 @@ app.get('/health', (c) =>
   }),
 )
 
-const requireAuth = createMiddleware<{ Bindings: Bindings; Variables: Variables }>(async (c, next) => {
-  if (c.env.APP_ENV === 'development') {
-    c.set('userId', '00000000-0000-4000-8000-000000000001')
-    c.set('userEmail', 'demo@azuramakeup.local')
+const requireAuth = (mode: 'strict' | 'upload') =>
+  createMiddleware<{ Bindings: Bindings; Variables: Variables }>(async (c, next) => {
+    const authorization = c.req.header('Authorization')
+    if (authorization?.startsWith('Bearer ')) {
+      const errorResponse = await verifyBearerToken(c, authorization.slice(7))
+      if (errorResponse) return errorResponse
+      await next()
+      return
+    }
+
+    if (c.env.APP_ENV === 'development') {
+      c.set('userEmail', 'demo@azuramakeup.local')
+      await next()
+      return
+    }
+
+    const authRequired = mode === 'strict' || c.env.REQUIRE_AUTH === 'true'
+    if (authRequired) {
+      return c.json({ ok: false, error: { code: 'UNAUTHENTICATED', message: 'Sesi login diperlukan.' } }, 401)
+    }
+
+    // Reject browser uploads from unexpected third-party origins when auth is disabled.
+    const origin = c.req.header('Origin')?.trim().replace(/\/+$/, '')
+    const allowedOrigins = parseAllowedOrigins(c.env.ALLOWED_ORIGIN)
+    if (origin && allowedOrigins.length > 0 && !allowedOrigins.includes(origin)) {
+      return c.json({ ok: false, error: { code: 'FORBIDDEN_ORIGIN', message: 'Origin tidak diizinkan.' } }, 403)
+    }
+
     await next()
-    return
-  }
-
-  const authorization = c.req.header('Authorization')
-  if (!authorization?.startsWith('Bearer ')) {
-    return c.json({ ok: false, error: { code: 'UNAUTHENTICATED', message: 'Sesi login diperlukan.' } }, 401)
-  }
-
-  if (!c.env.SUPABASE_URL || !c.env.SUPABASE_PUBLISHABLE_KEY) {
-    return c.json({ ok: false, error: { code: 'SERVER_CONFIG', message: 'Konfigurasi autentikasi belum tersedia.' } }, 500)
-  }
-
-  const token = authorization.slice(7)
-  const response = await fetch(`${c.env.SUPABASE_URL}/auth/v1/user`, {
-    headers: {
-      apikey: c.env.SUPABASE_PUBLISHABLE_KEY,
-      Authorization: `Bearer ${token}`,
-    },
   })
-
-  if (!response.ok) {
-    return c.json({ ok: false, error: { code: 'INVALID_SESSION', message: 'Sesi tidak valid atau sudah berakhir.' } }, 401)
-  }
-
-  const user = (await response.json()) as { id: string; email?: string }
-  c.set('userId', user.id)
-  c.set('userEmail', user.email)
-  await next()
-})
-
-app.use('/api/*', requireAuth)
 
 function purposePrefix(purpose: FilePurpose) {
   return {
@@ -124,7 +165,7 @@ async function hasValidSignature(bytes: Uint8Array, mime: string) {
   return false
 }
 
-app.post('/api/files', async (c) => {
+app.post('/api/files', requireAuth('upload'), async (c) => {
   const body = await c.req.parseBody()
   const file = body.file
   const parsedPurpose = filePurposeSchema.safeParse(body.purpose)
@@ -154,28 +195,38 @@ app.post('/api/files', async (c) => {
   const stored = await bucket.put(key, bytes, {
     httpMetadata: { contentType: file.type, cacheControl: visibility === 'public' ? 'public, max-age=31536000, immutable' : 'private, no-store' },
     customMetadata: {
-      uploadedBy: c.get('userId'),
+      uploadedBy: c.get('userId') ?? 'anonymous',
       originalName: file.name.slice(0, 160),
       purpose: parsedPurpose.data,
     },
   })
 
   if (c.env.APP_ENV === 'production' && c.env.SUPABASE_URL && c.env.SUPABASE_SECRET_KEY) {
-    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SECRET_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    })
-    await supabase.from('pengaturan_file').insert({
-      id,
-      bucket: visibility,
-      object_key: key,
-      original_name: file.name,
-      mime_type: file.type,
-      size_bytes: file.size,
-      etag: stored.etag,
-      purpose: parsedPurpose.data,
-      created_by: c.get('userId'),
-    })
+    try {
+      const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SECRET_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+      const { error: insertError } = await supabase.from('pengaturan_file').insert({
+        id,
+        bucket: visibility,
+        object_key: key,
+        original_name: file.name,
+        mime_type: file.type,
+        size_bytes: file.size,
+        etag: stored.etag,
+        purpose: parsedPurpose.data,
+        created_by: c.get('userId') ?? null,
+      })
+      if (insertError) {
+        console.warn('pengaturan_file insert warning:', insertError.message)
+      }
+    } catch (error) {
+      console.warn('pengaturan_file sync failed:', error)
+    }
   }
+
+  const baseUrl = (c.env.PUBLIC_BASE_URL ?? '').trim().replace(/\/+$/, '')
+  const relativePath = `/api/files/${visibility}/${key}`
 
   return c.json({
     ok: true,
@@ -185,21 +236,24 @@ app.post('/api/files', async (c) => {
       visibility,
       mimeType: file.type,
       size: file.size,
-      url: `/api/files/${visibility}/${key}`,
+      url: baseUrl ? `${baseUrl}${relativePath}` : relativePath,
     },
   }, 201)
 })
 
-app.get('/api/files/:visibility/*', async (c) => {
-  const visibility = c.req.param('visibility')
-  const prefix = `/api/files/${visibility}/`
-  const key = decodeURIComponent(c.req.path.slice(prefix.length))
-  if (!key || (visibility !== 'public' && visibility !== 'private')) {
+app.get('/api/files/:visibility/*', async (c, next) => {
+  if (c.env.APP_ENV === 'production' && c.req.param('visibility') !== 'public') {
+    return requireAuth('strict')(c, next)
+  }
+  await next()
+}, async (c) => {
+  const params = parseFileRouteParams(c)
+  if (!params) {
     return c.json({ ok: false, error: { code: 'INVALID_FILE_PATH', message: 'Lokasi file tidak valid.' } }, 400)
   }
 
-  const bucket = visibility === 'public' ? c.env.PUBLIC_BUCKET : c.env.PRIVATE_BUCKET
-  const object = await bucket.get(key)
+  const bucket = params.visibility === 'public' ? c.env.PUBLIC_BUCKET : c.env.PRIVATE_BUCKET
+  const object = await bucket.get(params.key)
   if (!object) {
     return c.json({ ok: false, error: { code: 'FILE_NOT_FOUND', message: 'File tidak ditemukan.' } }, 404)
   }
@@ -208,20 +262,18 @@ app.get('/api/files/:visibility/*', async (c) => {
   object.writeHttpMetadata(headers)
   headers.set('ETag', object.httpEtag)
   headers.set('X-Content-Type-Options', 'nosniff')
-  if (visibility === 'private') headers.set('Cache-Control', 'private, no-store')
+  if (params.visibility === 'private') headers.set('Cache-Control', 'private, no-store')
   return new Response(object.body, { headers })
 })
 
-app.delete('/api/files/:visibility/*', async (c) => {
-  const visibility = c.req.param('visibility')
-  const prefix = `/api/files/${visibility}/`
-  const key = decodeURIComponent(c.req.path.slice(prefix.length))
-  if (!key || (visibility !== 'public' && visibility !== 'private')) {
+app.delete('/api/files/:visibility/*', requireAuth('strict'), async (c) => {
+  const params = parseFileRouteParams(c)
+  if (!params) {
     return c.json({ ok: false, error: { code: 'INVALID_FILE_PATH', message: 'Lokasi file tidak valid.' } }, 400)
   }
-  const bucket = visibility === 'public' ? c.env.PUBLIC_BUCKET : c.env.PRIVATE_BUCKET
-  await bucket.delete(key)
-  return c.json({ ok: true, data: { deleted: key } })
+  const bucket = params.visibility === 'public' ? c.env.PUBLIC_BUCKET : c.env.PRIVATE_BUCKET
+  await bucket.delete(params.key)
+  return c.json({ ok: true, data: { deleted: params.key } })
 })
 
 app.notFound((c) => c.json({ ok: false, error: { code: 'NOT_FOUND', message: 'Endpoint tidak ditemukan.' } }, 404))
