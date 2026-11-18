@@ -15,7 +15,7 @@ const props = withDefaults(defineProps<{
   options: AttireSelectOption[]
   placeholder?: string
 }>(), {
-  placeholder: 'Pilih busana dari katalog',
+  placeholder: 'Select attire from catalog',
 })
 
 const emit = defineEmits<{
@@ -93,7 +93,7 @@ onBeforeUnmount(() => {
           role="button"
           tabindex="0"
           class="attire-picker-clear"
-          title="Kosongkan pilihan"
+          title="Clear selection"
           @click.stop="clear"
           @keydown.enter.stop="clear"
         >
@@ -105,7 +105,7 @@ onBeforeUnmount(() => {
 
     <div v-if="open" class="attire-picker-menu" role="listbox">
       <button type="button" class="attire-picker-option is-reset" @click="clear">
-        <span>— Belum memilih busana</span>
+        <span>— No attire selected</span>
       </button>
       <button
         v-for="opt in options"

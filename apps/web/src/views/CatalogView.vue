@@ -11,7 +11,7 @@ import CurrencyInput from '../components/CurrencyInput.vue'
 
 const store = useCrmStore()
 const router = useRouter()
-const activeTab = ref<'Semua' | CatalogType>('Semua')
+const activeTab = ref<'All' | CatalogType>('All')
 const search = ref('')
 const showForm = ref(false)
 const showChoice = ref(false)
@@ -20,15 +20,15 @@ const selectedItem = ref<CatalogItem | null>(null)
 const uploading = ref(false)
 const uploadError = ref('')
 const imagePreview = ref('')
-const form = reactive({ name: '', type: 'Inti' as CatalogType, description: '', price: 0, unit: 'orang', imageUrl: '' })
+const form = reactive({ name: '', type: 'Inti' as CatalogType, description: '', price: 0, unit: 'paket', imageUrl: '' })
 
 const items = computed(() => store.catalog.filter((item) => {
-  const matchesTab = activeTab.value === 'Semua' || item.type === activeTab.value
+  const matchesTab = activeTab.value === 'All' || item.type === activeTab.value
   return matchesTab && item.name.toLowerCase().includes(search.value.toLowerCase())
 }))
 
 const resetForm = () => {
-  Object.assign(form, { name: '', type: 'Inti', description: '', price: 0, unit: 'orang', imageUrl: '' })
+  Object.assign(form, { name: '', type: 'Inti', description: '', price: 0, unit: store.units[0] ?? 'paket', imageUrl: '' })
   imagePreview.value = ''
   uploadError.value = ''
 }
@@ -59,7 +59,7 @@ const handleFile = async (event: Event) => {
     form.imageUrl = result.url
     imagePreview.value = result.url
   } catch (error) {
-    uploadError.value = error instanceof Error ? error.message : 'Upload gagal.'
+    uploadError.value = error instanceof Error ? error.message : 'Upload failed.'
   } finally {
     uploading.value = false
     inputEl.value = ''
@@ -68,7 +68,10 @@ const handleFile = async (event: Event) => {
 
 const submit = () => {
   uploadError.value = ''
-  if (!form.name.trim() || !form.description.trim() || form.price <= 0) { uploadError.value = 'Nama, deskripsi, dan harga layanan wajib diisi.'; return }
+  if (!form.name.trim() || !form.description.trim() || form.price <= 0) {
+    uploadError.value = 'Service name, description, and catalog price are required.'
+    return
+  }
   const payload = { ...form, active: true }
   if (editingId.value) store.updateCatalogItem(editingId.value, payload)
   else store.addCatalogItem(payload)
@@ -80,41 +83,59 @@ const submit = () => {
 <template>
   <div class="page-stack">
     <section class="page-heading">
-      <div><span class="eyebrow">Ruang Kerja</span><h2>Katalog Jasa</h2><p>Harga acuan layanan inti dan layanan tambahan. Harga transaksi tetap dapat disesuaikan.</p></div>
-      <button class="primary-button" @click="openCreate"><Plus :size="18" />Tambah Layanan</button>
+      <div><span class="eyebrow">Workspace</span><h2>Service Catalog</h2><p>Reference pricing for core packages and add-on services. Order line prices can still be customized per booking.</p></div>
+      <button class="primary-button" @click="openCreate"><Plus :size="18" />Add Service</button>
     </section>
     <section class="catalog-toolbar">
-      <div class="segmented-tabs"><button v-for="tab in ['Semua', 'Inti', 'Additional'] as const" :key="tab" :class="{ active: activeTab === tab }" @click="activeTab = tab">{{ tab === 'Semua' ? 'Semua Layanan' : tab === 'Inti' ? 'Layanan Inti' : 'Layanan Tambahan' }}</button></div>
-      <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Cari layanan" /></label>
+      <div class="segmented-tabs">
+        <button v-for="tab in ['All', 'Inti', 'Additional'] as const" :key="tab" :class="{ active: activeTab === tab }" @click="activeTab = tab">
+          {{ tab === 'All' ? 'All Services' : tab === 'Inti' ? 'Core Services' : 'Add-on Services' }}
+        </button>
+      </div>
+      <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search services" /></label>
     </section>
     <section class="catalog-grid">
       <article v-for="item in items" :key="item.id" class="service-card">
         <div class="service-image" :class="`service-${item.type.toLowerCase()}`">
           <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.name" loading="lazy" decoding="async" />
-          <div v-else><ImageIcon :size="27" /><span>{{ item.type }}</span></div>
-          <StatusBadge :label="item.active ? 'Aktif' : 'Nonaktif'" />
+          <div v-else><ImageIcon :size="27" /><span>{{ item.type === 'Inti' ? 'Core' : 'Add-on' }}</span></div>
+          <StatusBadge :label="item.active ? 'Active' : 'Inactive'" />
         </div>
-        <div class="service-body"><div class="service-title"><div><span>{{ item.code }} · {{ item.type }}</span><h3>{{ item.name }}</h3></div><button class="icon-button" title="Edit layanan" @click="openEdit(item)"><Pencil :size="16" /></button></div><p>{{ item.description }}</p><div class="service-price"><div><span>Harga katalog</span><strong>{{ formatCurrency(item.price) }}</strong></div><span>/ {{ item.unit }}</span></div><button class="outline-button" @click="chooseItem(item)"><Check :size="16" />Pilih Layanan</button></div>
+        <div class="service-body">
+          <div class="service-title">
+            <div><span>{{ item.code }} · {{ item.type === 'Inti' ? 'Core Service' : 'Add-on' }}</span><h3>{{ item.name }}</h3></div>
+            <button class="icon-button" title="Edit service" @click="openEdit(item)"><Pencil :size="16" /></button>
+          </div>
+          <p>{{ item.description }}</p>
+          <div class="service-price"><div><span>Catalog Price</span><strong>{{ formatCurrency(item.price) }}</strong></div><span>/ {{ item.unit }}</span></div>
+          <button class="outline-button" @click="chooseItem(item)"><Check :size="16" />Select Service</button>
+        </div>
       </article>
     </section>
 
-    <UiModal :open="showForm" :title="editingId ? 'Edit Layanan' : 'Tambah Layanan'" description="Informasi ini menjadi referensi saat membuat pesanan." wide @close="showForm = false">
+    <UiModal :open="showForm" :title="editingId ? 'Edit Service' : 'Add Service'" description="Catalog details act as quick presets when building customer orders." wide @close="showForm = false">
       <form class="form-grid" @submit.prevent="submit">
-        <label><span>Nama layanan *</span><input v-model="form.name" placeholder="Contoh: Makeup Bridesmaid" required /></label>
-        <label><span>Jenis katalog *</span><select v-model="form.type"><option>Inti</option><option>Additional</option></select></label>
-        <label class="span-2"><span>Deskripsi *</span><textarea v-model="form.description" rows="3" required /></label>
-        <label><span>Harga katalog *</span><CurrencyInput v-model="form.price" placeholder="250.000" aria-label="Harga katalog" /></label>
-        <label><span>Satuan *</span><input v-model="form.unit" placeholder="orang / sesi" /></label>
-        <label class="span-2"><span>Gambar layanan</span><div class="upload-zone"><img v-if="imagePreview" :src="imagePreview" alt="Preview" /><div v-else><UploadCloud :size="25" /><strong>Unggah JPG, PNG, atau WebP</strong><span>Maksimal 5 MB · disimpan di R2 lokal</span></div><input type="file" accept="image/jpeg,image/png,image/webp" @change="handleFile" /></div></label>
-        <p v-if="uploading" class="upload-state span-2"><LoaderCircle class="spin" :size="16" />Mengunggah ke R2 lokal…</p>
+        <label><span>Service Name *</span><input v-model="form.name" placeholder="e.g. Bridesmaid Makeup" required /></label>
+        <label><span>Catalog Type *</span><select v-model="form.type"><option value="Inti">Core Service</option><option value="Additional">Add-on Service</option></select></label>
+        <label class="span-2"><span>Description *</span><textarea v-model="form.description" rows="3" required /></label>
+        <label><span>Catalog Price *</span><CurrencyInput v-model="form.price" placeholder="250.000" aria-label="Catalog price" /></label>
+        <label>
+          <span>Unit *</span>
+          <select v-model="form.unit">
+            <option v-for="u in store.units" :key="u" :value="u">{{ u }}</option>
+            <option v-if="form.unit && !store.units.includes(form.unit)" :value="form.unit">{{ form.unit }}</option>
+          </select>
+        </label>
+        <label class="span-2"><span>Service Image</span><div class="upload-zone"><img v-if="imagePreview" :src="imagePreview" alt="Preview" /><div v-else><UploadCloud :size="25" /><strong>Upload JPG, PNG, or WebP</strong><span>Max 5 MB</span></div><input type="file" accept="image/jpeg,image/png,image/webp" @change="handleFile" /></div></label>
+        <p v-if="uploading" class="upload-state span-2"><LoaderCircle class="spin" :size="16" />Uploading image…</p>
         <p v-if="uploadError" class="form-error span-2">{{ uploadError }}</p>
-        <div class="modal-actions span-2"><button type="button" class="secondary-button" @click="showForm = false">Batal</button><button class="primary-button" :disabled="uploading">{{ editingId ? 'Simpan Perubahan' : 'Simpan Layanan' }}</button></div>
+        <div class="modal-actions span-2"><button type="button" class="secondary-button" @click="showForm = false">Cancel</button><button class="primary-button" :disabled="uploading">{{ editingId ? 'Save Changes' : 'Save Service' }}</button></div>
       </form>
     </UiModal>
 
-    <UiModal :open="showChoice" title="Gunakan Layanan" description="Lanjutkan layanan terpilih ke pesanan customer." @close="showChoice = false">
-      <div v-if="selectedItem" class="selection-summary"><span>{{ selectedItem.code }} · {{ selectedItem.type }}</span><strong>{{ selectedItem.name }}</strong><p>{{ selectedItem.description }}</p><b>{{ formatCurrency(selectedItem.price) }} / {{ selectedItem.unit }}</b></div>
-      <div class="modal-actions"><button class="secondary-button" @click="showChoice = false">Batal</button><button class="primary-button" @click="continueToOrder">Lanjut ke Pesanan</button></div>
+    <UiModal :open="showChoice" title="Use Service" description="Continue with the selected service into a customer PO order." @close="showChoice = false">
+      <div v-if="selectedItem" class="selection-summary"><span>{{ selectedItem.code }} · {{ selectedItem.type === 'Inti' ? 'Core Service' : 'Add-on' }}</span><strong>{{ selectedItem.name }}</strong><p>{{ selectedItem.description }}</p><b>{{ formatCurrency(selectedItem.price) }} / {{ selectedItem.unit }}</b></div>
+      <div class="modal-actions"><button class="secondary-button" @click="showChoice = false">Cancel</button><button class="primary-button" @click="continueToOrder">Continue to Orders</button></div>
     </UiModal>
   </div>
 </template>

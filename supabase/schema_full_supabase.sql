@@ -20,7 +20,7 @@
 create extension if not exists pgcrypto with schema extensions;
 
 -- -----------------------------------------------------------------------------
--- 1. BERSIHKAN TABEL LAMA BAHASA INGGRIS (AGAR SUPABASE TABLE EDITOR RAPI)
+-- 1. BERSIHKAN TABEL & VIEW LAMA BAHASA INGGRIS (AGAR SUPABASE TABLE EDITOR RAPI)
 -- -----------------------------------------------------------------------------
 drop view if exists public.po_financial_summary cascade;
 drop view if exists public.inventory_balances cascade;
@@ -29,50 +29,63 @@ drop view if exists public.v_laporan_keuangan_po cascade;
 drop view if exists public.v_inventaris_saldo cascade;
 drop view if exists public.v_dasbor_faktur cascade;
 
-drop table if exists
-  public.payment_allocations,
-  public.payments,
-  public.invoice_items,
-  public.invoices,
-  public.order_items,
-  public.orders,
-  public.booking_job_employees,
-  public.booking_job_assignments,
-  public.booking_refunds,
-  public.wedding_event_details,
-  public.wedding_fitting_forms,
-  public.wedding_attire,
-  public.expenses,
-  public.stock_movements,
-  public.stock_opname_items,
-  public.stock_opnames,
-  public.stock_out_items,
-  public.stock_out,
-  public.stock_in_items,
-  public.stock_in,
-  public.inventory_items,
-  public.catalog_items,
-  public.bookings,
-  public.customers,
-  public.employees,
-  public.app_dropdown_options,
-  public.business_profiles,
-  public.business_counters,
-  public.file_objects,
-  public.audit_logs
-cascade;
+drop table if exists public.payment_allocations cascade;
+drop table if exists public.payments cascade;
+drop table if exists public.invoice_items cascade;
+drop table if exists public.invoices cascade;
+drop table if exists public.order_items cascade;
+drop table if exists public.orders cascade;
+drop table if exists public.booking_job_employees cascade;
+drop table if exists public.booking_job_assignments cascade;
+drop table if exists public.booking_refunds cascade;
+drop table if exists public.wedding_event_details cascade;
+drop table if exists public.wedding_fitting_forms cascade;
+drop table if exists public.wedding_attire cascade;
+drop table if exists public.expenses cascade;
+drop table if exists public.stock_movements cascade;
+drop table if exists public.stock_opname_items cascade;
+drop table if exists public.stock_opnames cascade;
+drop table if exists public.stock_out_items cascade;
+drop table if exists public.stock_out cascade;
+drop table if exists public.stock_in_items cascade;
+drop table if exists public.stock_in cascade;
+drop table if exists public.inventory_items cascade;
+drop table if exists public.catalog_items cascade;
+drop table if exists public.bookings cascade;
+drop table if exists public.customers cascade;
+drop table if exists public.employees cascade;
+drop table if exists public.app_dropdown_options cascade;
+drop table if exists public.business_profiles cascade;
+drop table if exists public.business_counters cascade;
+drop table if exists public.file_objects cascade;
+drop table if exists public.audit_logs cascade;
 
 -- -----------------------------------------------------------------------------
 -- 2. ENUM & FUNGSI UTILITAS
 -- -----------------------------------------------------------------------------
-do $$ begin create type public.app_role as enum ('owner', 'admin', 'finance', 'inventory', 'viewer'); exception when duplicate_object then null; end $$;
-do $$ begin create type public.booking_status as enum ('draft', 'confirmed', 'completed', 'cancelled'); exception when duplicate_object then null; end $$;
-do $$ begin create type public.catalog_type as enum ('core', 'additional'); exception when duplicate_object then null; end $$;
-do $$ begin create type public.order_type as enum ('initial', 'additional'); exception when duplicate_object then null; end $$;
-do $$ begin create type public.stock_movement_type as enum ('in', 'out', 'adjustment', 'opname'); exception when duplicate_object then null; end $$;
-do $$ begin create type public.file_purpose as enum ('catalog', 'payment-proof', 'expense-proof', 'inventory', 'avatar', 'business-asset', 'wedding-attire', 'business-logo'); exception when duplicate_object then null; end $$;
-do $$ begin create type public.attire_category as enum ('bride', 'groom'); exception when duplicate_object then null; end $$;
-do $$ begin create type public.attire_status as enum ('available', 'booked', 'laundry'); exception when duplicate_object then null; end $$;
+do $enum$
+begin
+  create type public.app_role as enum ('owner', 'admin', 'finance', 'inventory', 'viewer');
+exception
+  when duplicate_object then null;
+end
+$enum$;
+
+drop type if exists public.booking_status cascade;
+drop type if exists public.catalog_type cascade;
+drop type if exists public.order_type cascade;
+drop type if exists public.stock_movement_type cascade;
+drop type if exists public.file_purpose cascade;
+drop type if exists public.attire_category cascade;
+drop type if exists public.attire_status cascade;
+
+create type public.booking_status as enum ('draft', 'confirmed', 'completed', 'cancelled');
+create type public.catalog_type as enum ('core', 'additional');
+create type public.order_type as enum ('initial', 'additional');
+create type public.stock_movement_type as enum ('in', 'out', 'adjustment', 'opname');
+create type public.file_purpose as enum ('catalog', 'payment-proof', 'expense-proof', 'inventory', 'avatar', 'business-asset', 'wedding-attire', 'business-logo');
+create type public.attire_category as enum ('bride', 'groom');
+create type public.attire_status as enum ('available', 'booked', 'laundry');
 
 create table if not exists public.pengaturan_penomoran (
   counter_key text not null,
@@ -158,7 +171,7 @@ create table if not exists public.profil_bisnis (
 
 create table if not exists public.pengaturan_dropdown (
   id uuid primary key default extensions.gen_random_uuid(),
-  option_group text not null check (option_group in ('paymentMethods', 'poExpenseCategories', 'generalExpenseCategories')),
+  option_group text not null check (option_group in ('paymentMethods', 'poExpenseCategories', 'generalExpenseCategories', 'stylingTypes', 'inventoryCategories', 'units')),
   label text not null check (length(trim(label)) > 0),
   sort_order integer not null default 0,
   is_active boolean not null default true,
@@ -398,6 +411,8 @@ create table if not exists public.pengeluaran (
   payment_method text not null,
   proof_file_id uuid references public.pengaturan_file(id) on delete set null,
   proof_url text,
+  source text not null default 'Manual',
+  refund_id uuid references public.data_pelanggan_refund(id) on delete set null,
   notes text,
   created_by uuid references public.profiles(id) on delete set null,
   created_at timestamptz not null default now(),
@@ -418,6 +433,7 @@ create table if not exists public.inventaris_barang (
   minimum_stock numeric(14, 3) not null default 0 check (minimum_stock >= 0),
   storage_location text,
   image_file_id uuid references public.pengaturan_file(id) on delete set null,
+  image_url text,
   notes text,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
@@ -688,7 +704,27 @@ insert into public.pengaturan_dropdown (option_group, label, sort_order) values
   ('generalExpenseCategories', 'Perlengkapan', 2),
   ('generalExpenseCategories', 'Akomodasi', 3),
   ('generalExpenseCategories', 'Transportasi', 4),
-  ('generalExpenseCategories', 'Honor Tim', 5)
+  ('generalExpenseCategories', 'Honor Tim', 5),
+  ('stylingTypes', 'Hairdo', 1),
+  ('stylingTypes', 'Hijabdo', 2),
+  ('stylingTypes', 'Paes Adat', 3),
+  ('inventoryCategories', 'Complexion', 1),
+  ('inventoryCategories', 'Finishing', 2),
+  ('inventoryCategories', 'Eye & Lashes', 3),
+  ('inventoryCategories', 'Skin Prep', 4),
+  ('inventoryCategories', 'Tools & Brushes', 5),
+  ('inventoryCategories', 'Hair Styling', 6),
+  ('inventoryCategories', 'Hijab & Veil', 7),
+  ('units', 'paket', 1),
+  ('units', 'orang', 2),
+  ('units', 'sesi', 3),
+  ('units', 'set', 4),
+  ('units', 'botol', 5),
+  ('units', 'jar', 6),
+  ('units', 'pcs', 7),
+  ('units', 'pasang', 8),
+  ('units', 'kotak', 9),
+  ('units', 'pack', 10)
 on conflict (option_group, label) do nothing;
 
 insert into public.profil_bisnis (id, name, tagline, phone, email, address, invoice_note)

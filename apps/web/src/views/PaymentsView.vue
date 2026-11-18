@@ -5,20 +5,18 @@ import {
 } from '@lucide/vue'
 import { useCrmStore, type Payment } from '../stores/crm'
 import { formatCurrency, formatDate } from '../utils/format'
-import {
-  downloadPaymentReceiptPdf,
-  formatWhatsAppPhone,
-  resolveReceiptShareUrl,
-} from '../utils/receiptPdf'
+import type { ReceiptSharePayload } from '../utils/receiptPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import CurrencyInput from '../components/CurrencyInput.vue'
+import ReceiptStationery from '../components/ReceiptStationery.vue'
 
 const store = useCrmStore()
 const showForm = ref(false)
 const editingId = ref('')
 const showDetail = ref(false)
 const detailPayment = ref<Payment | null>(null)
+const detailReceiptPayload = ref<ReceiptSharePayload | null>(null)
 const showDeleteConfirm = ref(false)
 const deletingPayment = ref<Payment | null>(null)
 
@@ -56,7 +54,7 @@ const rows = computed(() => store.payments.filter((payment) => {
   return !query || payment.receiptNumber.toLowerCase().includes(query) || booking?.poNumber.toLowerCase().includes(query) || customer?.name.toLowerCase().includes(query)
 }))
 
-const methodLabel = (method: Payment['method']) => (method === 'Cash' ? 'Tunai' : method)
+const methodLabel = (method: Payment['method']) => (method === 'Cash' ? 'Cash' : method === 'Tunai' ? 'Cash' : method)
 
 const openCreate = () => {
   editingId.value = ''
@@ -64,7 +62,7 @@ const openCreate = () => {
   Object.assign(form, {
     bookingId: '',
     amount: 0,
-    method: 'Transfer',
+    method: store.paymentMethods[0] || 'Transfer',
     paidAt: new Date().toISOString().slice(0, 10),
     notes: '',
   })
@@ -84,8 +82,30 @@ const openEdit = (payment: Payment) => {
   showForm.value = true
 }
 
-const openDetail = (payment: Payment) => {
+const receiptParamsFor = (payment: Payment) => {
+  const booking = store.bookingFor(payment.bookingId)
+  const customer = booking ? store.customerFor(booking.customerId) : undefined
+  const invoice = store.bookingInvoice(payment.bookingId)
+  const allPayments = store.payments.filter((p) => p.bookingId === payment.bookingId)
+  return {
+    payment,
+    booking,
+    customer,
+    invoice,
+    sortedGroups: invoice ? store.sortedOrderGroups(invoice) : [],
+    allPayments,
+    sortItemsIntiFirst: store.sortInvoiceItemsIntiFirst,
+    totalBilling: store.bookingTotal(payment.bookingId),
+    totalPaid: store.bookingPaid(payment.bookingId),
+    balance: store.bookingBalance(payment.bookingId),
+    businessProfile: store.businessProfile,
+  }
+}
+
+const openDetail = async (payment: Payment) => {
   detailPayment.value = payment
+  const { toReceiptSharePayload } = await import('../utils/receiptPdf')
+  detailReceiptPayload.value = toReceiptSharePayload(receiptParamsFor(payment))
   showDetail.value = true
 }
 
@@ -104,7 +124,7 @@ const confirmDelete = () => {
 const submit = () => {
   try {
     error.value = ''
-    if (!form.bookingId) throw new Error('Pilih Nomor PO terlebih dahulu.')
+    if (!form.bookingId) throw new Error('Please select a PO Number first.')
     if (editingId.value) {
       store.updatePayment(editingId.value, {
         amount: form.amount,
@@ -119,46 +139,39 @@ const submit = () => {
     Object.assign(form, {
       bookingId: '',
       amount: 0,
-      method: 'Transfer',
+      method: store.paymentMethods[0] || 'Transfer',
       paidAt: new Date().toISOString().slice(0, 10),
       notes: '',
     })
     showForm.value = false
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Pembayaran gagal disimpan.'
+    error.value = err instanceof Error ? err.message : 'Failed to save payment.'
   }
 }
 
-const receiptParamsFor = (payment: Payment) => {
-  const booking = store.bookingFor(payment.bookingId)
-  const customer = booking ? store.customerFor(booking.customerId) : undefined
-  const invoice = store.bookingInvoice(payment.bookingId)
-  return {
-    payment,
-    booking,
-    customer,
-    invoice,
-    sortedGroups: invoice ? store.sortedOrderGroups(invoice) : [],
-    sortItemsIntiFirst: store.sortInvoiceItemsIntiFirst,
-    totalBilling: store.bookingTotal(payment.bookingId),
-    totalPaid: store.bookingPaid(payment.bookingId),
-    balance: store.bookingBalance(payment.bookingId),
-    businessProfile: store.businessProfile,
-  }
-}
-
-const downloadReceipt = (payment: Payment) => {
+const downloadReceipt = async (payment: Payment) => {
+  const { downloadPaymentReceiptPdf } = await import('../utils/receiptPdf')
   downloadPaymentReceiptPdf(receiptParamsFor(payment))
+}
+
+const digitsPhone = (phone: string) => {
+  const digits = phone.replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.startsWith('0')) return `62${digits.slice(1)}`
+  if (digits.startsWith('62')) return digits
+  if (digits.startsWith('8')) return `62${digits}`
+  return digits
 }
 
 const hasWhatsAppPhone = (payment: Payment) => {
   const booking = store.bookingFor(payment.bookingId)
   const customer = booking ? store.customerFor(booking.customerId) : undefined
-  return Boolean(formatWhatsAppPhone(customer?.phone ?? ''))
+  return Boolean(digitsPhone(customer?.phone ?? ''))
 }
 
 const onSendWhatsApp = async (payment: Payment) => {
   const params = receiptParamsFor(payment)
+  const { formatWhatsAppPhone, resolveReceiptShareUrl } = await import('../utils/receiptPdf')
   const waPhone = formatWhatsAppPhone(params.customer?.phone ?? '')
   if (!waPhone) return
 
@@ -177,24 +190,24 @@ const onSendWhatsApp = async (payment: Payment) => {
     const balance = Math.max(0, params.balance)
     const brandTitle = [store.businessProfile.name || 'Azura', store.businessProfile.tagline || 'Makeup Artist'].filter(Boolean).join(' ')
     const lines = [
-      `Halo Kak ${params.customer?.name ?? ''},`,
-      `Berikut bukti kwitansi pembayaran dari ${brandTitle}:`,
+      `Hello ${params.customer?.name ?? ''},`,
+      `Here is your official payment receipt from ${brandTitle}:`,
       ``,
-      `• No. Kwitansi: ${payment.receiptNumber}`,
-      `• No. PO: ${params.booking?.poNumber ?? '-'}`,
-      `• Tanggal Bayar: ${formatDate(payment.paidAt)}`,
-      `• Metode: ${methodLabel(payment.method)}`,
-      `• Nominal Diterima: ${formatCurrency(payment.amount)}`,
-      ...(itemLines.length ? [``, `Rincian Pesanan:`, ...itemLines] : []),
+      `• Receipt No: ${payment.receiptNumber}`,
+      `• PO No: ${params.booking?.poNumber ?? '-'}`,
+      `• Payment Date: ${formatDate(payment.paidAt)}`,
+      `• Method: ${methodLabel(payment.method)}`,
+      `• Amount Received: ${formatCurrency(payment.amount)}`,
+      ...(itemLines.length ? [``, `Order Breakdown:`, ...itemLines] : []),
       ``,
-      `• Total Tagihan: ${formatCurrency(params.totalBilling)}`,
-      `• Sudah Dibayar: ${formatCurrency(params.totalPaid)}`,
-      `• Sisa Pembayaran: ${formatCurrency(balance)}`,
+      `• Total Billing: ${formatCurrency(params.totalBilling)}`,
+      `• Cumulative Paid: ${formatCurrency(params.totalPaid)}`,
+      `• Remaining Balance: ${formatCurrency(balance)}`,
       ``,
-      `Tautan PDF Kwitansi (${payment.receiptNumber}):`,
+      `Receipt & PDF Download Link (${payment.receiptNumber}):`,
       shareResult.url,
       ``,
-      `Terima kasih telah mempercayakan momen spesial Anda kepada ${brandTitle}.`,
+      `Thank you for trusting ${brandTitle} with your special day.`,
     ]
 
     const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(lines.join('\n'))}`
@@ -205,8 +218,8 @@ const onSendWhatsApp = async (payment: Payment) => {
     }
 
     waHint.value = shareResult.mode === 'r2'
-      ? `Pesan WhatsApp disertai tautan PDF langsung (${shareResult.url}) siap dikirim ke ${params.customer?.phone}.`
-      : `Pesan WhatsApp disertai tautan Kwitansi & Unduh PDF siap dikirim ke ${params.customer?.phone}.`
+      ? `WhatsApp message with direct PDF link (${shareResult.url}) is ready for ${params.customer?.phone}.`
+      : `WhatsApp message with digital receipt & PDF download link is ready for ${params.customer?.phone}.`
   } finally {
     sendingId.value = ''
   }
@@ -217,41 +230,41 @@ const onSendWhatsApp = async (payment: Payment) => {
   <div class="page-stack">
     <section class="page-heading">
       <div>
-        <span class="eyebrow">Ruang Kerja</span>
-        <h2>Pembayaran Pelanggan</h2>
-        <p>Catat uang muka, cicilan, atau pelunasan; lihat detail, ubah/hapus transaksi, unduh kwitansi PDF, dan kirim ke WhatsApp.</p>
+        <span class="eyebrow">Workspace</span>
+        <h2>Customer Payments</h2>
+        <p>Record deposits, installments, and settlements; preview exact stationery receipts, download PDFs, and share via WhatsApp.</p>
       </div>
-      <button class="primary-button" @click="openCreate"><Plus :size="18" />Catat Pembayaran</button>
+      <button class="primary-button" @click="openCreate"><Plus :size="18" />Record Payment</button>
     </section>
 
     <section class="summary-strip">
-      <div><span>Total tagihan</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
-      <div><span>Sudah diterima</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
-      <div><span>Sisa piutang</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
-      <div><span>Transaksi pembayaran</span><strong>{{ store.payments.length }}</strong></div>
+      <div><span>Total Billed</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
+      <div><span>Total Received</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
+      <div><span>Open Receivables</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
+      <div><span>Transactions</span><strong>{{ store.payments.length }}</strong></div>
     </section>
 
     <div v-if="waHint" class="flow-note">
       <CheckCircle2 :size="18" />
-      <div><strong>Tautan PDF Kwitansi Disertakan ke WhatsApp</strong><span>{{ waHint }}</span></div>
-      <button type="button" class="soft-button" @click="waHint = ''">Tutup</button>
+      <div><strong>Receipt PDF Link Included for WhatsApp</strong><span>{{ waHint }}</span></div>
+      <button type="button" class="soft-button" @click="waHint = ''">Dismiss</button>
     </div>
 
     <section class="panel table-panel">
       <div class="table-toolbar">
-        <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Cari kwitansi, PO, atau pelanggan" /></label>
+        <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search receipt, PO, or customer" /></label>
       </div>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
             <tr>
-              <th>Kwitansi</th>
-              <th>Pelanggan &amp; PO</th>
-              <th>Tanggal</th>
-              <th>Metode</th>
-              <th>Nominal</th>
-              <th>Status Tagihan</th>
-              <th>Aksi &amp; Kwitansi</th>
+              <th>Receipt</th>
+              <th>Customer &amp; PO</th>
+              <th>Payment Date</th>
+              <th>Method</th>
+              <th>Amount Paid</th>
+              <th>PO Status</th>
+              <th>Actions &amp; Receipt</th>
             </tr>
           </thead>
           <tbody>
@@ -264,28 +277,28 @@ const onSendWhatsApp = async (payment: Payment) => {
               <td>{{ formatDate(payment.paidAt) }}</td>
               <td><span class="method-chip"><WalletCards :size="14" />{{ methodLabel(payment.method) }}</span></td>
               <td><strong>{{ formatCurrency(payment.amount) }}</strong></td>
-              <td><StatusBadge :label="store.bookingBalance(payment.bookingId) <= 0 ? 'Lunas' : 'Dibayar Sebagian'" /></td>
+              <td><StatusBadge :label="store.bookingBalance(payment.bookingId) <= 0 ? 'Paid' : 'Partial'" /></td>
               <td>
                 <div class="row-actions payment-doc-actions">
-                  <button type="button" class="icon-button" title="Lihat detail pembayaran" @click="openDetail(payment)">
+                  <button type="button" class="icon-button" title="Preview payment receipt" @click="openDetail(payment)">
                     <Eye :size="15" />
                   </button>
-                  <button type="button" class="icon-button" title="Ubah pembayaran" @click="openEdit(payment)">
+                  <button type="button" class="icon-button" title="Edit payment" @click="openEdit(payment)">
                     <Pencil :size="15" />
                   </button>
-                  <button type="button" class="icon-button danger-icon-button" title="Hapus pembayaran" @click="openDeleteModal(payment)">
+                  <button type="button" class="icon-button danger-icon-button" title="Delete payment" @click="openDeleteModal(payment)">
                     <Trash2 :size="15" />
                   </button>
-                  <button type="button" class="soft-button receipt-dl-btn" title="Unduh Kwitansi PDF" @click="downloadReceipt(payment)">
-                    <Download :size="14" />Kwitansi
+                  <button type="button" class="soft-button receipt-dl-btn" title="Download Receipt PDF" @click="downloadReceipt(payment)">
+                    <Download :size="14" />Receipt PDF
                   </button>
                   <button
                     v-if="hasWhatsAppPhone(payment)"
                     type="button"
                     class="wa-icon-button"
                     :disabled="sendingId === payment.id"
-                    :title="`Kirim tautan PDF kwitansi ke WhatsApp ${store.customerFor(store.bookingFor(payment.bookingId)?.customerId ?? '')?.phone}`"
-                    aria-label="Kirim via WhatsApp"
+                    :title="`Send receipt PDF link via WhatsApp to ${store.customerFor(store.bookingFor(payment.bookingId)?.customerId ?? '')?.phone}`"
+                    aria-label="Send via WhatsApp"
                     @click="onSendWhatsApp(payment)"
                   >
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
@@ -299,8 +312,8 @@ const onSendWhatsApp = async (payment: Payment) => {
               <td colspan="7">
                 <div class="empty-state">
                   <ReceiptText :size="28" />
-                  <strong>Belum ada transaksi pembayaran</strong>
-                  <span>Klik "Catat Pembayaran" untuk menambahkan pembayaran pelanggan.</span>
+                  <strong>No payment transactions yet</strong>
+                  <span>Click "Record Payment" to log a client deposit or settlement.</span>
                 </div>
               </td>
             </tr>
@@ -311,16 +324,16 @@ const onSendWhatsApp = async (payment: Payment) => {
 
     <UiModal
       :open="showForm"
-      :title="editingId ? 'Ubah Transaksi Pembayaran' : 'Catat Pembayaran'"
-      :description="editingId ? 'Perbaiki nominal, metode, tanggal, atau catatan pembayaran jika terjadi kesalahan input.' : 'Sistem akan mengalokasikan pembayaran ke tagihan PO yang dipilih.'"
+      :title="editingId ? 'Edit Payment Transaction' : 'Record Payment'"
+      :description="editingId ? 'Adjust amount, method, payment date, or notes if needed.' : 'Allocates the payment directly to the selected customer PO balance.'"
       wide
       @close="showForm = false"
     >
       <form class="form-grid" @submit.prevent="submit">
         <label class="span-2">
-          <span>Nomor PO *</span>
+          <span>PO Number *</span>
           <select v-model="form.bookingId" :disabled="Boolean(editingId)">
-            <option value="">Pilih pemesanan PO</option>
+            <option value="">Select PO booking</option>
             <option
               v-for="booking in store.bookings.filter((b) => Boolean(editingId) ? b.id === form.bookingId : store.bookingBalance(b.id) > 0)"
               :key="booking.id"
@@ -331,13 +344,13 @@ const onSendWhatsApp = async (payment: Payment) => {
           </select>
         </label>
         <div v-if="selected" class="payment-preview span-2">
-          <div><span>Total tagihan</span><strong>{{ formatCurrency(store.bookingTotal(selected.id)) }}</strong></div>
-          <div><span>Sudah dibayar</span><strong>{{ formatCurrency(store.bookingPaid(selected.id)) }}</strong></div>
-          <div><span>Maksimal input</span><strong>{{ formatCurrency(maxAllowedForForm) }}</strong></div>
+          <div><span>Total Billing</span><strong>{{ formatCurrency(store.bookingTotal(selected.id)) }}</strong></div>
+          <div><span>Paid to Date</span><strong>{{ formatCurrency(store.bookingPaid(selected.id)) }}</strong></div>
+          <div><span>Max Allowed Input</span><strong>{{ formatCurrency(maxAllowedForForm) }}</strong></div>
         </div>
-        <label><span>Tanggal pembayaran *</span><input v-model="form.paidAt" type="date" /></label>
+        <label><span>Payment Date *</span><input v-model="form.paidAt" type="date" /></label>
         <label>
-          <span>Metode *</span>
+          <span>Payment Method *</span>
           <select v-model="form.method">
             <option v-for="m in store.paymentMethods" :key="m" :value="m">{{ m }}</option>
             <option v-if="form.method && !store.paymentMethods.includes(form.method)" :value="form.method">
@@ -346,73 +359,58 @@ const onSendWhatsApp = async (payment: Payment) => {
           </select>
         </label>
         <label class="span-2">
-          <span>Nominal pembayaran *</span>
-          <CurrencyInput v-model="form.amount" placeholder="0" aria-label="Nominal pembayaran" />
-          <small v-if="selected">Sisa tagihan setelah disimpan: {{ formatCurrency(Math.max(0, maxAllowedForForm - form.amount)) }}</small>
+          <span>Amount Paid *</span>
+          <CurrencyInput v-model="form.amount" placeholder="0" aria-label="Payment amount" />
+          <small v-if="selected">Remaining balance after saving: {{ formatCurrency(Math.max(0, maxAllowedForForm - form.amount)) }}</small>
         </label>
-        <label class="span-2"><span>Catatan</span><textarea v-model="form.notes" rows="2" placeholder="Contoh: Uang muka pertama" /></label>
-        <div class="flow-note span-2"><ReceiptText :size="18" /><div><strong>Kwitansi &amp; Tautan PDF otomatis</strong><span>Setelah disimpan, Anda dapat mengunduh PDF kwitansi atau mengirim tautan PDF langsung ke WhatsApp pelanggan.</span></div><CheckCircle2 :size="19" /></div>
+        <label class="span-2"><span>Notes</span><textarea v-model="form.notes" rows="2" placeholder="e.g. First booking deposit (DP)" /></label>
+        <div class="flow-note span-2"><ReceiptText :size="18" /><div><strong>Automatic Receipt PDF &amp; Share Link</strong><span>After saving, you can preview the editorial stationery receipt, download the PDF, or send via WhatsApp.</span></div><CheckCircle2 :size="19" /></div>
         <p v-if="error" class="form-error span-2">{{ error }}</p>
         <div class="modal-actions span-2">
-          <button type="button" class="secondary-button" @click="showForm = false">Batal</button>
-          <button class="primary-button">{{ editingId ? 'Simpan Perubahan' : 'Simpan Pembayaran' }}</button>
+          <button type="button" class="secondary-button" @click="showForm = false">Cancel</button>
+          <button class="primary-button">{{ editingId ? 'Save Changes' : 'Save Payment' }}</button>
         </div>
       </form>
     </UiModal>
 
+    <!-- EYE PREVIEW: 100% Aligned with Receipt PDF -->
     <UiModal
-      :open="showDetail && Boolean(detailPayment)"
-      :title="detailPayment ? `Detail Pembayaran — ${detailPayment.receiptNumber}` : 'Detail Pembayaran'"
-      description="Rincian transaksi pembayaran, status tagihan PO, dan daftar layanan."
+      :open="showDetail && Boolean(detailPayment && detailReceiptPayload)"
+      :title="detailPayment ? `Receipt Preview — ${detailPayment.receiptNumber}` : 'Receipt Preview'"
+      description="Exact design and transaction details synchronized with the downloadable Receipt PDF."
       wide
       @close="showDetail = false"
     >
-      <div v-if="detailPayment" class="detail-grid">
-        <div><span>Nomor Kwitansi</span><strong class="mono-code">{{ detailPayment.receiptNumber }}</strong></div>
-        <div><span>Status Tagihan PO</span><StatusBadge :label="store.bookingBalance(detailPayment.bookingId) <= 0 ? 'Lunas' : 'Dibayar Sebagian'" /></div>
-        <div>
-          <span>Pelanggan</span>
-          <strong>{{ store.customerFor(store.bookingFor(detailPayment.bookingId)?.customerId ?? '')?.name }}</strong>
-          <small>{{ store.customerFor(store.bookingFor(detailPayment.bookingId)?.customerId ?? '')?.phone }}</small>
+      <div v-if="detailPayment && detailReceiptPayload" style="display: grid; gap: 16px;">
+        <ReceiptStationery :payload="detailReceiptPayload" :logo-url="store.businessProfile.logoUrl" />
+        <div class="modal-actions">
+          <button type="button" class="secondary-button" @click="showDetail = false">Close</button>
+          <button type="button" class="secondary-button" @click="showDetail = false; openEdit(detailPayment)">
+            <Pencil :size="15" />Edit Transaction
+          </button>
+          <button type="button" class="primary-button" @click="downloadReceipt(detailPayment)">
+            <Download :size="16" />Download Receipt PDF
+          </button>
         </div>
-        <div>
-          <span>Nomor PO &amp; Acara</span>
-          <strong class="mono-code">{{ store.bookingFor(detailPayment.bookingId)?.poNumber }}</strong>
-          <small>{{ formatDate(store.bookingFor(detailPayment.bookingId)?.eventDate ?? '') }} · {{ store.bookingFor(detailPayment.bookingId)?.location }}</small>
-        </div>
-        <div><span>Tanggal Bayar</span><strong>{{ formatDate(detailPayment.paidAt) }}</strong></div>
-        <div><span>Metode Pembayaran</span><strong>{{ methodLabel(detailPayment.method) }}</strong></div>
-        <div><span>Nominal Diterima</span><strong>{{ formatCurrency(detailPayment.amount) }}</strong></div>
-        <div><span>Sisa Tagihan PO</span><strong>{{ formatCurrency(Math.max(0, store.bookingBalance(detailPayment.bookingId))) }}</strong></div>
-        <div v-if="detailPayment.notes" class="span-2"><span>Catatan</span><strong>{{ detailPayment.notes }}</strong></div>
-      </div>
-      <div v-if="detailPayment" class="modal-actions">
-        <button type="button" class="secondary-button" @click="showDetail = false">Tutup</button>
-        <button type="button" class="secondary-button" @click="showDetail = false; openEdit(detailPayment)">
-          <Pencil :size="15" />Ubah Transaksi
-        </button>
-        <button type="button" class="primary-button" @click="downloadReceipt(detailPayment)">
-          <Download :size="16" />Unduh Kwitansi PDF
-        </button>
       </div>
     </UiModal>
 
     <UiModal
       :open="showDeleteConfirm && Boolean(deletingPayment)"
-      title="Hapus Transaksi Pembayaran?"
-      description="Penghapusan transaksi akan memperbarui sisa tagihan pelanggan dan total pemasukan."
+      title="Delete Payment Transaction?"
+      description="Deleting this payment will recalculate the customer balance and total cash inflow."
       @close="showDeleteConfirm = false"
     >
       <div v-if="deletingPayment" class="cancel-impact-box">
         <strong>{{ deletingPayment.receiptNumber }} — {{ store.customerFor(store.bookingFor(deletingPayment.bookingId)?.customerId ?? '')?.name }}</strong>
         <ul>
-          <li>Nomor PO: <b>{{ store.bookingFor(deletingPayment.bookingId)?.poNumber }}</b></li>
-          <li>Nominal: <b>{{ formatCurrency(deletingPayment.amount) }}</b> ({{ methodLabel(deletingPayment.method) }})</li>
+          <li>PO Number: <b>{{ store.bookingFor(deletingPayment.bookingId)?.poNumber }}</b></li>
+          <li>Amount: <b>{{ formatCurrency(deletingPayment.amount) }}</b> ({{ methodLabel(deletingPayment.method) }})</li>
         </ul>
       </div>
       <div class="modal-actions" style="margin-top: 16px;">
-        <button type="button" class="secondary-button" @click="showDeleteConfirm = false">Batal</button>
-        <button type="button" class="danger-button" @click="confirmDelete">Ya, Hapus Pembayaran</button>
+        <button type="button" class="secondary-button" @click="showDeleteConfirm = false">Cancel</button>
+        <button type="button" class="danger-button" @click="confirmDelete">Yes, Delete Payment</button>
       </div>
     </UiModal>
   </div>

@@ -32,7 +32,7 @@ import {
 } from '../utils/supabaseSync'
 
 export type BookingStatus = 'Draft' | 'Terkonfirmasi' | 'Selesai' | 'Dibatalkan'
-export type StylingType = 'Hijabdo' | 'Hairdo'
+export type StylingType = string
 export type CatalogType = 'Inti' | 'Additional'
 
 export interface Customer {
@@ -69,7 +69,13 @@ export interface BookingRefund {
   createdAt: string
 }
 
-export type DropdownOptionGroup = 'paymentMethods' | 'poExpenseCategories' | 'generalExpenseCategories'
+export type DropdownOptionGroup =
+  | 'paymentMethods'
+  | 'poExpenseCategories'
+  | 'generalExpenseCategories'
+  | 'stylingTypes'
+  | 'inventoryCategories'
+  | 'units'
 
 export interface EmployeeRecord {
   id: string
@@ -175,6 +181,7 @@ export interface InventoryItem {
   stockAdjustment: number
   minimumStock: number
   location: string
+  imageUrl?: string
   active: boolean
 }
 
@@ -222,6 +229,8 @@ export interface Expense {
   expenseScope?: 'Berdasarkan PO' | 'Di Luar PO'
   proofImageUrl?: string
   method: string
+  source?: 'Manual' | 'Bayar Cancel'
+  refundId?: string
 }
 
 export interface Activity {
@@ -233,7 +242,7 @@ export interface Activity {
 }
 
 export type AttireCategory = 'Bride' | 'Groom'
-export type AttireStatus = 'Tersedia' | 'Terpakai' | 'Laundry'
+export type AttireStatus = 'Tersedia' | 'Booked' | 'Terpakai' | 'Laundry'
 
 export interface WeddingAttire {
   id: string
@@ -307,25 +316,25 @@ const normalizeInvoices = (rawInvoices: Invoice[], catalog: CatalogItem[]): Invo
   for (const inv of rawInvoices) {
     const rawGroups: OrderGroup[] = Array.isArray(inv.groups) && inv.groups.length
       ? inv.groups.map((g) => ({
-          ...g,
-          createdAt: g.createdAt || `${g.orderDate}T00:00:00.000Z`,
-          items: (g.items ?? []).map((it) => ({
+        ...g,
+        createdAt: g.createdAt || `${g.orderDate}T00:00:00.000Z`,
+        items: (g.items ?? []).map((it) => ({
+          ...it,
+          serviceType: resolveServiceType(it, catalog),
+        })),
+      }))
+      : [
+        {
+          id: uid(),
+          kind: inv.kind === 'Additional' ? 'Tambahan' : 'Awal',
+          orderDate: inv.issuedAt,
+          createdAt: `${inv.issuedAt}T00:00:00.000Z`,
+          items: (inv.items ?? []).map((it) => ({
             ...it,
             serviceType: resolveServiceType(it, catalog),
           })),
-        }))
-      : [
-          {
-            id: uid(),
-            kind: inv.kind === 'Additional' ? 'Tambahan' : 'Awal',
-            orderDate: inv.issuedAt,
-            createdAt: `${inv.issuedAt}T00:00:00.000Z`,
-            items: (inv.items ?? []).map((it) => ({
-              ...it,
-              serviceType: resolveServiceType(it, catalog),
-            })),
-          },
-        ]
+        },
+      ]
 
     const existing = byBooking.get(inv.bookingId)
     if (!existing) {
@@ -396,15 +405,15 @@ const normalizeWeddingForms = (forms: WeddingFittingForm[]): WeddingFittingForm[
     const visibleEvents = normalizedEvents.length
       ? normalizedEvents.slice(0, highestNonEmpty)
       : [
-          {
-            number: 1 as const,
-            name: '',
-            readyTime: '',
-            timeNote: '',
-            bride: { look: '', accessories: '', shoes: '', attireId: '' },
-            groom: { look: '', accessories: '', shoes: '', attireId: '' },
-          },
-        ]
+        {
+          number: 1 as const,
+          name: '',
+          readyTime: '',
+          timeNote: '',
+          bride: { look: '', accessories: '', shoes: '', attireId: '' },
+          groom: { look: '', accessories: '', shoes: '', attireId: '' },
+        },
+      ]
 
     return {
       ...form,
@@ -516,9 +525,9 @@ const seed = () => {
     { id: 'exp-3', date: '2026-11-08', category: 'Honor Tim', description: 'Asisten makeup', amount: 600000, bookingId: 'b-4', method: 'Cash' },
   ]
   const activities: Activity[] = [
-    { id: 'act-1', at: '2026-11-15T14:28:00+07:00', title: 'Pembayaran diterima', detail: 'DP PO-2026-0004 sebesar Rp. 500.000', tone: 'green' },
-    { id: 'act-2', at: '2026-11-15T11:12:00+07:00', title: 'Stok diperbarui', detail: 'False Lashes bertambah 10 pasang', tone: 'blue' },
-    { id: 'act-3', at: '2026-11-14T16:20:00+07:00', title: 'Booking dikonfirmasi', detail: 'PO-2026-0001 siap untuk acara', tone: 'amber' },
+    { id: 'act-1', at: '2026-11-15T14:28:00+07:00', title: 'Payment received', detail: 'DP PO-2026-0004 for Rp. 500.000', tone: 'green' },
+    { id: 'act-2', at: '2026-11-15T11:12:00+07:00', title: 'Stock updated', detail: 'False Lashes increased by 10 pairs', tone: 'blue' },
+    { id: 'act-3', at: '2026-11-14T16:20:00+07:00', title: 'Booking confirmed', detail: 'PO-2026-0001 confirmed for event', tone: 'amber' },
   ]
   const weddingAttire: WeddingAttire[] = [
     { id: 'attire-1', code: 'BTR-0001', name: 'Kebaya Sekar Arum', category: 'Bride', size: 'M', status: 'Tersedia' },
@@ -554,7 +563,14 @@ const seed = () => {
   const paymentMethods = ['Tunai', 'Transfer', 'QRIS', 'Lainnya']
   const poExpenseCategories = ['Transportasi', 'Honor Tim', 'Akomodasi', 'Perlengkapan', 'Operasional']
   const generalExpenseCategories = ['Operasional', 'Perlengkapan', 'Akomodasi', 'Transportasi', 'Honor Tim']
-  return { customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms, employees, jobAssignments, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories }
+  const stylingTypes = ['Hijabdo', 'Hairdo']
+  const inventoryCategories = ['Complexion', 'Finishing', 'Aksesoris Mata', 'Skin Prep', 'Tools', 'Hair Styling', 'Hijab Styling', 'Softlens Care']
+  const units = ['paket', 'orang', 'sesi', 'set', 'botol', 'pcs', 'pasang', 'jar', 'kotak', 'pack']
+  return {
+    customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames,
+    expenses, activities, weddingAttire, weddingForms, employees, jobAssignments, businessProfile,
+    paymentMethods, poExpenseCategories, generalExpenseCategories, stylingTypes, inventoryCategories, units,
+  }
 }
 
 const localTodayIso = () => {
@@ -566,6 +582,13 @@ const calendarDaysDiff = (fromIso: string, toIso: string) => {
   const a = new Date(`${fromIso}T00:00:00`).getTime()
   const b = new Date(`${toIso}T00:00:00`).getTime()
   return Math.round((b - a) / 86_400_000)
+}
+
+export interface ActionToast {
+  id: string
+  title: string
+  detail: string
+  tone: 'blue' | 'green' | 'amber' | 'rose'
 }
 
 export const useCrmStore = defineStore('crm', () => {
@@ -598,22 +621,25 @@ export const useCrmStore = defineStore('crm', () => {
     paymentMethods: defaults.paymentMethods,
     poExpenseCategories: defaults.poExpenseCategories,
     generalExpenseCategories: defaults.generalExpenseCategories,
+    stylingTypes: defaults.stylingTypes,
+    inventoryCategories: defaults.inventoryCategories,
+    units: defaults.units,
   }
 
   const mergedCatalog = parsed.catalog ?? defaults.catalog
   const initial: ReturnType<typeof seed> = isSupabaseMode
     ? emptyInitial
     : {
-        ...defaults,
-        ...parsed,
-        catalog: mergedCatalog,
-        invoices: normalizeInvoices(parsed.invoices ?? defaults.invoices, mergedCatalog),
-        inventory: normalizeInventory(parsed.inventory ?? defaults.inventory),
-        weddingAttire: normalizeWeddingAttire(parsed.weddingAttire ?? defaults.weddingAttire),
-        weddingForms: normalizeWeddingForms(parsed.weddingForms ?? defaults.weddingForms),
-        stockOpnames: parsed.stockOpnames ?? defaults.stockOpnames,
-        refunds: parsed.refunds ?? defaults.refunds,
-      }
+      ...defaults,
+      ...parsed,
+      catalog: mergedCatalog,
+      invoices: normalizeInvoices(parsed.invoices ?? defaults.invoices, mergedCatalog),
+      inventory: normalizeInventory(parsed.inventory ?? defaults.inventory),
+      weddingAttire: normalizeWeddingAttire(parsed.weddingAttire ?? defaults.weddingAttire),
+      weddingForms: normalizeWeddingForms(parsed.weddingForms ?? defaults.weddingForms),
+      stockOpnames: parsed.stockOpnames ?? defaults.stockOpnames,
+      refunds: parsed.refunds ?? defaults.refunds,
+    }
 
   const customers = ref(initial.customers)
   const bookings = ref(initial.bookings)
@@ -634,6 +660,9 @@ export const useCrmStore = defineStore('crm', () => {
   const paymentMethods = ref<string[]>(initial.paymentMethods?.length ? initial.paymentMethods : defaults.paymentMethods)
   const poExpenseCategories = ref<string[]>(initial.poExpenseCategories?.length ? initial.poExpenseCategories : defaults.poExpenseCategories)
   const generalExpenseCategories = ref<string[]>(initial.generalExpenseCategories?.length ? initial.generalExpenseCategories : defaults.generalExpenseCategories)
+  const stylingTypes = ref<string[]>(initial.stylingTypes?.length ? initial.stylingTypes : defaults.stylingTypes)
+  const inventoryCategories = ref<string[]>(initial.inventoryCategories?.length ? initial.inventoryCategories : defaults.inventoryCategories)
+  const units = ref<string[]>(initial.units?.length ? initial.units : defaults.units)
 
   const groupTotal = (group: OrderGroup) =>
     group.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
@@ -726,8 +755,10 @@ export const useCrmStore = defineStore('crm', () => {
 
   const effectiveAttireStatus = (attire: WeddingAttire, referenceDate?: string): AttireStatus => {
     if (attire.status === 'Laundry') return 'Laundry'
-    const activeScheduled = attireSchedule(attire.id, { includePast: false, referenceDate })
-    if (activeScheduled.length > 0) return 'Terpakai'
+    const refDate = referenceDate ?? localTodayIso()
+    const activeScheduled = attireSchedule(attire.id, { includePast: false, referenceDate: refDate })
+    if (activeScheduled.some((entry) => entry.eventDate === refDate)) return 'Terpakai'
+    if (activeScheduled.length > 0) return 'Booked'
     // Once event dates have passed, attire automatically returns to Tersedia
     return 'Tersedia'
   }
@@ -767,8 +798,8 @@ export const useCrmStore = defineStore('crm', () => {
             eventName: entry.eventName,
             daysLeft: diff,
             message: diff === 0
-              ? `Hari ini acara ${entry.customerName} (${entry.poNumber})! Segera siapkan baju ${item.name} yang masih berstatus Laundry.`
-              : `H-1 acara ${entry.customerName} (${entry.poNumber}) besok! Segera siapkan baju ${item.name} yang masih berstatus Laundry.`,
+              ? `Event today for ${entry.customerName} (${entry.poNumber})! Prepare attire ${item.name} immediately (still in Laundry).`
+              : `H-1 event tomorrow for ${entry.customerName} (${entry.poNumber})! Prepare attire ${item.name} immediately (still in Laundry).`,
           })
         }
       }
@@ -783,13 +814,42 @@ export const useCrmStore = defineStore('crm', () => {
   const totalReceivable = computed(() => Math.max(0, totalBilling.value - totalPaid.value))
   const totalExpenses = computed(() => expenses.value.reduce((sum, expense) => sum + expense.amount, 0))
   const totalRefunds = computed(() => refunds.value.reduce((sum, refund) => sum + refund.amount, 0))
-  const totalCashOut = computed(() => totalExpenses.value + totalRefunds.value)
+  const totalCashOut = computed(() => {
+    const linkedRefundIds = new Set(expenses.value.map((e) => e.refundId).filter(Boolean))
+    const unlinkedRefunds = refunds.value
+      .filter((r) => !linkedRefundIds.has(r.id))
+      .reduce((sum, r) => sum + r.amount, 0)
+    return totalExpenses.value + unlinkedRefunds
+  })
   const netCashflow = computed(() => totalPaid.value - totalCashOut.value)
   const upcomingBookings = computed(() => [...bookings.value].filter((item) => item.status !== 'Dibatalkan' && item.eventDate >= '2026-11-15').sort((a, b) => a.eventDate.localeCompare(b.eventDate)))
   const lowStock = computed(() => inventory.value.filter((item) => stockStatus(item) !== 'Aman'))
 
+  const actionToast = ref<ActionToast | null>(null)
+  let actionToastTimer: ReturnType<typeof setTimeout> | undefined
+
+  const dismissActionToast = () => {
+    if (actionToastTimer) {
+      clearTimeout(actionToastTimer)
+      actionToastTimer = undefined
+    }
+    actionToast.value = null
+  }
+
+  const showActionToast = (title: string, detail: string, tone: Activity['tone'] = 'green') => {
+    if (typeof window === 'undefined' || import.meta.env.MODE === 'test') return
+    const id = uid()
+    actionToast.value = { id, title, detail, tone }
+    if (actionToastTimer) clearTimeout(actionToastTimer)
+    actionToastTimer = setTimeout(() => {
+      if (actionToast.value?.id === id) actionToast.value = null
+      actionToastTimer = undefined
+    }, 4200)
+  }
+
   const addActivity = (title: string, detail: string, tone: Activity['tone']) => {
     activities.value.unshift({ id: uid(), at: new Date().toISOString(), title, detail, tone })
+    showActionToast(title, detail, tone)
   }
 
   const addBooking = (input: { name: string; phone: string; location: string; eventDate: string; eventTime?: string; stylingType?: StylingType; notes?: string }) => {
@@ -809,16 +869,16 @@ export const useCrmStore = defineStore('crm', () => {
     }
     customers.value.unshift(customer)
     bookings.value.unshift(booking)
-    addActivity('Booking baru dibuat', `${booking.poNumber} untuk ${customer.name}`, 'blue')
+    addActivity('New booking created', `${booking.poNumber} for ${customer.name}`, 'blue')
     syncBooking(booking, customer)
     return booking
   }
 
   const updateBooking = (id: string, input: { name: string; phone: string; location: string; eventDate: string; eventTime?: string; stylingType?: StylingType; notes?: string; status: BookingStatus }) => {
     const booking = bookingFor(id)
-    if (!booking) throw new Error('Booking tidak ditemukan.')
+    if (!booking) throw new Error('Booking not found.')
     const customer = customerFor(booking.customerId)
-    if (!customer) throw new Error('Customer tidak ditemukan.')
+    if (!customer) throw new Error('Customer not found.')
     customer.name = input.name.trim()
     customer.phone = input.phone.trim()
     Object.assign(booking, {
@@ -829,7 +889,7 @@ export const useCrmStore = defineStore('crm', () => {
       notes: input.notes,
       status: input.status,
     })
-    addActivity('Booking diperbarui', `${booking.poNumber} untuk ${customer.name}`, 'blue')
+    addActivity('Booking updated', `${booking.poNumber} for ${customer.name}`, 'blue')
     syncBooking(booking, customer)
     return booking
   }
@@ -843,10 +903,10 @@ export const useCrmStore = defineStore('crm', () => {
     notes?: string
   }) => {
     const booking = bookingFor(input.bookingId)
-    if (!booking) throw new Error('Booking tidak ditemukan.')
-    if (!input.refundDate) throw new Error('Tanggal pengembalian wajib diisi.')
+    if (!booking) throw new Error('Booking not found.')
+    if (!input.refundDate) throw new Error('Refund date is required.')
     if (!Number.isFinite(input.amount) || input.amount <= 0) {
-      throw new Error('Nominal pengembalian harus lebih dari nol.')
+      throw new Error('Refund amount must be greater than zero.')
     }
     const customer = customerFor(booking.customerId)
     if (booking.status === 'Dibatalkan') {
@@ -858,8 +918,8 @@ export const useCrmStore = defineStore('crm', () => {
       if (input.amount > remaining) {
         throw new Error(
           maxPaid <= 0
-            ? 'Customer pada PO ini belum memiliki uang masuk yang dapat dikembalikan.'
-            : `Nominal pengembalian melebihi sisa uang yang sudah masuk (${new Intl.NumberFormat('id-ID').format(remaining)}).`,
+            ? 'This PO has no received funds eligible for refund.'
+            : `Refund amount exceeds remaining paid funds (${new Intl.NumberFormat('id-ID').format(remaining)}).`,
         )
       }
     }
@@ -877,12 +937,27 @@ export const useCrmStore = defineStore('crm', () => {
       createdAt: new Date().toISOString(),
     }
     refunds.value.unshift(refund)
+    const cancelExpense: Expense = {
+      id: uid(),
+      date: refund.refundDate,
+      category: 'Cancel Refund',
+      description: `Cancel Payment — ${booking.poNumber} (${customer?.name ?? 'Customer'})`,
+      amount: refund.amount,
+      bookingId: booking.id,
+      expenseScope: 'Berdasarkan PO',
+      proofImageUrl: refund.proofImageUrl,
+      method: refund.method,
+      source: 'Bayar Cancel',
+      refundId: refund.id,
+    }
+    expenses.value.unshift(cancelExpense)
     addActivity(
-      'Pengembalian uang dicatat',
-      `${refund.refundNumber} (${booking.poNumber}) sebesar Rp. ${new Intl.NumberFormat('id-ID').format(refund.amount)}`,
+      'Cancel refund recorded',
+      `${refund.refundNumber} (${booking.poNumber}) of Rp. ${new Intl.NumberFormat('id-ID').format(refund.amount)}`,
       'rose',
     )
     syncRefund(refund)
+    syncExpense(cancelExpense)
     return refund
   }
 
@@ -897,15 +972,15 @@ export const useCrmStore = defineStore('crm', () => {
     },
   ) => {
     const booking = bookingFor(bookingId)
-    if (!booking) throw new Error('Booking tidak ditemukan.')
+    if (!booking) throw new Error('Booking not found.')
     const customer = customerFor(booking.customerId)
     const paidBefore = bookingPaid(bookingId)
 
     if (refundInput && refundInput.amount > 0 && refundInput.amount > paidBefore) {
       throw new Error(
         paidBefore <= 0
-          ? 'Customer belum memiliki uang masuk sehingga pengembalian uang harus Rp. 0.'
-          : `Nominal pengembalian melebihi total uang yang sudah masuk (Rp. ${new Intl.NumberFormat('id-ID').format(paidBefore)}).`,
+          ? 'Customer has no paid balance, so refund amount must be Rp. 0.'
+          : `Refund amount exceeds total received funds (Rp. ${new Intl.NumberFormat('id-ID').format(paidBefore)}).`,
       )
     }
 
@@ -918,9 +993,7 @@ export const useCrmStore = defineStore('crm', () => {
     invoices.value = invoices.value.filter((inv) => inv.bookingId !== bookingId)
     payments.value = payments.value.filter((pay) => pay.bookingId !== bookingId)
 
-    // Remove or release fitting form attire bookings (attireSchedule already ignores Dibatalkan,
-    // and we also keep/preserve or clear attire? Keeping Dibatalkan skipped makes attire immediately Tersedia)
-    addActivity('Booking dibatalkan', `${booking.poNumber} · ${customer?.name ?? 'Customer'}`, 'rose')
+    addActivity('Booking cancelled', `${booking.poNumber} · ${customer?.name ?? 'Customer'}`, 'rose')
     syncCancelBookingCascade(booking)
 
     if (refundInput && refundInput.amount > 0) {
@@ -934,7 +1007,7 @@ export const useCrmStore = defineStore('crm', () => {
 
   const addPayment = (input: { bookingId: string; amount: number; method: Payment['method']; paidAt: string; notes?: string }) => {
     const balance = bookingBalance(input.bookingId)
-    if (input.amount <= 0 || input.amount > balance) throw new Error('Nominal pembayaran harus lebih dari nol dan tidak boleh melebihi sisa tagihan.')
+    if (input.amount <= 0 || input.amount > balance) throw new Error('Payment amount must be positive and cannot exceed remaining balance.')
     const payment: Payment = {
       id: uid(),
       receiptNumber: `KWT-${new Date(input.paidAt).getFullYear()}-${String(payments.value.length + 1).padStart(4, '0')}`,
@@ -942,7 +1015,7 @@ export const useCrmStore = defineStore('crm', () => {
     }
     payments.value.unshift(payment)
     const booking = bookingFor(input.bookingId)
-    addActivity('Pembayaran diterima', `${booking?.poNumber ?? 'PO'} sebesar Rp. ${new Intl.NumberFormat('id-ID').format(input.amount)}`, 'green')
+    addActivity('Payment received', `${booking?.poNumber ?? 'PO'} for Rp. ${new Intl.NumberFormat('id-ID').format(input.amount)}`, 'green')
     syncPayment(payment, {
       totalBilling: bookingTotal(input.bookingId),
       totalPaid: bookingPaid(input.bookingId),
@@ -956,19 +1029,19 @@ export const useCrmStore = defineStore('crm', () => {
     input: { amount: number; method: Payment['method']; paidAt: string; notes?: string },
   ) => {
     const payment = payments.value.find((p) => p.id === id)
-    if (!payment) throw new Error('Data pembayaran tidak ditemukan.')
+    if (!payment) throw new Error('Payment record not found.')
     const maxAllowed = bookingBalance(payment.bookingId) + payment.amount
     if (!Number.isFinite(input.amount) || input.amount <= 0 || input.amount > maxAllowed) {
-      throw new Error('Nominal pembayaran harus lebih dari nol dan tidak boleh melebihi sisa tagihan.')
+      throw new Error('Payment amount must be positive and cannot exceed remaining balance.')
     }
-    if (!input.paidAt) throw new Error('Tanggal pembayaran wajib diisi.')
+    if (!input.paidAt) throw new Error('Payment date is required.')
     Object.assign(payment, {
       amount: Math.round(input.amount),
       method: input.method,
       paidAt: input.paidAt,
       notes: input.notes?.trim() || undefined,
     })
-    addActivity('Pembayaran diperbarui', `${payment.receiptNumber} · Rp. ${new Intl.NumberFormat('id-ID').format(payment.amount)}`, 'blue')
+    addActivity('Payment updated', `${payment.receiptNumber} · Rp. ${new Intl.NumberFormat('id-ID').format(payment.amount)}`, 'blue')
     syncPayment(payment, {
       totalBilling: bookingTotal(payment.bookingId),
       totalPaid: bookingPaid(payment.bookingId),
@@ -979,10 +1052,10 @@ export const useCrmStore = defineStore('crm', () => {
 
   const deletePayment = (id: string) => {
     const idx = payments.value.findIndex((p) => p.id === id)
-    if (idx < 0) throw new Error('Data pembayaran tidak ditemukan.')
+    if (idx < 0) throw new Error('Payment record not found.')
     const [removed] = payments.value.splice(idx, 1)
     if (removed) {
-      addActivity('Pembayaran dihapus', `${removed.receiptNumber} sebesar Rp. ${new Intl.NumberFormat('id-ID').format(removed.amount)}`, 'rose')
+      addActivity('Payment deleted', `${removed.receiptNumber} for Rp. ${new Intl.NumberFormat('id-ID').format(removed.amount)}`, 'rose')
       syncDeletePayment(removed.id)
     }
     return removed
@@ -991,15 +1064,15 @@ export const useCrmStore = defineStore('crm', () => {
   const addCatalogItem = (input: Omit<CatalogItem, 'id' | 'code'>) => {
     const item: CatalogItem = { ...input, id: uid(), code: `CAT-${String(catalog.value.length + 1).padStart(4, '0')}` }
     catalog.value.unshift(item)
-    addActivity('Layanan ditambahkan', `${item.name} masuk ke katalog ${item.type}`, 'blue')
+    addActivity('Service added', `${item.name} added to ${item.type} catalog`, 'blue')
     syncCatalogItem(item)
   }
 
   const updateCatalogItem = (id: string, input: Omit<CatalogItem, 'id' | 'code'>) => {
     const item = catalog.value.find((entry) => entry.id === id)
-    if (!item) throw new Error('Layanan tidak ditemukan.')
+    if (!item) throw new Error('Catalog service not found.')
     Object.assign(item, input)
-    addActivity('Layanan diperbarui', `${item.name} pada katalog ${item.type}`, 'blue')
+    addActivity('Service updated', `${item.name} in ${item.type} catalog`, 'blue')
     syncCatalogItem(item)
     return item
   }
@@ -1007,9 +1080,9 @@ export const useCrmStore = defineStore('crm', () => {
   const snapshotLineItems = (lines: Array<{ catalogItemId: string; quantity: number; customerPrice: number }>): InvoiceItem[] =>
     lines.map((line) => {
       const catalogItem = catalog.value.find((item) => item.id === line.catalogItemId && item.active)
-      if (!catalogItem) throw new Error('Salah satu layanan tidak tersedia atau sudah nonaktif.')
+      if (!catalogItem) throw new Error('One or more selected services are unavailable or inactive.')
       if (!Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.customerPrice) || line.customerPrice < 0) {
-        throw new Error('Qty dan harga customer tidak valid.')
+        throw new Error('Invalid quantity or unit price.')
       }
       return {
         id: uid(),
@@ -1032,9 +1105,9 @@ export const useCrmStore = defineStore('crm', () => {
     items: Array<{ catalogItemId: string; quantity: number; customerPrice: number }>
   }) => {
     const booking = bookingFor(input.bookingId)
-    if (!booking) throw new Error('Booking tidak ditemukan.')
-    if (!input.items.length) throw new Error('Tambahkan minimal satu layanan.')
-    if (!input.issuedAt) throw new Error('Tanggal invoice dibuat wajib diisi.')
+    if (!booking) throw new Error('Booking not found.')
+    if (!input.items.length) throw new Error('Add at least one service item.')
+    if (!input.issuedAt) throw new Error('Invoice issue date is required.')
     const orderDate = input.orderDate || input.issuedAt
 
     if (input.kind === 'Additional') {
@@ -1046,7 +1119,7 @@ export const useCrmStore = defineStore('crm', () => {
     }
 
     if (bookingInvoice(input.bookingId)) {
-      throw new Error('Booking ini sudah mempunyai pesanan awal dan invoice.')
+      throw new Error('This booking already has an initial order and invoice.')
     }
 
     const invoiceItems = sortInvoiceItemsIntiFirst(snapshotLineItems(input.items))
@@ -1069,7 +1142,7 @@ export const useCrmStore = defineStore('crm', () => {
       items: [...invoiceItems],
     }
     invoices.value.unshift(invoice)
-    addActivity('Pesanan awal dibuat', `${invoice.invoiceNumber} untuk ${booking.poNumber}`, 'blue')
+    addActivity('Initial order created', `${invoice.invoiceNumber} for ${booking.poNumber}`, 'blue')
     syncInvoiceOrderGroup(invoice, initialGroup)
     return invoice
   }
@@ -1080,11 +1153,11 @@ export const useCrmStore = defineStore('crm', () => {
     items: Array<{ catalogItemId: string; quantity: number; customerPrice: number }>
   }) => {
     const booking = bookingFor(input.bookingId)
-    if (!booking) throw new Error('Booking tidak ditemukan.')
+    if (!booking) throw new Error('Booking not found.')
     const invoice = bookingInvoice(input.bookingId)
-    if (!invoice) throw new Error('Pesanan awal harus dibuat terlebih dahulu sebelum menambah pesanan.')
-    if (!input.orderDate) throw new Error('Tanggal pemesanan wajib diisi.')
-    if (!input.items.length) throw new Error('Tambahkan minimal satu layanan.')
+    if (!invoice) throw new Error('An initial order must exist before adding extra service batches.')
+    if (!input.orderDate) throw new Error('Order date is required.')
+    if (!input.items.length) throw new Error('Add at least one service item.')
 
     const snappedItems = sortInvoiceItemsIntiFirst(snapshotLineItems(input.items))
     const newGroup: OrderGroup = {
@@ -1098,7 +1171,7 @@ export const useCrmStore = defineStore('crm', () => {
     invoice.groups = sortGroupsChronologically([...invoice.groups, newGroup])
     invoice.items = invoice.groups.flatMap((g) => g.items)
 
-    addActivity('Pesanan tambahan dicatat', `${booking.poNumber} · ${snappedItems.length} item pada ${input.orderDate}`, 'amber')
+    addActivity('Add-on order recorded', `${booking.poNumber} · ${snappedItems.length} item(s) on ${input.orderDate}`, 'amber')
     syncInvoiceOrderGroup(invoice, newGroup)
     return invoice
   }
@@ -1121,18 +1194,18 @@ export const useCrmStore = defineStore('crm', () => {
     },
   ) => {
     const booking = bookingFor(bookingId)
-    if (!booking) throw new Error('Booking tidak ditemukan.')
+    if (!booking) throw new Error('Booking not found.')
     const invoice = bookingInvoice(bookingId)
-    if (!invoice) throw new Error('Invoice tidak ditemukan.')
+    if (!invoice) throw new Error('Invoice not found.')
     const groupIndex = invoice.groups.findIndex((g) => g.id === groupId)
-    if (groupIndex < 0) throw new Error('Kelompok pesanan tidak ditemukan.')
-    if (!input.orderDate) throw new Error('Tanggal pemesanan wajib diisi.')
-    if (!input.items.length) throw new Error('Kelompok pesanan minimal harus berisi satu layanan.')
+    if (groupIndex < 0) throw new Error('Order group not found.')
+    if (!input.orderDate) throw new Error('Order date is required.')
+    if (!input.items.length) throw new Error('An order group must contain at least one service item.')
 
     const existingGroup = invoice.groups[groupIndex]!
     const nextItems: InvoiceItem[] = input.items.map((line) => {
       if (!Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.customerPrice) || line.customerPrice < 0) {
-        throw new Error('Qty dan harga customer tidak valid.')
+        throw new Error('Invalid quantity or customer unit price.')
       }
       const prevItem = line.id ? existingGroup.items.find((it) => it.id === line.id) : undefined
       if (prevItem && (!line.catalogItemId || line.catalogItemId === prevItem.catalogItemId)) {
@@ -1143,7 +1216,7 @@ export const useCrmStore = defineStore('crm', () => {
         }
       }
       const catalogItem = catalog.value.find((c) => c.id === line.catalogItemId)
-      if (!catalogItem) throw new Error('Pilih layanan dari katalog pada seluruh baris.')
+      if (!catalogItem) throw new Error('Select a valid catalog service on every line.')
       return {
         id: line.id || uid(),
         catalogItemId: catalogItem.id,
@@ -1167,26 +1240,26 @@ export const useCrmStore = defineStore('crm', () => {
     invoice.groups = sortGroupsChronologically(updatedGroups)
     invoice.items = invoice.groups.flatMap((g) => g.items)
 
-    addActivity('Pesanan diperbarui', `${booking.poNumber} · kelompok ${existingGroup.kind}`, 'blue')
+    addActivity('Order updated', `${booking.poNumber} · group ${existingGroup.kind}`, 'blue')
     syncInvoiceOrderGroup(invoice, updatedGroup)
     return invoice
   }
 
   const deleteOrderGroup = (bookingId: string, groupId: string) => {
     const booking = bookingFor(bookingId)
-    if (!booking) throw new Error('Pemesanan tidak ditemukan.')
+    if (!booking) throw new Error('Booking not found.')
     const invoice = bookingInvoice(bookingId)
-    if (!invoice) throw new Error('Faktur tidak ditemukan.')
+    if (!invoice) throw new Error('Invoice not found.')
     const idx = invoice.groups.findIndex((g) => g.id === groupId)
-    if (idx < 0) throw new Error('Kelompok pesanan tidak ditemukan.')
+    if (idx < 0) throw new Error('Order group not found.')
     const target = invoice.groups[idx]!
     if (invoice.groups.length <= 1) {
-      throw new Error('Minimal satu kelompok pesanan harus tersisa pada PO. Gunakan pembatalan PO jika ingin menghapus seluruh pesanan.')
+      throw new Error('At least one order group must remain on a PO. Cancel the PO to remove the entire order.')
     }
     invoice.groups.splice(idx, 1)
     invoice.groups = sortGroupsChronologically(invoice.groups)
     invoice.items = invoice.groups.flatMap((g) => g.items)
-    addActivity('Kelompok pesanan dihapus', `${booking.poNumber} · ${target.kind}`, 'rose')
+    addActivity('Order group removed', `${booking.poNumber} · ${target.kind}`, 'rose')
     syncDeleteOrderGroup(invoice.id, target.id)
     return invoice
   }
@@ -1194,7 +1267,7 @@ export const useCrmStore = defineStore('crm', () => {
   const addExpense = (input: Omit<Expense, 'id'>) => {
     const rec: Expense = { id: uid(), ...input }
     expenses.value.unshift(rec)
-    addActivity('Pengeluaran dicatat', input.description, 'rose')
+    addActivity('Expense recorded', input.description, 'rose')
     syncExpense(rec)
   }
 
@@ -1206,20 +1279,19 @@ export const useCrmStore = defineStore('crm', () => {
     proofImageUrl?: string
     items: Array<{ category: string; description: string; amount: number }>
   }) => {
-    if (!input.date) throw new Error('Tanggal pengeluaran wajib diisi.')
-    if (!input.items.length) throw new Error('Tambahkan minimal satu item pengeluaran.')
+    if (!input.date) throw new Error('Expense date is required.')
+    if (!input.items.length) throw new Error('Add at least one expense item.')
     if (input.expenseScope === 'Berdasarkan PO' && !input.bookingId) {
-      throw new Error('Pilih Nomor PO untuk pengeluaran berdasarkan PO.')
+      throw new Error('Select a PO Number for PO-linked expenses.')
     }
     for (const row of input.items) {
-      if (!row.description.trim()) throw new Error('Deskripsi wajib diisi pada seluruh baris pengeluaran.')
+      if (!row.description.trim()) throw new Error('Description is required on all expense lines.')
       if (!Number.isFinite(row.amount) || row.amount <= 0) {
-        throw new Error(`Nominal pada "${row.description.trim()}" harus lebih dari nol.`)
+        throw new Error(`Amount for "${row.description.trim()}" must be greater than zero.`)
       }
     }
 
     const created: Expense[] = []
-    // Add in reverse order so row 1 stays on top cleanly
     for (const row of [...input.items].reverse()) {
       const record: Expense = {
         id: uid(),
@@ -1231,6 +1303,7 @@ export const useCrmStore = defineStore('crm', () => {
         expenseScope: input.expenseScope,
         bookingId: input.expenseScope === 'Berdasarkan PO' ? input.bookingId : undefined,
         proofImageUrl: input.proofImageUrl || undefined,
+        source: 'Manual',
       }
       expenses.value.unshift(record)
       created.unshift(record)
@@ -1239,8 +1312,8 @@ export const useCrmStore = defineStore('crm', () => {
 
     const totalSum = created.reduce((s, r) => s + r.amount, 0)
     addActivity(
-      'Pengeluaran dicatat',
-      `${created.length} item pengeluaran sebesar Rp. ${new Intl.NumberFormat('id-ID').format(totalSum)}`,
+      'Expenses recorded',
+      `${created.length} expense item(s) totaling Rp. ${new Intl.NumberFormat('id-ID').format(totalSum)}`,
       'rose',
     )
     return created
@@ -1248,23 +1321,23 @@ export const useCrmStore = defineStore('crm', () => {
 
   const updateExpense = (id: string, input: Omit<Expense, 'id'>) => {
     const existing = expenses.value.find((e) => e.id === id)
-    if (!existing) throw new Error('Data pengeluaran tidak ditemukan.')
+    if (!existing) throw new Error('Expense record not found.')
     Object.assign(existing, {
       ...input,
       bookingId: input.bookingId || undefined,
       proofImageUrl: input.proofImageUrl || undefined,
     })
-    addActivity('Pengeluaran diperbarui', existing.description, 'blue')
+    addActivity('Expense updated', existing.description, 'blue')
     syncExpense(existing)
     return existing
   }
 
   const deleteExpense = (id: string) => {
     const idx = expenses.value.findIndex((e) => e.id === id)
-    if (idx < 0) throw new Error('Data pengeluaran tidak ditemukan.')
+    if (idx < 0) throw new Error('Expense record not found.')
     const [removed] = expenses.value.splice(idx, 1)
     if (removed) {
-      addActivity('Pengeluaran dihapus', removed.description, 'rose')
+      addActivity('Expense deleted', removed.description, 'rose')
       syncDeleteExpense(removed.id)
     }
     return removed
@@ -1289,17 +1362,17 @@ export const useCrmStore = defineStore('crm', () => {
     proofImageUrl?: string
     items: Array<{ itemId: string; quantity: number }>
   }) => {
-    if (!input.pic.trim()) throw new Error('Nama PIC wajib diisi.')
-    if (!input.date) throw new Error('Tanggal transaksi wajib diisi.')
-    if (!input.items.length) throw new Error('Tambahkan minimal satu barang.')
+    if (!input.pic.trim()) throw new Error('Staff PIC name is required.')
+    if (!input.date) throw new Error('Transaction date is required.')
+    if (!input.items.length) throw new Error('Add at least one inventory item.')
 
     // Validate all rows first (including summed qty if same item appears more than once)
     const qtyByItem = new Map<string, number>()
     for (const row of input.items) {
-      if (!row.itemId) throw new Error('Pilih barang pada seluruh baris.')
-      if (!Number.isFinite(row.quantity) || row.quantity <= 0) throw new Error('Qty harus lebih dari nol.')
+      if (!row.itemId) throw new Error('Select an item on every row.')
+      if (!Number.isFinite(row.quantity) || row.quantity <= 0) throw new Error('Quantity must be greater than zero.')
       const item = inventory.value.find((entry) => entry.id === row.itemId)
-      if (!item) throw new Error('Barang tidak ditemukan.')
+      if (!item) throw new Error('Inventory item not found.')
       qtyByItem.set(row.itemId, (qtyByItem.get(row.itemId) ?? 0) + row.quantity)
     }
 
@@ -1307,7 +1380,7 @@ export const useCrmStore = defineStore('crm', () => {
       for (const [itemId, totalQty] of qtyByItem.entries()) {
         const item = inventory.value.find((entry) => entry.id === itemId)!
         if (totalQty > stockAvailable(item)) {
-          throw new Error(`Qty keluar untuk ${item.name} (${totalQty}) melebihi stok tersedia (${stockAvailable(item)}).`)
+          throw new Error(`Outgoing quantity for ${item.name} (${totalQty}) exceeds available stock (${stockAvailable(item)}).`)
         }
       }
     }
@@ -1333,8 +1406,8 @@ export const useCrmStore = defineStore('crm', () => {
     }
 
     addActivity(
-      `Barang ${input.type.toLowerCase()}`,
-      `${input.items.length} jenis barang oleh ${input.pic.trim()}`,
+      input.type === 'Masuk' ? 'Stock In recorded' : 'Stock Out recorded',
+      `${input.items.length} item(s) handled by ${input.pic.trim()}`,
       input.type === 'Masuk' ? 'green' : 'amber',
     )
     return batchId
@@ -1346,15 +1419,15 @@ export const useCrmStore = defineStore('crm', () => {
     notes?: string
     items: Array<{ itemId: string; physicalStock: number; notes?: string }>
   }) => {
-    if (!input.pic.trim()) throw new Error('Nama PIC stok opname wajib diisi.')
-    if (!input.date) throw new Error('Tanggal stok opname wajib diisi.')
-    if (!input.items.length) throw new Error('Pilih minimal satu barang untuk stok opname.')
+    if (!input.pic.trim()) throw new Error('Stock opname auditor PIC is required.')
+    if (!input.date) throw new Error('Stock opname date is required.')
+    if (!input.items.length) throw new Error('Select at least one item for stock opname.')
 
     const opnameItems: StockOpnameItem[] = input.items.map((row) => {
       const item = inventory.value.find((entry) => entry.id === row.itemId)
-      if (!item) throw new Error('Barang tidak ditemukan.')
+      if (!item) throw new Error('Inventory item not found.')
       if (!Number.isFinite(row.physicalStock) || row.physicalStock < 0) {
-        throw new Error(`Stok fisik untuk ${item.name} tidak boleh negatif.`)
+        throw new Error(`Physical stock count for ${item.name} cannot be negative.`)
       }
       const systemStock = stockAvailable(item)
       const diff = row.physicalStock - systemStock
@@ -1384,7 +1457,7 @@ export const useCrmStore = defineStore('crm', () => {
           quantity: line.diff,
           date: input.date,
           pic: input.pic.trim(),
-          notes: `Stok Opname${line.notes ? ` · ${line.notes}` : ''}`,
+          notes: `Stock Opname${line.notes ? ` · ${line.notes}` : ''}`,
         }
         movements.value.unshift(adjMov)
         opAdjMovements.push(adjMov)
@@ -1405,8 +1478,8 @@ export const useCrmStore = defineStore('crm', () => {
 
     const diffCount = opnameItems.filter((i) => i.diff !== 0).length
     addActivity(
-      'Stok opname diselaraskan',
-      `${record.opnameNumber} · ${opnameItems.length} barang dicek (${diffCount} penyesuaian)`,
+      'Stock opname reconciled',
+      `${record.opnameNumber} · ${opnameItems.length} item(s) audited (${diffCount} adjusted)`,
       diffCount > 0 ? 'amber' : 'green',
     )
     return record
@@ -1417,28 +1490,26 @@ export const useCrmStore = defineStore('crm', () => {
     input: { itemId: string; type: 'Masuk' | 'Keluar'; quantity: number; date: string; pic: string; notes?: string; proofImageUrl?: string },
   ) => {
     const mov = movements.value.find((m) => m.id === id)
-    if (!mov) throw new Error('Riwayat transaksi barang tidak ditemukan.')
-    if (!input.pic.trim()) throw new Error('Nama penanggung jawab wajib diisi.')
-    if (!input.date) throw new Error('Tanggal transaksi wajib diisi.')
-    if (!Number.isFinite(input.quantity) || input.quantity <= 0) throw new Error('Jumlah harus lebih dari nol.')
+    if (!mov) throw new Error('Stock movement record not found.')
+    if (!input.pic.trim()) throw new Error('Staff PIC name is required.')
+    if (!input.date) throw new Error('Transaction date is required.')
+    if (!Number.isFinite(input.quantity) || input.quantity <= 0) throw new Error('Quantity must be greater than zero.')
 
     const oldItem = inventory.value.find((i) => i.id === mov.itemId)
     const newItem = inventory.value.find((i) => i.id === input.itemId)
-    if (!newItem) throw new Error('Barang tujuan tidak ditemukan.')
+    if (!newItem) throw new Error('Target item not found.')
 
-    // Revert old effect temporarily to validate & apply cleanly
     if (oldItem) {
       if (mov.type === 'Masuk') oldItem.stockIn = Math.max(0, oldItem.stockIn - mov.quantity)
       else if (mov.type === 'Keluar') oldItem.stockOut = Math.max(0, oldItem.stockOut - mov.quantity)
     }
 
     if (input.type === 'Keluar' && input.quantity > stockAvailable(newItem)) {
-      // Restore old before throwing
       if (oldItem) {
         if (mov.type === 'Masuk') oldItem.stockIn += mov.quantity
         else if (mov.type === 'Keluar') oldItem.stockOut += mov.quantity
       }
-      throw new Error(`Jumlah keluar untuk ${newItem.name} (${input.quantity}) melebihi stok tersedia (${stockAvailable(newItem)}).`)
+      throw new Error(`Outgoing quantity for ${newItem.name} (${input.quantity}) exceeds available stock (${stockAvailable(newItem)}).`)
     }
 
     if (input.type === 'Masuk') newItem.stockIn += input.quantity
@@ -1454,14 +1525,14 @@ export const useCrmStore = defineStore('crm', () => {
       proofImageUrl: input.proofImageUrl || undefined,
     })
 
-    addActivity(`Riwayat barang ${input.type.toLowerCase()} diperbarui`, `${newItem.name} (${input.quantity} ${newItem.unit})`, 'blue')
+    addActivity(`Stock ${input.type === 'Masuk' ? 'In' : 'Out'} updated`, `${newItem.name} (${input.quantity} ${newItem.unit})`, 'blue')
     syncStockMovement(mov)
     return mov
   }
 
   const deleteStockMovement = (id: string) => {
     const idx = movements.value.findIndex((m) => m.id === id)
-    if (idx < 0) throw new Error('Riwayat transaksi barang tidak ditemukan.')
+    if (idx < 0) throw new Error('Stock movement record not found.')
     const [removed] = movements.value.splice(idx, 1)
     if (removed) {
       const item = inventory.value.find((i) => i.id === removed.itemId)
@@ -1470,7 +1541,7 @@ export const useCrmStore = defineStore('crm', () => {
         else if (removed.type === 'Keluar') item.stockOut = Math.max(0, item.stockOut - removed.quantity)
         else item.stockAdjustment = (item.stockAdjustment ?? 0) - removed.quantity
       }
-      addActivity('Riwayat barang dihapus', `${item?.name ?? 'Barang'} · ${removed.type}`, 'rose')
+      addActivity('Stock movement deleted', `${item?.name ?? 'Item'} · ${removed.type}`, 'rose')
       syncDeleteStockMovement(removed.id)
     }
     return removed
@@ -1481,12 +1552,11 @@ export const useCrmStore = defineStore('crm', () => {
     input: { date: string; pic: string; notes?: string; items: Array<{ itemId: string; physicalStock: number; notes?: string }> },
   ) => {
     const record = stockOpnames.value.find((r) => r.id === id)
-    if (!record) throw new Error('Data pemeriksaan stok tidak ditemukan.')
-    if (!input.pic.trim()) throw new Error('Nama penanggung jawab wajib diisi.')
-    if (!input.date) throw new Error('Tanggal pemeriksaan stok wajib diisi.')
-    if (!input.items.length) throw new Error('Pilih minimal satu barang.')
+    if (!record) throw new Error('Stock opname record not found.')
+    if (!input.pic.trim()) throw new Error('Staff PIC name is required.')
+    if (!input.date) throw new Error('Stock opname date is required.')
+    if (!input.items.length) throw new Error('Select at least one item.')
 
-    // Revert prior adjustments from this opname
     for (const prevLine of record.items) {
       if (prevLine.diff !== 0) {
         const item = inventory.value.find((i) => i.id === prevLine.itemId)
@@ -1497,9 +1567,9 @@ export const useCrmStore = defineStore('crm', () => {
 
     const nextItems: StockOpnameItem[] = input.items.map((row) => {
       const item = inventory.value.find((entry) => entry.id === row.itemId)
-      if (!item) throw new Error('Barang tidak ditemukan.')
+      if (!item) throw new Error('Inventory item not found.')
       if (!Number.isFinite(row.physicalStock) || row.physicalStock < 0) {
-        throw new Error(`Stok fisik untuk ${item.name} tidak boleh negatif.`)
+        throw new Error(`Physical stock count for ${item.name} cannot be negative.`)
       }
       const systemStock = stockAvailable(item)
       const diff = row.physicalStock - systemStock
@@ -1528,7 +1598,7 @@ export const useCrmStore = defineStore('crm', () => {
           quantity: line.diff,
           date: input.date,
           pic: input.pic.trim(),
-          notes: `Stok Opname${line.notes ? ` · ${line.notes}` : ''}`,
+          notes: `Stock Opname${line.notes ? ` · ${line.notes}` : ''}`,
         }
         movements.value.unshift(adjMov)
         nextOpAdjMovements.push(adjMov)
@@ -1542,14 +1612,14 @@ export const useCrmStore = defineStore('crm', () => {
       items: nextItems,
     })
 
-    addActivity('Stok opname diperbarui', `${record.opnameNumber} · ${nextItems.length} barang`, 'blue')
+    addActivity('Stock opname updated', `${record.opnameNumber} · ${nextItems.length} item(s)`, 'blue')
     syncStockOpname(record, nextOpAdjMovements)
     return record
   }
 
   const deleteStockOpname = (id: string) => {
     const idx = stockOpnames.value.findIndex((r) => r.id === id)
-    if (idx < 0) throw new Error('Data pemeriksaan stok tidak ditemukan.')
+    if (idx < 0) throw new Error('Stock opname record not found.')
     const [removed] = stockOpnames.value.splice(idx, 1)
     if (removed) {
       for (const line of removed.items) {
@@ -1559,7 +1629,7 @@ export const useCrmStore = defineStore('crm', () => {
         }
       }
       movements.value = movements.value.filter((m) => m.opnameId !== removed.id)
-      addActivity('Stok opname dihapus', removed.opnameNumber, 'rose')
+      addActivity('Stock opname deleted', removed.opnameNumber, 'rose')
       syncDeleteStockOpname(removed.id)
     }
     return removed
@@ -1576,7 +1646,7 @@ export const useCrmStore = defineStore('crm', () => {
       active: true,
     }
     inventory.value.unshift(item)
-    addActivity('Barang baru ditambahkan', `${item.name} masuk ke katalog inventory`, 'blue')
+    addActivity('New inventory item added', `${item.name} added to inventory catalog`, 'blue')
     syncInventoryItem(item)
     return item
   }
@@ -1588,9 +1658,10 @@ export const useCrmStore = defineStore('crm', () => {
     location: string
     initialStock: number
     minimumStock: number
+    imageUrl?: string
   }) => {
     const item = inventory.value.find((entry) => entry.id === id)
-    if (!item) throw new Error('Barang tidak ditemukan.')
+    if (!item) throw new Error('Inventory item not found.')
     Object.assign(item, {
       name: input.name.trim(),
       category: input.category.trim(),
@@ -1598,18 +1669,19 @@ export const useCrmStore = defineStore('crm', () => {
       location: input.location.trim(),
       initialStock: Math.max(0, Number(input.initialStock) || 0),
       minimumStock: Math.max(0, Number(input.minimumStock) || 0),
+      imageUrl: input.imageUrl !== undefined ? (input.imageUrl || undefined) : item.imageUrl,
     })
-    addActivity('Barang diperbarui', `${item.name} diperbarui di katalog inventory`, 'blue')
+    addActivity('Inventory item updated', `${item.name} updated in inventory catalog`, 'blue')
     syncInventoryItem(item)
     return item
   }
 
   const deleteInventoryItem = (id: string) => {
     const idx = inventory.value.findIndex((entry) => entry.id === id)
-    if (idx < 0) throw new Error('Barang tidak ditemukan.')
+    if (idx < 0) throw new Error('Inventory item not found.')
     const [removed] = inventory.value.splice(idx, 1)
     if (removed) {
-      addActivity('Barang dihapus', `${removed.name} dihapus dari katalog inventory`, 'rose')
+      addActivity('Inventory item deleted', `${removed.name} removed from inventory catalog`, 'rose')
       syncDeleteInventoryItem(removed.id)
     }
     return removed
@@ -1622,35 +1694,36 @@ export const useCrmStore = defineStore('crm', () => {
       code: `BTR-${String(weddingAttire.value.length + 1).padStart(4, '0')}`,
     }
     weddingAttire.value.unshift(item)
-    addActivity('Busana ditambahkan', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
+    addActivity('Attire added', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
     syncWeddingAttire(item)
     return item
   }
 
   const updateWeddingAttire = (id: string, input: Omit<WeddingAttire, 'id' | 'code'>) => {
     const item = weddingAttire.value.find((entry) => entry.id === id)
-    if (!item) throw new Error('Busana tidak ditemukan.')
+    if (!item) throw new Error('Attire not found.')
     Object.assign(item, input)
-    addActivity('Busana diperbarui', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
+    addActivity('Attire updated', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
     syncWeddingAttire(item)
     return item
   }
 
   const updateWeddingAttireStatus = (id: string, status: AttireStatus) => {
     const item = weddingAttire.value.find((entry) => entry.id === id)
-    if (!item) throw new Error('Busana tidak ditemukan.')
+    if (!item) throw new Error('Attire not found.')
     item.status = status
+    addActivity('Attire status updated', `${item.name} → ${status === 'Tersedia' ? 'Available' : status}`, 'blue')
     syncWeddingAttire(item)
   }
 
   const saveWeddingForm = (input: WeddingFittingForm) => {
-    if (!bookingFor(input.bookingId)) throw new Error('Pilih Nomor PO sebelum menyimpan form.')
+    if (!bookingFor(input.bookingId)) throw new Error('Select a PO Number before saving the fitting form.')
     const index = weddingForms.value.findIndex((form) => form.bookingId === input.bookingId)
     const form = { ...input, updatedAt: new Date().toISOString() }
     if (index >= 0) weddingForms.value.splice(index, 1, form)
     else weddingForms.value.unshift(form)
     const booking = bookingFor(input.bookingId)
-    addActivity('Form fitting disimpan', `${booking?.poNumber} · ${customerFor(booking?.customerId ?? '')?.name}`, 'green')
+    addActivity('Fitting form saved', `${booking?.poNumber} · ${customerFor(booking?.customerId ?? '')?.name}`, 'green')
     syncWeddingForm(form)
     return form
   }
@@ -1658,6 +1731,8 @@ export const useCrmStore = defineStore('crm', () => {
   const deleteWeddingForm = (bookingId: string) => {
     const index = weddingForms.value.findIndex((form) => form.bookingId === bookingId)
     if (index >= 0) weddingForms.value.splice(index, 1)
+    const booking = bookingFor(bookingId)
+    addActivity('Fitting form deleted', booking?.poNumber || bookingId, 'rose')
     syncDeleteWeddingForm(bookingId)
   }
 
@@ -1665,38 +1740,40 @@ export const useCrmStore = defineStore('crm', () => {
 
   const addEmployee = (input: { name: string; role: string; email?: string; phone?: string; active?: boolean }) => {
     const cleanName = input.name.trim()
-    if (!cleanName) throw new Error('Nama karyawan wajib diisi.')
+    if (!cleanName) throw new Error('Employee name is required.')
     const emp: EmployeeRecord = {
       id: uid(),
       name: cleanName,
-      role: input.role.trim() || 'MUA / Tim',
+      role: input.role.trim() || 'MUA / Team',
       email: input.email?.trim() || undefined,
       phone: input.phone?.trim() || undefined,
       active: input.active ?? true,
-      lastLogin: 'Baru ditambahkan',
+      lastLogin: 'Just added',
     }
     employees.value.push(emp)
-    addActivity('Karyawan ditambahkan', `${emp.name} (${emp.role})`, 'blue')
+    addActivity('Employee added', `${emp.name} (${emp.role})`, 'blue')
     syncEmployee(emp)
     return emp
   }
 
   const updateEmployee = (id: string, input: Partial<Omit<EmployeeRecord, 'id'>>) => {
     const emp = employees.value.find((e) => e.id === id)
-    if (!emp) throw new Error('Karyawan tidak ditemukan.')
+    if (!emp) throw new Error('Employee not found.')
     if (typeof input.name === 'string') emp.name = input.name.trim()
     if (typeof input.role === 'string') emp.role = input.role.trim()
     if (input.email !== undefined) emp.email = input.email?.trim() || undefined
     if (input.phone !== undefined) emp.phone = input.phone?.trim() || undefined
     if (typeof input.active === 'boolean') emp.active = input.active
+    addActivity('Employee updated', `${emp.name} (${emp.role})`, 'blue')
     syncEmployee(emp)
     return emp
   }
 
   const toggleEmployeeStatus = (id: string) => {
     const emp = employees.value.find((e) => e.id === id)
-    if (!emp) throw new Error('Karyawan tidak ditemukan.')
+    if (!emp) throw new Error('Employee not found.')
     emp.active = !emp.active
+    addActivity('Employee status updated', `${emp.name} is now ${emp.active ? 'Active' : 'Inactive'}`, emp.active ? 'green' : 'amber')
     syncEmployee(emp)
     return emp
   }
@@ -1714,15 +1791,21 @@ export const useCrmStore = defineStore('crm', () => {
 
   const toggleBookingEmployee = (bookingId: string, employeeId: string) => {
     const booking = bookingFor(bookingId)
-    if (!booking) throw new Error('Booking PO tidak ditemukan.')
+    if (!booking) throw new Error('Booking PO not found.')
     let job = jobForBooking(bookingId)
     if (!job) {
       job = { bookingId, employeeIds: [], updatedAt: new Date().toISOString() }
       jobAssignments.value.unshift(job)
     }
     const idx = job.employeeIds.indexOf(employeeId)
-    if (idx >= 0) job.employeeIds.splice(idx, 1)
-    else job.employeeIds.push(employeeId)
+    const empName = employees.value.find((e) => e.id === employeeId)?.name || 'Staff'
+    if (idx >= 0) {
+      job.employeeIds.splice(idx, 1)
+      addActivity('Staff unassigned', `${empName} removed from ${booking.poNumber}`, 'amber')
+    } else {
+      job.employeeIds.push(employeeId)
+      addActivity('Staff assigned', `${empName} assigned to ${booking.poNumber}`, 'green')
+    }
     job.updatedAt = new Date().toISOString()
     syncJobAssignment(job)
     return job
@@ -1730,7 +1813,7 @@ export const useCrmStore = defineStore('crm', () => {
 
   const setBookingJobNotes = (bookingId: string, notes: string) => {
     const booking = bookingFor(bookingId)
-    if (!booking) throw new Error('Booking PO tidak ditemukan.')
+    if (!booking) throw new Error('Booking PO not found.')
     let job = jobForBooking(bookingId)
     if (!job) {
       job = { bookingId, employeeIds: [], updatedAt: new Date().toISOString() }
@@ -1738,13 +1821,14 @@ export const useCrmStore = defineStore('crm', () => {
     }
     job.notes = notes.trim() || undefined
     job.updatedAt = new Date().toISOString()
+    addActivity('Assignment notes updated', booking.poNumber, 'blue')
     syncJobAssignment(job)
     return job
   }
 
   const updateBusinessProfile = (patch: Partial<BusinessProfile>) => {
     Object.assign(businessProfile.value, patch)
-    addActivity('Profil bisnis diperbarui', businessProfile.value.name || 'Azura Makeup Artist', 'blue')
+    addActivity('Business profile updated', businessProfile.value.name || 'Azura Makeup Artist', 'blue')
     syncBusinessProfile(businessProfile.value)
     return businessProfile.value
   }
@@ -1752,36 +1836,39 @@ export const useCrmStore = defineStore('crm', () => {
   const dropdownListRef = (group: DropdownOptionGroup) => {
     if (group === 'paymentMethods') return paymentMethods
     if (group === 'poExpenseCategories') return poExpenseCategories
-    return generalExpenseCategories
+    if (group === 'generalExpenseCategories') return generalExpenseCategories
+    if (group === 'stylingTypes') return stylingTypes
+    if (group === 'inventoryCategories') return inventoryCategories
+    return units
   }
 
   const addDropdownOption = (group: DropdownOptionGroup, rawLabel: string) => {
     const label = rawLabel.trim()
-    if (!label) throw new Error('Nama opsi dropdown wajib diisi.')
+    if (!label) throw new Error('Dropdown option label is required.')
     const target = dropdownListRef(group)
     if (target.value.some((item) => item.toLowerCase() === label.toLowerCase())) {
-      throw new Error(`Opsi "${label}" sudah tersedia.`)
+      throw new Error(`Option "${label}" already exists.`)
     }
     target.value.push(label)
-    addActivity('Pengaturan dropdown diperbarui', `Menambahkan opsi "${label}"`, 'blue')
+    addActivity('Dropdown settings updated', `Added option "${label}"`, 'blue')
     syncDropdownGroup(group, target.value)
     return label
   }
 
   const updateDropdownOption = (group: DropdownOptionGroup, oldLabel: string, rawNextLabel: string) => {
     const nextLabel = rawNextLabel.trim()
-    if (!nextLabel) throw new Error('Nama opsi dropdown tidak boleh kosong.')
+    if (!nextLabel) throw new Error('Dropdown option label cannot be empty.')
     const target = dropdownListRef(group)
     const index = target.value.indexOf(oldLabel)
-    if (index < 0) throw new Error('Opsi tidak ditemukan.')
+    if (index < 0) throw new Error('Option not found.')
     if (
       nextLabel.toLowerCase() !== oldLabel.toLowerCase()
       && target.value.some((item) => item.toLowerCase() === nextLabel.toLowerCase())
     ) {
-      throw new Error(`Opsi "${nextLabel}" sudah tersedia.`)
+      throw new Error(`Option "${nextLabel}" already exists.`)
     }
     target.value.splice(index, 1, nextLabel)
-    addActivity('Pengaturan dropdown diperbarui', `${oldLabel} → ${nextLabel}`, 'blue')
+    addActivity('Dropdown settings updated', `${oldLabel} -> ${nextLabel}`, 'blue')
     syncDropdownGroup(group, target.value)
     return nextLabel
   }
@@ -1789,10 +1876,10 @@ export const useCrmStore = defineStore('crm', () => {
   const removeDropdownOption = (group: DropdownOptionGroup, label: string) => {
     const target = dropdownListRef(group)
     if (target.value.length <= 1) {
-      throw new Error('Sisakan minimal 1 opsi aktif.')
+      throw new Error('At least 1 active option must remain.')
     }
     target.value = target.value.filter((item) => item !== label)
-    addActivity('Opsi dropdown dihapus', label, 'amber')
+    addActivity('Dropdown option removed', label, 'amber')
     syncDropdownGroup(group, target.value)
   }
 
@@ -1806,6 +1893,9 @@ export const useCrmStore = defineStore('crm', () => {
     if (remote.paymentMethods?.length) paymentMethods.value = remote.paymentMethods
     if (remote.poExpenseCategories?.length) poExpenseCategories.value = remote.poExpenseCategories
     if (remote.generalExpenseCategories?.length) generalExpenseCategories.value = remote.generalExpenseCategories
+    if (remote.stylingTypes?.length) stylingTypes.value = remote.stylingTypes
+    if (remote.inventoryCategories?.length) inventoryCategories.value = remote.inventoryCategories
+    if (remote.units?.length) units.value = remote.units
     if (remote.employees) employees.value = remote.employees
 
     if (remote.customers) customers.value = remote.customers
@@ -1877,6 +1967,9 @@ export const useCrmStore = defineStore('crm', () => {
     paymentMethods.value = fresh.paymentMethods
     poExpenseCategories.value = fresh.poExpenseCategories
     generalExpenseCategories.value = fresh.generalExpenseCategories
+    stylingTypes.value = fresh.stylingTypes
+    inventoryCategories.value = fresh.inventoryCategories
+    units.value = fresh.units
   }
 
   let persistenceTimer: ReturnType<typeof setTimeout> | undefined
@@ -1890,6 +1983,7 @@ export const useCrmStore = defineStore('crm', () => {
       weddingAttire: weddingAttire.value, weddingForms: weddingForms.value,
       employees: employees.value, jobAssignments: jobAssignments.value, businessProfile: businessProfile.value,
       paymentMethods: paymentMethods.value, poExpenseCategories: poExpenseCategories.value, generalExpenseCategories: generalExpenseCategories.value,
+      stylingTypes: stylingTypes.value, inventoryCategories: inventoryCategories.value, units: units.value,
     }))
   }
 
@@ -1904,7 +1998,7 @@ export const useCrmStore = defineStore('crm', () => {
   }
 
   if (!isSupabaseMode) {
-    watch([customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms, employees, jobAssignments, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories], () => {
+    watch([customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms, employees, jobAssignments, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories, stylingTypes, inventoryCategories, units], () => {
       schedulePersistence()
     }, { deep: true })
   }
@@ -1916,6 +2010,7 @@ export const useCrmStore = defineStore('crm', () => {
   return {
     customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms,
     employees, jobAssignments, activeEmployees, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories,
+    stylingTypes, inventoryCategories, units,
     totalBilling, totalPaid, totalReceivable, totalExpenses, totalRefunds, totalCashOut, netCashflow, upcomingBookings, lowStock, laundryUrgentAlerts,
     groupTotal, sortedOrderGroups, sortInvoiceItemsIntiFirst, invoiceTotal, bookingInvoices, bookingInvoice, bookingPayments, bookingTotal, bookingPaid, bookingBalance, customerFor, bookingFor,
     stockAvailable, stockStatus, attireSchedule, effectiveAttireStatus, attireConflictsOnDate, urgentAttireSchedules, getLaundryUrgentAlerts,
@@ -1925,6 +2020,7 @@ export const useCrmStore = defineStore('crm', () => {
     addWeddingAttire, updateWeddingAttire, updateWeddingAttireStatus, saveWeddingForm, deleteWeddingForm,
     addEmployee, updateEmployee, toggleEmployeeStatus, jobForBooking, assignedEmployeesForBooking, toggleBookingEmployee, setBookingJobNotes,
     updateBusinessProfile, addDropdownOption, updateDropdownOption, removeDropdownOption, resetDemo,
+    actionToast, showActionToast, dismissActionToast,
     dbSyncState: supabaseSyncState, refreshFromDatabase: hydrateFromSupabase, syncLocalDataToDatabase,
   }
 })

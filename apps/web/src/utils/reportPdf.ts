@@ -3,6 +3,7 @@ import autoTable from 'jspdf-autotable'
 import type {
   Booking,
   BookingRefund,
+  BusinessProfile,
   Customer,
   Expense,
   InventoryItem,
@@ -12,42 +13,19 @@ import type {
   StockMovement,
   StockOpnameRecord,
 } from '../stores/crm'
-import { formatCurrency, formatDate } from './format'
+import { REPORT_CATALOG, type ReportKey } from './reportCatalog'
+import { displayBookingStatus, displayStockStatus, formatCurrency, formatDate } from './format'
+import {
+  drawEditorialBanner,
+  drawEditorialFooter,
+  drawEditorialKpiStrip,
+  loadImageForPdf,
+  PDF_PALETTE,
+  type LoadedPdfImage,
+} from './pdfTheme'
 
-export type ReportKey =
-  | 'customers'
-  | 'bookings'
-  | 'orders'
-  | 'invoices'
-  | 'payments'
-  | 'receivables'
-  | 'expenses'
-  | 'cashflow'
-  | 'stock-in'
-  | 'stock-out'
-  | 'stock-opname'
-  | 'inventory'
-
-export interface ReportCatalogEntry {
-  key: ReportKey
-  title: string
-  description: string
-}
-
-export const REPORT_CATALOG: ReportCatalogEntry[] = [
-  { key: 'customers', title: 'Data Pelanggan', description: 'Daftar identitas pelanggan, kontak WhatsApp, dan jumlah pemesanan.' },
-  { key: 'bookings', title: 'Pemesanan / Nomor PO', description: 'Jadwal acara, lokasi, jenis penataan (Hijabdo/Hairdo), dan status PO.' },
-  { key: 'orders', title: 'Pesanan & Layanan Tambahan', description: 'Rincian pesanan awal dan tambahan per tanggal pemesanan.' },
-  { key: 'invoices', title: 'Faktur Tagihan', description: 'Nomor faktur, tanggal dibuat, nilai tagihan, dan status pembayaran.' },
-  { key: 'payments', title: 'Pembayaran', description: 'Riwayat kwitansi pembayaran diterima beserta metode pembayaran.' },
-  { key: 'receivables', title: 'Piutang Pelanggan', description: 'Daftar PO yang masih memiliki sisa tagihan belum lunas.' },
-  { key: 'expenses', title: 'Pengeluaran', description: 'Rincian biaya berdasarkan PO maupun di luar PO.' },
-  { key: 'cashflow', title: 'Pemasukan & Pengeluaran', description: 'Rekap perbandingan total pemasukan kas, pengeluaran, dan selisih bersih.' },
-  { key: 'stock-in', title: 'Barang Masuk', description: 'Riwayat penambahan stok inventaris beserta tanggal dan penanggung jawab.' },
-  { key: 'stock-out', title: 'Barang Keluar', description: 'Riwayat pemakaian/pengeluaran stok inventaris beserta tanggal dan penanggung jawab.' },
-  { key: 'stock-opname', title: 'Pemeriksaan Stok (Opname)', description: 'Rekap penyelarasan stok sistem vs fisik beserta selisih (+/-).' },
-  { key: 'inventory', title: 'Stok Inventaris Saat Ini', description: 'Posisi stok terkini seluruh barang beserta indikator warna status aman/menipis/habis.' },
-]
+export type { ReportKey, ReportCatalogEntry } from './reportCatalog'
+export { REPORT_CATALOG } from './reportCatalog'
 
 export interface ReportDataSnapshot {
   customers: Customer[]
@@ -59,6 +37,7 @@ export interface ReportDataSnapshot {
   inventory: InventoryItem[]
   movements: StockMovement[]
   stockOpnames: StockOpnameRecord[]
+  businessProfile?: BusinessProfile
   sortedOrderGroups: (invoice: Invoice) => OrderGroup[]
   groupTotal: (group: OrderGroup) => number
   invoiceTotal: (invoice: Invoice) => number
@@ -80,7 +59,7 @@ const getLastFinalY = (doc: jsPDF, fallback: number): number => {
   return last?.finalY ?? fallback
 }
 
-export const buildSelectedReportsPdfDoc = (params: {
+export const buildSelectedReportsPdfDoc = async (params: {
   selectedKeys: ReportKey[]
   fromDate?: string
   toDate?: string
@@ -88,7 +67,7 @@ export const buildSelectedReportsPdfDoc = (params: {
 }) => {
   const { selectedKeys, fromDate = '', toDate = '', data } = params
   if (!selectedKeys.length) {
-    throw new Error('Pilih minimal satu jenis laporan terlebih dahulu.')
+    throw new Error('Please select at least one report section first.')
   }
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
@@ -102,6 +81,18 @@ export const buildSelectedReportsPdfDoc = (params: {
   const findBooking = (id: string) => data.bookings.find((b) => b.id === id)
   const findInvItem = (id: string) => data.inventory.find((i) => i.id === id)
 
+  // Preload inventory photos when Current Inventory Stock is included
+  const invImages = new Map<string, LoadedPdfImage | null>()
+  if (selectedKeys.includes('inventory')) {
+    await Promise.all(
+      data.inventory.map(async (item) => {
+        if (item.imageUrl) {
+          invImages.set(item.id, await loadImageForPdf(item.imageUrl))
+        }
+      }),
+    )
+  }
+
   const ensureSpace = (y: number, needed: number) => {
     if (y + needed > bottomLimit) {
       doc.addPage()
@@ -111,36 +102,57 @@ export const buildSelectedReportsPdfDoc = (params: {
   }
 
   const drawSectionHeading = (currentY: number, title: string): number => {
-    const y = ensureSpace(currentY, 16)
-    doc.setFillColor(30, 26, 23)
-    doc.rect(marginX, y, 3, 6, 'F')
+    const y = ensureSpace(currentY, 18)
+    doc.setFillColor(...PDF_PALETTE.goldDark)
+    doc.rect(marginX, y, 3, 6.2, 'F')
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(10.5)
-    doc.setTextColor(30, 26, 23)
-    doc.text(title, marginX + 6, y + 4.7)
-    doc.setDrawColor(225, 217, 206)
-    doc.line(marginX, y + 7.5, marginX + contentWidth, y + 7.5)
-    return y + 10.5
+    doc.setTextColor(...PDF_PALETTE.ink)
+    doc.text(title, marginX + 6, y + 4.8)
+    doc.setDrawColor(...PDF_PALETTE.border)
+    doc.line(marginX, y + 7.8, marginX + contentWidth, y + 7.8)
+    return y + 11
   }
 
-  // Header Banner
-  doc.setFillColor(30, 26, 23)
-  doc.roundedRect(marginX, 14, contentWidth, 24, 2.5, 2.5, 'F')
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(13.5)
-  doc.setTextColor(246, 239, 227)
-  doc.text('LAPORAN BISNIS — AZURA MAKEUP ARTIST', marginX + 6, 23)
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8.5)
-  doc.setTextColor(218, 205, 187)
   const periodLabel = fromDate || toDate
-    ? `Periode: ${fromDate ? formatDate(fromDate) : 'Awal'} s/d ${toDate ? formatDate(toDate) : 'Sekarang'}`
-    : 'Periode: Semua Data'
-  const printedAt = `Dicetak: ${formatDate(new Date().toISOString().slice(0, 10))} · ${selectedKeys.length} bagian laporan`
-  doc.text(`${periodLabel}   |   ${printedAt}`, marginX + 6, 31.5)
+    ? `${fromDate ? formatDate(fromDate) : 'Start'} to ${toDate ? formatDate(toDate) : 'Latest'}`
+    : 'All Records'
 
-  let y = 44
+  const singleTitle = selectedKeys.length === 1
+    ? (REPORT_CATALOG.find((r) => r.key === selectedKeys[0])?.title.toUpperCase() ?? 'STUDIO BUSINESS REPORT')
+    : 'STUDIO BUSINESS REPORT'
+
+  let y = drawEditorialBanner(doc, {
+    marginX,
+    docTitle: singleTitle,
+    docSubtitle: `${selectedKeys.length} REPORT SECTION${selectedKeys.length > 1 ? 'S' : ''} · EXECUTIVE SUMMARY`,
+    rightMetaTop: periodLabel,
+    rightMetaBottom: `Generated ${formatDate(new Date().toISOString().slice(0, 10))}`,
+    businessProfile: data.businessProfile,
+  })
+
+  // Top KPI Executive Summary Strip
+  const totalRevenue = data.payments
+    .filter((p) => inDateRange(p.paidAt, fromDate, toDate))
+    .reduce((sum, p) => sum + p.amount, 0)
+  const linkedRefundIds = new Set(data.expenses.map((e) => e.refundId).filter(Boolean))
+  const totalExpensesPeriod = data.expenses
+    .filter((e) => inDateRange(e.date, fromDate, toDate))
+    .reduce((sum, e) => sum + e.amount, 0)
+  const unlinkedRefunds = (data.refunds ?? [])
+    .filter((r) => !linkedRefundIds.has(r.id) && inDateRange(r.refundDate, fromDate, toDate))
+    .reduce((sum, r) => sum + r.amount, 0)
+  const netCashPeriod = totalRevenue - totalExpensesPeriod - unlinkedRefunds
+  const totalReceivables = data.bookings.reduce((sum, b) => sum + Math.max(0, data.bookingBalance(b.id)), 0)
+
+  if (!selectedKeys.every((k) => k === 'inventory' || k === 'stock-in' || k === 'stock-out' || k === 'stock-opname')) {
+    y = drawEditorialKpiStrip(doc, y, marginX, contentWidth, [
+      { label: 'Total Cash Inflow', value: formatCurrency(totalRevenue), accent: 'success' },
+      { label: 'Total Expenses & Refunds', value: formatCurrency(totalExpensesPeriod + unlinkedRefunds), accent: 'danger' },
+      { label: 'Net Cash Position', value: formatCurrency(netCashPeriod), accent: 'info' },
+      { label: 'Open Receivables', value: formatCurrency(totalReceivables), accent: 'warning' },
+    ])
+  }
 
   const tableBase = {
     margin: { left: marginX, right: marginX, bottom: 16 },
@@ -149,16 +161,19 @@ export const buildSelectedReportsPdfDoc = (params: {
     styles: {
       font: 'helvetica',
       fontSize: 8,
-      cellPadding: 2.3,
-      textColor: [34, 47, 41] as [number, number, number],
-      lineColor: [223, 231, 227] as [number, number, number],
+      cellPadding: 2.5,
+      textColor: PDF_PALETTE.ink,
+      lineColor: PDF_PALETTE.border,
       overflow: 'linebreak' as const,
       valign: 'middle' as const,
     },
     headStyles: {
-      fillColor: [38, 32, 28] as [number, number, number],
-      textColor: [246, 239, 227] as [number, number, number],
+      fillColor: PDF_PALETTE.espressoSoft,
+      textColor: PDF_PALETTE.cream,
       fontStyle: 'bold' as const,
+    },
+    alternateRowStyles: {
+      fillColor: [251, 249, 245] as [number, number, number],
     },
   }
 
@@ -175,11 +190,11 @@ export const buildSelectedReportsPdfDoc = (params: {
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['No', 'Nama Customer', 'Telepon / WhatsApp', 'Total Booking']],
-        body: rows.length ? rows : [['-', 'Belum ada data customer', '-', '-']],
+        head: [['No.', 'Customer Name', 'Phone / WhatsApp', 'Total Bookings']],
+        body: rows.length ? rows : [['-', 'No customer records found', '-', '-']],
         columnStyles: {
           0: { cellWidth: 12, halign: 'center' },
-          1: { cellWidth: 74 },
+          1: { cellWidth: 74, fontStyle: 'bold' },
           2: { cellWidth: 56 },
           3: { cellWidth: 40, halign: 'center' },
         },
@@ -192,20 +207,20 @@ export const buildSelectedReportsPdfDoc = (params: {
         `${formatDate(b.eventDate)} ${b.eventTime || ''}`.trim(),
         b.location,
         b.stylingType || '-',
-        b.status,
+        displayBookingStatus(b.status),
       ])
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['No. PO', 'Customer', 'Tanggal Acara', 'Lokasi', 'Penataan', 'Status']],
-        body: rows.length ? rows : [['-', 'Tidak ada booking pada periode ini', '-', '-', '-', '-']],
+        head: [['PO No.', 'Customer', 'Event Date', 'Venue', 'Styling', 'Status']],
+        body: rows.length ? rows : [['-', 'No bookings in selected date range', '-', '-', '-', '-']],
         columnStyles: {
           0: { cellWidth: 28, fontStyle: 'bold' },
           1: { cellWidth: 38 },
           2: { cellWidth: 32 },
           3: { cellWidth: 42 },
           4: { cellWidth: 20 },
-          5: { cellWidth: 22 },
+          5: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
         },
       })
     } else if (entry.key === 'orders') {
@@ -221,7 +236,7 @@ export const buildSelectedReportsPdfDoc = (params: {
           rows.push([
             booking?.poNumber ?? '-',
             cust?.name ?? '-',
-            group.kind === 'Awal' ? 'Pesanan Awal' : 'Tambahan',
+            group.kind === 'Awal' ? 'Initial Order' : 'Add-on',
             formatDate(group.orderDate),
             itemSummary || '-',
             formatCurrency(data.groupTotal(group)),
@@ -231,8 +246,8 @@ export const buildSelectedReportsPdfDoc = (params: {
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['No. PO', 'Customer', 'Jenis', 'Tgl Pesan', 'Rincian Layanan', 'Total Kelompok']],
-        body: rows.length ? rows : [['-', 'Tidak ada pesanan pada periode ini', '-', '-', '-', '-']],
+        head: [['PO No.', 'Customer', 'Type', 'Order Date', 'Services Breakdown', 'Group Total']],
+        body: rows.length ? rows : [['-', 'No orders found in selected period', '-', '-', '-', '-']],
         columnStyles: {
           0: { cellWidth: 26, fontStyle: 'bold' },
           1: { cellWidth: 30 },
@@ -263,8 +278,8 @@ export const buildSelectedReportsPdfDoc = (params: {
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['No. Invoice', 'No. PO', 'Customer', 'Tgl Dibuat', 'Tagihan', 'Dibayar', 'Sisa']],
-        body: rows.length ? rows : [['-', '-', 'Tidak ada invoice pada periode ini', '-', '-', '-', '-']],
+        head: [['Invoice No.', 'PO No.', 'Customer', 'Issued Date', 'Total Billed', 'Paid', 'Balance']],
+        body: rows.length ? rows : [['-', '-', 'No invoices found in selected period', '-', '-', '-', '-']],
         columnStyles: {
           0: { cellWidth: 28, fontStyle: 'bold' },
           1: { cellWidth: 26 },
@@ -291,13 +306,13 @@ export const buildSelectedReportsPdfDoc = (params: {
         ]
       })
       if (rows.length) {
-        rows.push(['TOTAL', '', '', '', '', formatCurrency(totalAmt)])
+        rows.push(['TOTAL RECEIVED', '', '', '', '', formatCurrency(totalAmt)])
       }
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['No. Kwitansi', 'No. PO', 'Customer', 'Tanggal', 'Metode', 'Nominal']],
-        body: rows.length ? rows : [['-', '-', 'Tidak ada pembayaran pada periode ini', '-', '-', '-']],
+        head: [['Receipt No.', 'PO No.', 'Customer', 'Paid Date', 'Method', 'Amount']],
+        body: rows.length ? rows : [['-', '-', 'No payment receipts in selected period', '-', '-', '-']],
         columnStyles: {
           0: { cellWidth: 30, fontStyle: 'bold' },
           1: { cellWidth: 28 },
@@ -319,13 +334,13 @@ export const buildSelectedReportsPdfDoc = (params: {
         formatCurrency(data.bookingBalance(b.id)),
       ])
       if (rows.length) {
-        rows.push(['TOTAL PIUTANG', '', '', '', '', formatCurrency(totalReceivable)])
+        rows.push(['TOTAL RECEIVABLES', '', '', '', '', formatCurrency(totalReceivable)])
       }
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['No. PO', 'Customer', 'Tgl Acara', 'Total Tagihan', 'Sudah Dibayar', 'Sisa Piutang']],
-        body: rows.length ? rows : [['-', 'Tidak ada piutang tersisa', '-', '-', '-', '-']],
+        head: [['PO No.', 'Customer', 'Event Date', 'Total Billing', 'Total Paid', 'Balance Due']],
+        body: rows.length ? rows : [['-', 'No remaining receivables', '-', '-', '-', '-']],
         columnStyles: {
           0: { cellWidth: 28, fontStyle: 'bold' },
           1: { cellWidth: 42 },
@@ -341,50 +356,53 @@ export const buildSelectedReportsPdfDoc = (params: {
       const rows = filtered.map((e) => [
         formatDate(e.date),
         e.description,
-        e.category,
-        e.bookingId ? (findBooking(e.bookingId)?.poNumber ?? '-') : 'Operasional umum',
+        e.source === 'Bayar Cancel' ? `${e.category} (Cancel Payment)` : e.category,
+        e.bookingId ? (findBooking(e.bookingId)?.poNumber ?? '-') : 'Studio Overhead',
         e.method,
         formatCurrency(e.amount),
       ])
       if (rows.length) {
-        rows.push(['TOTAL', '', '', '', '', formatCurrency(totalExp)])
+        rows.push(['TOTAL EXPENSES', '', '', '', '', formatCurrency(totalExp)])
       }
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['Tanggal', 'Deskripsi', 'Kategori', 'No. PO', 'Metode', 'Nominal']],
-        body: rows.length ? rows : [['-', 'Tidak ada pengeluaran pada periode ini', '-', '-', '-', '-']],
+        head: [['Date', 'Description', 'Category & Source', 'PO Ref', 'Method', 'Amount']],
+        body: rows.length ? rows : [['-', 'No expense records in selected period', '-', '-', '-', '-']],
         columnStyles: {
-          0: { cellWidth: 25 },
-          1: { cellWidth: 52 },
-          2: { cellWidth: 26 },
-          3: { cellWidth: 29 },
+          0: { cellWidth: 24 },
+          1: { cellWidth: 50 },
+          2: { cellWidth: 32 },
+          3: { cellWidth: 26 },
           4: { cellWidth: 20 },
           5: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
         },
       })
     } else if (entry.key === 'cashflow') {
-      const paidPeriod = data.payments.filter((p) => inDateRange(p.paidAt, fromDate, toDate)).reduce((s, p) => s + p.amount, 0)
-      const expPeriod = data.expenses.filter((e) => inDateRange(e.date, fromDate, toDate)).reduce((s, e) => s + e.amount, 0)
-      const refundPeriod = (data.refunds ?? []).filter((r) => inDateRange(r.refundDate, fromDate, toDate)).reduce((s, r) => s + r.amount, 0)
-      const net = paidPeriod - expPeriod - refundPeriod
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['Komponen Keuangan', 'Nominal']],
+        head: [['Cashflow Component', 'Amount']],
         body: [
-          ['Total Pemasukan (Pembayaran Diterima)', formatCurrency(paidPeriod)],
-          ['Total Pengeluaran Operasional & PO', formatCurrency(expPeriod)],
-          ['Total Pengembalian Uang (Refund PO Batal)', formatCurrency(refundPeriod)],
-          ['Selisih Kas Bersih (Pemasukan − Pengeluaran − Refund)', formatCurrency(net)],
+          ['Total Cash Inflow (Payments Received)', formatCurrency(totalRevenue)],
+          ['Total PO & Studio Operating Expenses (incl. Cancel Payouts)', formatCurrency(totalExpensesPeriod)],
+          ['Additional Unlinked Cancellation Refunds', formatCurrency(unlinkedRefunds)],
+          ['Net Cash Position (Inflow − Total Outflow)', formatCurrency(netCashPeriod)],
         ],
         columnStyles: {
           0: { cellWidth: contentWidth - 55, fontStyle: 'bold' },
           1: { cellWidth: 55, halign: 'right', fontStyle: 'bold' },
         },
+        didParseCell: (hookData) => {
+          if (hookData.section === 'body' && hookData.row.index === 3) {
+            hookData.cell.styles.fillColor = PDF_PALETTE.linen
+            hookData.cell.styles.fontStyle = 'bold'
+          }
+        },
       })
     } else if (entry.key === 'stock-in' || entry.key === 'stock-out') {
       const targetType = entry.key === 'stock-in' ? 'Masuk' : 'Keluar'
+      const actionLabel = entry.key === 'stock-in' ? 'Stock In' : 'Stock Out'
       const filtered = data.movements.filter((m) => m.type === targetType && inDateRange(m.date, fromDate, toDate))
       const rows = filtered.map((m) => {
         const item = findInvItem(m.itemId)
@@ -399,8 +417,8 @@ export const buildSelectedReportsPdfDoc = (params: {
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['Tanggal', 'Nama Barang', 'Qty', 'PIC', 'Keterangan']],
-        body: rows.length ? rows : [['-', `Tidak ada barang ${targetType.toLowerCase()} pada periode ini`, '-', '-', '-']],
+        head: [['Date', 'Item Name', 'Qty', 'PIC', 'Notes']],
+        body: rows.length ? rows : [['-', `No ${actionLabel.toLowerCase()} records in selected period`, '-', '-', '-']],
         columnStyles: {
           0: { cellWidth: 26 },
           1: { cellWidth: 54, fontStyle: 'bold' },
@@ -429,8 +447,8 @@ export const buildSelectedReportsPdfDoc = (params: {
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['No. Opname', 'Tanggal', 'PIC', 'Barang', 'Sistem', 'Fisik', 'Selisih']],
-        body: rows.length ? rows : [['-', '-', '-', 'Belum ada riwayat stok opname pada periode ini', '-', '-', '-']],
+        head: [['Opname No.', 'Date', 'PIC', 'Item', 'System', 'Physical', 'Variance']],
+        body: rows.length ? rows : [['-', '-', '-', 'No stock opname history in selected period', '-', '-', '-']],
         columnStyles: {
           0: { cellWidth: 26, fontStyle: 'bold' },
           1: { cellWidth: 24 },
@@ -445,82 +463,70 @@ export const buildSelectedReportsPdfDoc = (params: {
       const safeCount = data.inventory.filter((i) => data.stockStatus(i) === 'Aman').length
       const lowCount = data.inventory.filter((i) => data.stockStatus(i) === 'Menipis').length
       const emptyCount = data.inventory.filter((i) => data.stockStatus(i) === 'Habis').length
-      const nowTime = new Intl.DateTimeFormat('id-ID', {
-        day: '2-digit',
-        month: 'long',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(new Date())
 
-      y = ensureSpace(y, 40)
-      // Spacious, padded info banner + clean pill indicators
-      doc.setFillColor(250, 246, 239)
-      doc.setDrawColor(218, 205, 185)
-      doc.roundedRect(marginX, y, contentWidth, 16.5, 2.2, 2.2, 'FD')
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(8.8)
-      doc.setTextColor(33, 29, 26)
-      doc.text(`Stok inventaris sampai dengan saat ini (${nowTime} WIB)`, marginX + 5, y + 6.2)
-
-      // Colored mini pills for Aman / Menipis / Habis / Total
-      const pills: Array<{ label: string; bg: [number, number, number]; fg: [number, number, number] }> = [
-        { label: `Aman: ${safeCount}`, bg: [225, 243, 232], fg: [34, 102, 68] },
-        { label: `Menipis: ${lowCount}`, bg: [253, 240, 212], fg: [156, 98, 22] },
-        { label: `Habis: ${emptyCount}`, bg: [252, 228, 224], fg: [176, 56, 46] },
-        { label: `Total: ${data.inventory.length} barang`, bg: [236, 229, 217], fg: [60, 50, 40] },
-      ]
-      let pillX = marginX + 5
-      const pillY = y + 9.2
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7.5)
-      for (const pill of pills) {
-        const w = doc.getTextWidth(pill.label) + 7
-        doc.setFillColor(...pill.bg)
-        doc.roundedRect(pillX, pillY, w, 5.2, 1.5, 1.5, 'F')
-        doc.setTextColor(...pill.fg)
-        doc.text(pill.label, pillX + 3.5, pillY + 3.7)
-        pillX += w + 3.5
-      }
-
-      y += 20
+      y = drawEditorialKpiStrip(doc, ensureSpace(y, 24), marginX, contentWidth, [
+        { label: 'Total SKU Items', value: `${data.inventory.length} Items`, accent: 'espresso' },
+        { label: 'In Stock', value: `${safeCount} Items`, accent: 'success' },
+        { label: 'Low Stock Alert', value: `${lowCount} Items`, accent: 'warning' },
+        { label: 'Out of Stock', value: `${emptyCount} Items`, accent: 'danger' },
+      ])
 
       const rows = data.inventory.map((item) => [
+        '',
         item.code,
         item.name,
         item.category,
         item.location,
         `${data.stockAvailable(item)} ${item.unit}`,
         `${item.minimumStock} ${item.unit}`,
-        data.stockStatus(item),
+        displayStockStatus(data.stockStatus(item)),
       ])
       autoTable(doc, {
         ...tableBase,
         startY: y,
-        head: [['Kode', 'Nama Barang', 'Kategori', 'Lokasi', 'Stok Saat Ini', 'Minimum', 'Status']],
-        body: rows.length ? rows : [['-', 'Belum ada barang inventaris', '-', '-', '-', '-', '-']],
+        styles: {
+          ...tableBase.styles,
+          minCellHeight: data.inventory.length ? 12 : 9,
+        },
+        head: [['Photo', 'Code', 'Item Name', 'Category', 'Storage', 'Current Stock', 'Minimum', 'Status']],
+        body: rows.length ? rows : [['', '-', 'No inventory items yet', '-', '-', '-', '-', '-']],
         columnStyles: {
-          0: { cellWidth: 22, fontStyle: 'bold' },
-          1: { cellWidth: 42 },
-          2: { cellWidth: 26 },
-          3: { cellWidth: 24 },
-          4: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
-          5: { cellWidth: 22, halign: 'center' },
-          6: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+          0: { cellWidth: 14, halign: 'center' },
+          1: { cellWidth: 20, fontStyle: 'bold' },
+          2: { cellWidth: 42, fontStyle: 'bold' },
+          3: { cellWidth: 25 },
+          4: { cellWidth: 21 },
+          5: { cellWidth: 21, halign: 'center', fontStyle: 'bold' },
+          6: { cellWidth: 19, halign: 'center' },
+          7: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
         },
         didParseCell: (hookData) => {
-          if (hookData.section !== 'body' || hookData.column.index !== 6) return
+          if (hookData.section !== 'body' || hookData.column.index !== 7) return
           const val = String(hookData.cell.raw ?? '')
-          if (val === 'Aman') {
-            hookData.cell.styles.fillColor = [225, 243, 232]
-            hookData.cell.styles.textColor = [34, 102, 68]
-          } else if (val === 'Menipis') {
-            hookData.cell.styles.fillColor = [253, 240, 212]
-            hookData.cell.styles.textColor = [156, 98, 22]
-          } else if (val === 'Habis') {
-            hookData.cell.styles.fillColor = [252, 228, 224]
-            hookData.cell.styles.textColor = [176, 56, 46]
+          if (val === 'In Stock') {
+            hookData.cell.styles.fillColor = PDF_PALETTE.successBg
+            hookData.cell.styles.textColor = PDF_PALETTE.successFg
+          } else if (val === 'Low Stock') {
+            hookData.cell.styles.fillColor = PDF_PALETTE.warningBg
+            hookData.cell.styles.textColor = PDF_PALETTE.warningFg
+          } else if (val === 'Out of Stock') {
+            hookData.cell.styles.fillColor = PDF_PALETTE.dangerBg
+            hookData.cell.styles.textColor = PDF_PALETTE.dangerFg
+          }
+        },
+        didDrawCell: (hookData) => {
+          if (hookData.section !== 'body' || hookData.column.index !== 0) return
+          const item = data.inventory[hookData.row.index]
+          if (!item) return
+          const img = invImages.get(item.id)
+          if (!img) return
+          const box = Math.min(hookData.cell.width - 2.6, hookData.cell.height - 2.2, 9.8)
+          const x = hookData.cell.x + (hookData.cell.width - box) / 2
+          const iy = hookData.cell.y + (hookData.cell.height - box) / 2
+          try {
+            doc.addImage(img.dataUrl, img.format, x, iy, box, box)
+          } catch {
+            // Skip invalid frame
           }
         },
       })
@@ -529,26 +535,21 @@ export const buildSelectedReportsPdfDoc = (params: {
     y = getLastFinalY(doc, y) + 8
   }
 
-  const totalPages = doc.getNumberOfPages()
-  for (let p = 1; p <= totalPages; p += 1) {
-    doc.setPage(p)
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.8)
-    doc.setTextColor(122, 112, 102)
-    doc.text(`Hak Cipta © ${new Date().getFullYear()} Daysheet.id`, marginX, pageHeight - 8)
-    doc.text(`Halaman ${p} dari ${totalPages}`, pageWidth - marginX, pageHeight - 8, { align: 'right' })
-  }
+  drawEditorialFooter(doc, {
+    marginX,
+    showPageNumbers: true,
+  })
 
   return doc
 }
 
-export const downloadSelectedReportsPdf = (params: {
+export const downloadSelectedReportsPdf = async (params: {
   selectedKeys: ReportKey[]
   fromDate?: string
   toDate?: string
   data: ReportDataSnapshot
 }) => {
-  const doc = buildSelectedReportsPdfDoc(params)
-  const suffix = params.selectedKeys.length === 1 ? params.selectedKeys[0] : 'Gabungan'
-  doc.save(`Laporan-Azura-MUA-${suffix}.pdf`)
+  const doc = await buildSelectedReportsPdfDoc(params)
+  const suffix = params.selectedKeys.length === 1 ? params.selectedKeys[0] : 'Combined'
+  doc.save(`Azura-MUA-Report-${suffix}.pdf`)
 }

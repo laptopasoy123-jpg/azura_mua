@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import {
   Plus, Search, Shirt, ZoomIn, UploadCloud, LoaderCircle, Save, CalendarHeart,
   Ruler, UsersRound, Store, Download, Trash2, Image as ImageIcon, Pencil,
-  CalendarDays, AlertTriangle, ChevronLeft, ChevronRight, ClipboardList, CheckCircle2,
+  CalendarDays, AlertTriangle, ChevronLeft, ChevronRight, ClipboardList, CheckCircle2, RotateCcw,
 } from '@lucide/vue'
 import UiModal from '../components/UiModal.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -13,20 +13,20 @@ import {
   type AttireCategory,
   type AttireScheduleEntry,
   type AttireStatus,
+  type Booking,
   type WeddingAttire,
   type WeddingEventDetail,
   type WeddingFittingForm,
 } from '../stores/crm'
-import { formatDate, uid } from '../utils/format'
-import { generateWeddingFittingPdf, downloadWeddingAttireReportPdf } from '../utils/weddingPdf'
+import { displayAttireStatus, formatDate, uid } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 
 const store = useCrmStore()
 const portalTab = ref<'inventory' | 'form' | 'database'>('inventory')
 
 const search = ref('')
-const category = ref<'Semua' | AttireCategory>('Semua')
-const status = ref<'Semua' | AttireStatus>('Semua')
+const category = ref<'All' | AttireCategory>('All')
+const status = ref<'All' | AttireStatus>('All')
 const showAttireForm = ref(false)
 const editingAttireId = ref('')
 const showZoom = ref(false)
@@ -38,6 +38,7 @@ const saveMessage = ref('')
 const lastSavedBookingId = ref('')
 const formError = ref('')
 const downloadingPdf = ref(false)
+const downloadingSchedulePdf = ref(false)
 
 // Calendar modal state per attire
 const showCalendarModal = ref(false)
@@ -46,59 +47,71 @@ const calendarYear = ref(2026)
 const calendarMonth = ref(10)
 const selectedCalendarDate = ref('')
 
-// Status change alert modal (ONLY triggers when schedule is Hari Ini or Besok H-1)
+// Blocked status alert (e.g. cannot set Available on event day) & H-1 Laundry alert
 const showStatusAlert = ref(false)
+const statusAlertBlocked = ref(false)
 const pendingAlertAttire = ref<WeddingAttire | null>(null)
 const pendingAlertTargetStatus = ref<AttireStatus>('Laundry')
+const statusAlertConflicts = ref<AttireScheduleEntry[]>([])
 
 // Floating success window after saving fitting form
 const showSaveSuccessModal = ref(false)
 const lastSavedSummary = ref('')
 
+// Inline floating edit modal for Tab 3 (Saved Fitting Database)
+const showEditFittingModal = ref(false)
+const modalFormError = ref('')
+
 // Date-range PDF report for attire schedule
 const scheduleReportFrom = ref('')
 const scheduleReportTo = ref('')
 
-const downloadScheduleReport = () => {
-  downloadWeddingAttireReportPdf({
-    fromDate: scheduleReportFrom.value,
-    toDate: scheduleReportTo.value,
-    bookings: store.bookings,
-    customers: store.customers,
-    weddingForms: store.weddingForms,
-    attireList: store.weddingAttire,
-    effectiveStatus: store.effectiveAttireStatus,
-    attireSchedule: store.attireSchedule,
-    businessProfile: store.businessProfile,
-  })
+const downloadScheduleReport = async () => {
+  downloadingSchedulePdf.value = true
+  try {
+    const { downloadWeddingAttireReportPdf } = await import('../utils/weddingPdf')
+    await downloadWeddingAttireReportPdf({
+      fromDate: scheduleReportFrom.value,
+      toDate: scheduleReportTo.value,
+      bookings: store.bookings,
+      customers: store.customers,
+      weddingForms: store.weddingForms,
+      attireList: store.weddingAttire,
+      effectiveStatus: store.effectiveAttireStatus,
+      attireSchedule: store.attireSchedule,
+      businessProfile: store.businessProfile,
+    })
+  } finally {
+    downloadingSchedulePdf.value = false
+  }
 }
 
 const familyUniformFields = [
-  ['ibuBesan', 'Ibu & Besan', 'Warna / model / opsi hijab'],
-  ['bapakBesan', 'Bapak & Besan', 'Detail seragam'],
-  ['terimaTamu', 'Terima Tamu', 'Warna / model / opsi hijab'],
+  ['ibuBesan', 'Mother & In-laws', 'Color / style / hijab option'],
+  ['bapakBesan', 'Father & In-laws', 'Uniform details'],
+  ['terimaTamu', 'Guest Greeters', 'Color / style / hijab option'],
 ] as const
 
 const addonUniformFields = [
-  ['melati', 'Melati', 'Detail melati'],
-  ['henna', 'Henna', 'Detail henna'],
-  ['tambahan', 'Tambahan Lain', 'Catatan tambahan'],
+  ['melati', 'Fresh Jasmine', 'Jasmine floral details'],
+  ['henna', 'Henna Art', 'Henna design details'],
+  ['tambahan', 'Other Extras', 'Additional notes'],
 ] as const
 
 const measurementGroups = [
   { key: 'bride', label: 'Bride', fields: ['LD', 'LPinggang', 'LPanggul', 'LLenganA', 'LLenganB', 'PLengan', 'Others adj', 'Shoes'] },
   { key: 'groom', label: 'Groom', fields: ['LD', 'LLengan', 'LPerut', 'PLengan', 'PCelana', 'LKepala', 'Others adj', 'Shoes'] },
-  { key: 'ibu', label: 'Ibu', fields: ['LD', 'LLengan', 'PLengan'] },
-  { key: 'ayah', label: 'Ayah', fields: ['LD', 'PLengan', 'PCelana', 'LKepala', 'Slop'], required: ['LKepala', 'Slop'] },
-  { key: 'kembarMayangCe', label: 'Kembar Mayang Ce', fields: ['LD', 'Slop'] },
-  { key: 'kembarMayangCo', label: 'Kembar Mayang Co', fields: ['LD', 'Slop'] },
-  { key: 'terimaTamu', label: 'Terima Tamu', fields: ['List LD'] },
+  { key: 'ibu', label: 'Mother', fields: ['LD', 'LLengan', 'PLengan'] },
+  { key: 'ayah', label: 'Father', fields: ['LD', 'PLengan', 'PCelana', 'LKepala', 'Slop'], required: ['LKepala', 'Slop'] },
+  { key: 'kembarMayangCe', label: 'Kembar Mayang (F)', fields: ['LD', 'Slop'] },
+  { key: 'kembarMayangCo', label: 'Kembar Mayang (M)', fields: ['LD', 'Slop'] },
+  { key: 'terimaTamu', label: 'Guest Greeters', fields: ['List LD'] },
 ]
 
-const softlensOptions = ['Normal', 'Plus', 'Silinder'] as const
+const softlensOptions = ['Normal', 'Plus', 'Astigmatism (Cylinder)'] as const
 
 const vendorFields = [
-  ['deco', 'Deco'], ['doc', 'Doc'], ['wcc', 'WCC'], ['mc', 'MC'], ['tenda', 'Tenda'], ['seserahan', 'Seserahan'], ['wo', 'WO'],
+  ['deco', 'Decoration'], ['doc', 'Documentation'], ['wcc', 'Wedding Cake / Catering'], ['mc', 'Master of Ceremony'], ['tenda', 'Tent & Stage'], ['seserahan', 'Seserahan'], ['wo', 'Wedding Organizer'],
 ] as const
 
 const createBlankEvent = (number: 1 | 2 | 3): WeddingEventDetail => ({
@@ -134,44 +147,82 @@ const blankForm = (bookingId = ''): WeddingFittingForm => ({
 })
 
 const fittingForm = reactive<WeddingFittingForm>(blankForm())
+const editModalForm = reactive<WeddingFittingForm>(blankForm())
 const attireForm = reactive({ name: '', category: 'Bride' as AttireCategory, size: '', status: 'Tersedia' as AttireStatus, notes: '', imageUrl: '' })
 
 const effectiveStatus = (item: WeddingAttire) => store.effectiveAttireStatus(item)
 
+// Cached per-attire schedules so wardrobe cards don't recompute on every render pass
+const scheduleMapByAttire = computed(() => {
+  const map = new Map<string, { active: AttireScheduleEntry[]; all: AttireScheduleEntry[]; status: AttireStatus }>()
+  for (const item of store.weddingAttire) {
+    map.set(item.id, {
+      active: store.attireSchedule(item.id),
+      all: store.attireSchedule(item.id, { includePast: true }),
+      status: effectiveStatus(item),
+    })
+  }
+  return map
+})
+
+const attireSummaryCounts = computed(() => {
+  let available = 0
+  let booked = 0
+  let inUse = 0
+  let laundry = 0
+  for (const item of store.weddingAttire) {
+    const st = scheduleMapByAttire.value.get(item.id)?.status ?? effectiveStatus(item)
+    if (st === 'Tersedia') available += 1
+    else if (st === 'Booked') booked += 1
+    else if (st === 'Terpakai') inUse += 1
+    else laundry += 1
+  }
+  return { available, booked, inUse, laundry }
+})
+
 const filteredAttire = computed(() => store.weddingAttire.filter((item) => {
   const query = search.value.toLowerCase()
-  const eff = effectiveStatus(item)
+  const eff = scheduleMapByAttire.value.get(item.id)?.status ?? effectiveStatus(item)
   return (!query || item.name.toLowerCase().includes(query) || item.code.toLowerCase().includes(query) || item.size.toLowerCase().includes(query))
-    && (category.value === 'Semua' || item.category === category.value)
-    && (status.value === 'Semua' || eff === status.value)
+    && (category.value === 'All' || item.category === category.value)
+    && (status.value === 'All' || eff === status.value)
 }))
+
+// Hide POs that already have a saved fitting form unless currently editing that specific PO
+const filledBookingIds = computed(() => new Set(store.weddingForms.map((f) => f.bookingId)))
+const fittingBookingOptions = computed(() =>
+  store.bookings.filter(
+    (b) => b.status !== 'Dibatalkan' && (!filledBookingIds.value.has(b.id) || fittingForm.bookingId === b.id),
+  ),
+)
 
 const brideCatalog = computed(() => store.weddingAttire.filter((item) => item.category === 'Bride'))
 const groomCatalog = computed(() => store.weddingAttire.filter((item) => item.category === 'Groom'))
 const selectedBooking = computed(() => store.bookingFor(fittingForm.bookingId))
+const modalEditingBooking = computed(() => store.bookingFor(editModalForm.bookingId))
 const savedFormForCurrentBooking = computed(() => store.weddingForms.find((form) => form.bookingId === fittingForm.bookingId))
 const lastSavedForm = computed(() => store.weddingForms.find((form) => form.bookingId === lastSavedBookingId.value))
 const selectedAttire = (id: string) => store.weddingAttire.find((item) => item.id === id)
 
-const isAttireLocked = (item: WeddingAttire) => {
+const isAttireLockedForBooking = (item: WeddingAttire, targetBooking?: Booking) => {
   const eff = effectiveStatus(item)
   if (eff === 'Laundry') return true
-  if (selectedBooking.value?.eventDate) {
-    return store.attireConflictsOnDate(item.id, selectedBooking.value.eventDate, selectedBooking.value.id).length > 0
+  if (targetBooking?.eventDate) {
+    return store.attireConflictsOnDate(item.id, targetBooking.eventDate, targetBooking.id).length > 0
   }
-  return eff === 'Terpakai'
+  return eff === 'Terpakai' || eff === 'Booked'
 }
 
-const buildAttireOptions = (list: WeddingAttire[]): AttireSelectOption[] =>
+const buildAttireOptionsForBooking = (list: WeddingAttire[], targetBooking?: Booking): AttireSelectOption[] =>
   list.map((item) => {
     const eff = effectiveStatus(item)
-    if (selectedBooking.value?.eventDate) {
-      const conflicts = store.attireConflictsOnDate(item.id, selectedBooking.value.eventDate, selectedBooking.value.id)
+    if (targetBooking?.eventDate) {
+      const conflicts = store.attireConflictsOnDate(item.id, targetBooking.eventDate, targetBooking.id)
       if (conflicts.length) {
         return {
           item,
           statusKind: 'booked',
-          statusLabel: `Terpakai (${conflicts[0]!.customerName}) · Terkunci`,
+          statusLabel: `Booked (${conflicts[0]!.customerName}) · Locked`,
           locked: true,
         }
       }
@@ -180,57 +231,58 @@ const buildAttireOptions = (list: WeddingAttire[]): AttireSelectOption[] =>
       return {
         item,
         statusKind: 'laundry',
-        statusLabel: 'Laundry · Terkunci',
+        statusLabel: 'Laundry · Locked',
         locked: true,
       }
     }
-    if (eff === 'Terpakai') {
-      if (selectedBooking.value?.eventDate) {
+    if (eff === 'Terpakai' || eff === 'Booked') {
+      if (targetBooking?.eventDate) {
         return {
           item,
           statusKind: 'available',
-          statusLabel: 'Tersedia tgl ini',
+          statusLabel: 'Available on this date',
           locked: false,
         }
       }
       return {
         item,
         statusKind: 'booked',
-        statusLabel: 'Terpakai · Terkunci',
+        statusLabel: `${displayAttireStatus(eff)} · Locked`,
         locked: true,
       }
     }
     return {
       item,
       statusKind: 'available',
-      statusLabel: 'Tersedia',
+      statusLabel: 'Available',
       locked: false,
     }
   })
 
-const brideAttireOptions = computed(() => buildAttireOptions(brideCatalog.value))
-const groomAttireOptions = computed(() => buildAttireOptions(groomCatalog.value))
+const brideAttireOptions = computed(() => buildAttireOptionsForBooking(brideCatalog.value, selectedBooking.value))
+const groomAttireOptions = computed(() => buildAttireOptionsForBooking(groomCatalog.value, selectedBooking.value))
+const modalBrideAttireOptions = computed(() => buildAttireOptionsForBooking(brideCatalog.value, modalEditingBooking.value))
+const modalGroomAttireOptions = computed(() => buildAttireOptionsForBooking(groomCatalog.value, modalEditingBooking.value))
 
-const attireSelectionAlert = (attireId: string): string => {
+const attireSelectionAlert = (attireId: string, targetBooking: Booking | undefined = selectedBooking.value): string => {
   if (!attireId) return ''
   const item = selectedAttire(attireId)
   if (!item) return ''
   const warnings: string[] = []
   if (item.status === 'Laundry') {
-    warnings.push('Busana ini sedang berstatus Laundry / perawatan.')
+    warnings.push('This attire is currently in Laundry / maintenance.')
   }
-  if (selectedBooking.value?.eventDate) {
-    const conflicts = store.attireConflictsOnDate(attireId, selectedBooking.value.eventDate, selectedBooking.value.id)
+  if (targetBooking?.eventDate) {
+    const conflicts = store.attireConflictsOnDate(attireId, targetBooking.eventDate, targetBooking.id)
     if (conflicts.length) {
       const c = conflicts[0]!
-      warnings.push(`Bentrok jadwal! Sudah dipakai ${c.poNumber} (${c.customerName}) pada ${formatDate(c.eventDate)}.`)
+      warnings.push(`Schedule conflict! Already reserved by ${c.poNumber} (${c.customerName}) on ${formatDate(c.eventDate)}.`)
     }
   }
   return warnings.join(' ')
 }
 
-const loadBookingIntoForm = (bookingId: string) => {
-  formError.value = ''
+const buildNormalizedForm = (bookingId: string): WeddingFittingForm => {
   const existing = store.weddingForms.find((item) => item.bookingId === bookingId)
   const next = existing ? JSON.parse(JSON.stringify(existing)) as WeddingFittingForm : blankForm(bookingId)
   if (!next.events?.length) next.events = [createBlankEvent(1)]
@@ -242,7 +294,12 @@ const loadBookingIntoForm = (bookingId: string) => {
   }))
   if (next.manggoloBlangkon === undefined) next.manggoloBlangkon = null
   if (next.manggoloSlop === undefined) next.manggoloSlop = null
-  Object.assign(fittingForm, next)
+  return next
+}
+
+const loadBookingIntoForm = (bookingId: string) => {
+  formError.value = ''
+  Object.assign(fittingForm, buildNormalizedForm(bookingId))
 }
 
 watch(() => fittingForm.bookingId, (bookingId, prevId) => {
@@ -253,22 +310,23 @@ watch(() => fittingForm.bookingId, (bookingId, prevId) => {
   }
 })
 
+// Keep user on Tab 3 (Saved Fitting Database) and edit in a floating popup modal
 const editSavedFitting = (bookingId: string) => {
-  saveMessage.value = ''
-  loadBookingIntoForm(bookingId)
-  portalTab.value = 'form'
+  modalFormError.value = ''
+  Object.assign(editModalForm, buildNormalizedForm(bookingId))
+  showEditFittingModal.value = true
 }
 
-const addEventSection = () => {
-  if (fittingForm.events.length >= 3) return
-  const nextNum = (fittingForm.events.length + 1) as 1 | 2 | 3
-  fittingForm.events.push(createBlankEvent(nextNum))
+const addEventSectionTo = (target: WeddingFittingForm) => {
+  if (target.events.length >= 3) return
+  const nextNum = (target.events.length + 1) as 1 | 2 | 3
+  target.events.push(createBlankEvent(nextNum))
 }
 
-const removeEventSection = (index: number) => {
-  if (index === 0 || fittingForm.events.length <= 1) return
-  fittingForm.events.splice(index, 1)
-  fittingForm.events.forEach((ev, idx) => {
+const removeEventSectionFrom = (target: WeddingFittingForm, index: number) => {
+  if (index === 0 || target.events.length <= 1) return
+  target.events.splice(index, 1)
+  target.events.forEach((ev, idx) => {
     ev.number = (idx + 1) as 1 | 2 | 3
   })
 }
@@ -312,7 +370,7 @@ const handleAttirePhoto = async (event: Event) => {
     attireForm.imageUrl = result.url
     imagePreview.value = result.url
   } catch (error) {
-    uploadError.value = error instanceof Error ? error.message : 'Gagal memproses foto.'
+    uploadError.value = error instanceof Error ? error.message : 'Failed to process photo.'
   } finally {
     uploading.value = false
     inputEl.value = ''
@@ -322,7 +380,7 @@ const handleAttirePhoto = async (event: Event) => {
 const submitAttire = () => {
   uploadError.value = ''
   if (!attireForm.name.trim() || !attireForm.size.trim()) {
-    uploadError.value = 'Nama dan ukuran busana wajib diisi.'
+    uploadError.value = 'Attire name and size are required.'
     return
   }
   const payload = {
@@ -345,12 +403,31 @@ const submitAttire = () => {
 }
 
 const onAttireStatusSelect = (item: WeddingAttire, nextStatus: AttireStatus, event?: Event) => {
-  // Only show warning popup if the attire is scheduled Hari Ini (today) or Besok (H-1)
-  const urgentSchedule = store.urgentAttireSchedules(item.id)
-  if ((nextStatus === 'Laundry' || nextStatus === 'Tersedia') && urgentSchedule.length > 0) {
+  const today = localTodayIso()
+  const resetSelectToStored = () => {
     if (event?.target) {
-      (event.target as HTMLSelectElement).value = effectiveStatus(item)
+      (event.target as HTMLSelectElement).value = item.status === 'Laundry' ? 'Laundry' : 'Tersedia'
     }
+  }
+  // Strict Rule: Switching to Available is BLOCKED if there is a non-cancelled event TODAY using this attire
+  if (nextStatus === 'Tersedia') {
+    const todayEvents = store.attireConflictsOnDate(item.id, today)
+    if (todayEvents.length > 0) {
+      resetSelectToStored()
+      statusAlertBlocked.value = true
+      statusAlertConflicts.value = todayEvents
+      pendingAlertAttire.value = item
+      pendingAlertTargetStatus.value = nextStatus
+      showStatusAlert.value = true
+      return
+    }
+  }
+
+  const urgentSchedule = store.urgentAttireSchedules(item.id)
+  if (nextStatus === 'Laundry' && urgentSchedule.length > 0) {
+    resetSelectToStored()
+    statusAlertBlocked.value = false
+    statusAlertConflicts.value = urgentSchedule
     pendingAlertAttire.value = item
     pendingAlertTargetStatus.value = nextStatus
     showStatusAlert.value = true
@@ -360,28 +437,31 @@ const onAttireStatusSelect = (item: WeddingAttire, nextStatus: AttireStatus, eve
 }
 
 const confirmStatusAlertOverride = () => {
-  if (pendingAlertAttire.value) {
+  if (!statusAlertBlocked.value && pendingAlertAttire.value) {
     store.updateWeddingAttireStatus(pendingAlertAttire.value.id, pendingAlertTargetStatus.value)
   }
   pendingAlertAttire.value = null
+  statusAlertConflicts.value = []
   showStatusAlert.value = false
 }
 
 const cancelStatusAlertOverride = () => {
   pendingAlertAttire.value = null
+  statusAlertConflicts.value = []
   showStatusAlert.value = false
 }
 
-// Monthly calendar for selected attire (includes past & cancelled for audit, with Selesai / Batal labels)
 const localTodayIso = () => {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
-const calendarEntryStatus = (entry: AttireScheduleEntry): 'Batal' | 'Selesai' | 'Terpakai' => {
-  if (entry.bookingStatus === 'Dibatalkan') return 'Batal'
-  if (entry.eventDate < localTodayIso()) return 'Selesai'
-  return 'Terpakai'
+const calendarEntryStatus = (entry: AttireScheduleEntry): 'Cancelled' | 'Completed' | 'In Use' | 'Booked' => {
+  if (entry.bookingStatus === 'Dibatalkan') return 'Cancelled'
+  const today = localTodayIso()
+  if (entry.eventDate < today) return 'Completed'
+  if (entry.eventDate === today) return 'In Use'
+  return 'Booked'
 }
 
 const openAttireCalendar = (item: WeddingAttire) => {
@@ -402,7 +482,7 @@ const openAttireCalendar = (item: WeddingAttire) => {
 }
 
 const calendarMonthLabel = computed(() =>
-  new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(calendarYear.value, calendarMonth.value, 1)),
+  new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(calendarYear.value, calendarMonth.value, 1)),
 )
 
 const shiftCalendarMonth = (delta: number) => {
@@ -452,38 +532,48 @@ const selectedDateBookings = computed(() => {
   return matching.length ? matching : all
 })
 
-const saveForm = () => {
-  formError.value = ''
-  saveMessage.value = ''
-  if (!fittingForm.bookingId) { formError.value = 'Pilih Nomor PO sebelum menyimpan form fitting.'; return }
-  for (const ev of fittingForm.events) {
+const validateFittingTarget = (
+  target: WeddingFittingForm,
+  targetBooking: Booking | undefined,
+  opts: { scrollOnMeasurementError?: boolean } = {},
+): string | null => {
+  if (!target.bookingId) return 'Please select a PO Number before saving the fitting form.'
+  for (const ev of target.events) {
     for (const [roleLabel, id] of [['Bride', ev.bride.attireId], ['Groom', ev.groom.attireId]] as const) {
       if (!id) continue
       const item = selectedAttire(id)
-      if (item && isAttireLocked(item)) {
-        formError.value = `Busana ${roleLabel} "${item.name}" pada Acara ${ev.number} sedang ${effectiveStatus(item) === 'Laundry' ? 'Laundry' : 'Terpakai'} dan terkunci untuk jadwal ini.`
-        return
+      if (item && isAttireLockedForBooking(item, targetBooking)) {
+        return `${roleLabel} attire "${item.name}" in Session ${ev.number} is currently ${displayAttireStatus(effectiveStatus(item))} and locked for this schedule.`
       }
     }
   }
   for (const group of measurementGroups) {
     for (const required of group.required ?? []) {
-      if (!fittingForm.measurements[group.key]?.[required]?.trim()) {
-        formError.value = `${required} pada bagian ${group.label} wajib diisi.`
-        document.getElementById('size-chart')?.scrollIntoView({ behavior: 'smooth' })
-        return
+      if (!target.measurements[group.key]?.[required]?.trim()) {
+        if (opts.scrollOnMeasurementError) {
+          document.getElementById('size-chart')?.scrollIntoView({ behavior: 'smooth' })
+        }
+        return `${required} in ${group.label} section is required.`
       }
     }
   }
-  const normalizedBlangkon = fittingForm.manggoloBlangkon === null || (fittingForm.manggoloBlangkon as unknown) === ''
+  target.manggoloBlangkon = target.manggoloBlangkon === null || (target.manggoloBlangkon as unknown) === ''
     ? null
-    : Math.max(0, Number(fittingForm.manggoloBlangkon))
-  const normalizedSlop = fittingForm.manggoloSlop === null || (fittingForm.manggoloSlop as unknown) === ''
+    : Math.max(0, Number(target.manggoloBlangkon))
+  target.manggoloSlop = target.manggoloSlop === null || (target.manggoloSlop as unknown) === ''
     ? null
-    : Math.max(0, Number(fittingForm.manggoloSlop))
+    : Math.max(0, Number(target.manggoloSlop))
+  return null
+}
 
-  fittingForm.manggoloBlangkon = normalizedBlangkon
-  fittingForm.manggoloSlop = normalizedSlop
+const saveForm = () => {
+  formError.value = ''
+  saveMessage.value = ''
+  const err = validateFittingTarget(fittingForm, selectedBooking.value, { scrollOnMeasurementError: true })
+  if (err) {
+    formError.value = err
+    return
+  }
 
   const savedPo = selectedBooking.value?.poNumber ?? 'PO'
   const savedCustomerName = selectedBooking.value ? (store.customerFor(selectedBooking.value.customerId)?.name ?? '') : ''
@@ -491,12 +581,23 @@ const saveForm = () => {
   store.saveWeddingForm(JSON.parse(JSON.stringify(fittingForm)) as WeddingFittingForm)
   lastSavedBookingId.value = savedBookingId
   lastSavedSummary.value = `${savedPo}${savedCustomerName ? ` — ${savedCustomerName}` : ''}`
-  saveMessage.value = `Form fitting ${savedPo} tersimpan ke Database Fitting. Form dikosongkan kembali untuk pengisian berikutnya.`
+  saveMessage.value = `Fitting form for ${savedPo} saved to Fitting Database. The form has been reset for your next entry.`
 
-  // Reset form back to blank after saving and scroll back to top
   Object.assign(fittingForm, blankForm(''))
   showSaveSuccessModal.value = true
   window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const saveEditModalForm = () => {
+  modalFormError.value = ''
+  const err = validateFittingTarget(editModalForm, modalEditingBooking.value)
+  if (err) {
+    modalFormError.value = err
+    return
+  }
+  store.saveWeddingForm(JSON.parse(JSON.stringify(editModalForm)) as WeddingFittingForm)
+  lastSavedBookingId.value = editModalForm.bookingId
+  showEditFittingModal.value = false
 }
 
 const downloadSavedPdf = async (targetForm?: WeddingFittingForm) => {
@@ -504,18 +605,20 @@ const downloadSavedPdf = async (targetForm?: WeddingFittingForm) => {
   const formToExport = targetForm ?? savedFormForCurrentBooking.value ?? lastSavedForm.value
   const booking = formToExport ? store.bookingFor(formToExport.bookingId) : undefined
   if (!formToExport || !booking) {
-    formError.value = 'Simpan form fitting terlebih dahulu sebelum mengunduh PDF.'
+    formError.value = 'Please save the fitting form before downloading the PDF.'
     return
   }
   downloadingPdf.value = true
   try {
+    const { generateWeddingFittingPdf } = await import('../utils/weddingPdf')
     await generateWeddingFittingPdf({
       form: formToExport,
       booking,
       attireList: store.weddingAttire,
+      businessProfile: store.businessProfile,
     })
   } catch (error) {
-    formError.value = error instanceof Error ? error.message : 'Gagal membuat PDF.'
+    formError.value = error instanceof Error ? error.message : 'Failed to generate PDF.'
   } finally {
     downloadingPdf.value = false
   }
@@ -533,16 +636,16 @@ const fittingList = computed(() =>
 <template>
   <div class="page-stack wedding-page">
     <section class="page-heading">
-      <div><span class="eyebrow">Ruang Kerja</span><h2>Portal Pernikahan</h2><p>Kelola inventaris busana, pengisian formulir fitting, dan data formulir fitting tersimpan secara terpisah.</p></div>
+      <div><span class="eyebrow">Workspace</span><h2>Wedding Wardrobe Portal</h2><p>Manage bridal attire inventory, client fitting forms, and saved wardrobe allocation schedules separately.</p></div>
       <div class="heading-actions">
-        <button class="primary-button" @click="openCreateAttire"><Plus :size="18" />Tambah Busana</button>
+        <button class="primary-button" @click="openCreateAttire"><Plus :size="18" />Add Attire</button>
       </div>
     </section>
 
     <div v-if="store.laundryUrgentAlerts.length" class="urgent-laundry-banner">
       <AlertTriangle :size="20" />
       <div class="urgent-laundry-list">
-        <strong>Peringatan Persiapan Busana (H-1 / Hari H)</strong>
+        <strong>Urgent Wardrobe Preparation Alert (H-1 / Event Day)</strong>
         <div v-for="alert in store.laundryUrgentAlerts" :key="`${alert.attireId}-${alert.bookingId}`" class="urgent-laundry-item">
           <span>{{ alert.message }}</span>
           <button
@@ -550,7 +653,7 @@ const fittingList = computed(() =>
             class="soft-button urgent-ready-btn"
             @click="store.updateWeddingAttireStatus(alert.attireId, 'Tersedia')"
           >
-            Selesai Laundry
+            Mark Laundry Complete
           </button>
         </div>
       </div>
@@ -559,62 +662,78 @@ const fittingList = computed(() =>
     <section class="portal-tabs-bar">
       <div class="segmented-tabs">
         <button :class="{ active: portalTab === 'inventory' }" @click="portalTab = 'inventory'">
-          1. Inventaris &amp; Kalender Busana ({{ store.weddingAttire.length }})
+          1. Wardrobe Inventory &amp; Calendar ({{ store.weddingAttire.length }})
         </button>
         <button :class="{ active: portalTab === 'form' }" @click="portalTab = 'form'">
-          2. Pengisian Formulir Fitting
+          2. Fitting Form Entry
         </button>
         <button :class="{ active: portalTab === 'database' }" @click="portalTab = 'database'">
-          3. Data Fitting Tersimpan ({{ store.weddingForms.length }})
+          3. Saved Fitting Database ({{ store.weddingForms.length }})
         </button>
       </div>
     </section>
 
-    <!-- TAB 1: INVENTORY BUSANA -->
+    <!-- TAB 1: WARDROBE INVENTORY -->
     <section v-if="portalTab === 'inventory'" class="panel attire-catalog-panel">
       <header class="wedding-section-head">
         <div>
           <span class="section-number">01</span>
           <div>
-            <span class="eyebrow">Inventory & jadwal busana</span>
-            <h3>Busana Bride & Groom</h3>
-            <p>Otomatis Terpakai saat tanggal acara customer aktif, otomatis Tersedia setelah tanggal acara lewat.</p>
+            <span class="eyebrow">Wardrobe inventory &amp; schedule</span>
+            <h3>Bride &amp; Groom Attire</h3>
+            <p>Shows <strong>Booked</strong> ahead of the event date, automatically switches to <strong>In Use</strong> on Event Day (Hari-H), and returns to <strong>Available</strong> once the event passes.</p>
           </div>
         </div>
         <div class="attire-summary">
-          <span><i class="dot-available" />{{ store.weddingAttire.filter((item) => effectiveStatus(item) === 'Tersedia').length }} Tersedia</span>
-          <span><i class="dot-booked" />{{ store.weddingAttire.filter((item) => effectiveStatus(item) === 'Terpakai').length }} Terpakai</span>
-          <span><i class="dot-laundry" />{{ store.weddingAttire.filter((item) => effectiveStatus(item) === 'Laundry').length }} Laundry</span>
+          <span><i class="dot-available" />{{ attireSummaryCounts.available }} Available</span>
+          <span><i class="dot-booked" />{{ attireSummaryCounts.booked }} Booked</span>
+          <span><i class="dot-booked" style="background:#d97706" />{{ attireSummaryCounts.inUse }} In Use</span>
+          <span><i class="dot-laundry" />{{ attireSummaryCounts.laundry }} Laundry</span>
         </div>
       </header>
 
       <div class="attire-toolbar">
-        <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Cari nama, kode, atau ukuran" /></label>
+        <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search attire name, code, or size" /></label>
         <div class="filter-row">
-          <select v-model="category"><option>Semua</option><option>Bride</option><option>Groom</option></select>
-          <select v-model="status"><option>Semua</option><option>Tersedia</option><option>Terpakai</option><option>Laundry</option></select>
+          <select v-model="category"><option value="All">All Categories</option><option>Bride</option><option>Groom</option></select>
+          <select v-model="status">
+            <option value="All">All Statuses</option>
+            <option value="Tersedia">Available</option>
+            <option value="Booked">Booked (Upcoming)</option>
+            <option value="Terpakai">In Use (Event Day)</option>
+            <option value="Laundry">Laundry</option>
+          </select>
         </div>
       </div>
 
       <div class="attire-report-bar">
         <div class="attire-report-info">
-          <Download :size="16" />
+          <Download :size="18" />
           <div>
-            <strong>Laporan Jadwal Pemakaian Busana (PDF)</strong>
-            <span>Tarik rincian siapa memakai busana Bride/Groom dari tanggal sampai tanggal.</span>
+            <strong>Wardrobe Allocation Schedule Report (PDF)</strong>
+            <span>Export client wardrobe usage with real attire photos from Start Date to End Date.</span>
           </div>
         </div>
         <div class="attire-report-controls">
           <label>
-            <span>Dari Tanggal</span>
-            <input v-model="scheduleReportFrom" type="date" />
+            <span>From Date</span>
+            <input v-model="scheduleReportFrom" type="date" aria-label="Schedule from date" />
           </label>
           <label>
-            <span>Sampai Tanggal</span>
-            <input v-model="scheduleReportTo" type="date" />
+            <span>To Date</span>
+            <input v-model="scheduleReportTo" type="date" aria-label="Schedule to date" />
           </label>
-          <button type="button" class="primary-button" @click="downloadScheduleReport">
-            <Download :size="16" />Unduh Laporan PDF
+          <button
+            v-if="scheduleReportFrom || scheduleReportTo"
+            type="button"
+            class="soft-button"
+            title="Clear date filter"
+            @click="scheduleReportFrom = ''; scheduleReportTo = ''"
+          >
+            <RotateCcw :size="14" />Reset
+          </button>
+          <button type="button" class="primary-button" :disabled="downloadingSchedulePdf" @click="downloadScheduleReport">
+            <Download :size="16" />{{ downloadingSchedulePdf ? 'Generating PDF…' : 'Download PDF Report' }}
           </button>
         </div>
       </div>
@@ -629,63 +748,49 @@ const fittingList = computed(() =>
           <div class="attire-card-body">
             <div>
               <span>{{ item.code }}</span>
-              <StatusBadge :label="effectiveStatus(item)" />
+              <StatusBadge :label="displayAttireStatus(scheduleMapByAttire.get(item.id)?.status ?? effectiveStatus(item))" />
             </div>
             <div class="attire-title-row">
               <h4>{{ item.name }}</h4>
-              <button type="button" class="icon-button attire-edit-btn" title="Edit busana / foto" @click="openEditAttire(item)">
+              <button type="button" class="icon-button attire-edit-btn" title="Edit attire / photo" @click="openEditAttire(item)">
                 <Pencil :size="14" />
               </button>
             </div>
             <p>{{ item.category }} · Size <strong>{{ item.size }}</strong></p>
 
             <div class="attire-schedule-box">
-              <div v-if="store.attireSchedule(item.id).length" class="attire-date-chips">
-                <span
-                  v-for="entry in store.attireSchedule(item.id).slice(0, 2)"
-                  :key="`${entry.bookingId}-${entry.eventNumber}`"
-                  class="attire-date-chip"
-                >
-                  {{ formatDate(entry.eventDate) }} · {{ entry.customerName }}
-                </span>
-                <small v-if="store.attireSchedule(item.id).length > 2">
-                  +{{ store.attireSchedule(item.id).length - 2 }} jadwal aktif lainnya
-                </small>
-              </div>
-              <span v-else class="attire-no-schedule">Tersedia (tidak ada jadwal aktif)</span>
-
               <button type="button" class="soft-button attire-calendar-btn" @click="openAttireCalendar(item)">
-                <CalendarDays :size="14" />Kalender ({{ store.attireSchedule(item.id, { includePast: true }).length }})
+                <CalendarDays :size="14" />Calendar ({{ (scheduleMapByAttire.get(item.id)?.all ?? []).length }})
               </button>
             </div>
 
-            <div v-if="item.status === 'Laundry' && store.attireSchedule(item.id).length" class="attire-laundry-warning">
+            <div v-if="item.status === 'Laundry' && (scheduleMapByAttire.get(item.id)?.active ?? []).length" class="attire-laundry-warning">
               <AlertTriangle :size="13" />
-              <span>Sedang Laundry padahal ada {{ store.attireSchedule(item.id).length }} jadwal pemakaian aktif!</span>
+              <span>In Laundry ({{ (scheduleMapByAttire.get(item.id)?.active ?? []).length }} upcoming)</span>
             </div>
 
             <select
-              :value="effectiveStatus(item)"
+              :value="item.status === 'Laundry' ? 'Laundry' : 'Tersedia'"
+              aria-label="Wardrobe status"
               @change="onAttireStatusSelect(item, ($event.target as HTMLSelectElement).value as AttireStatus, $event)"
             >
-              <option value="Tersedia">Tersedia</option>
-              <option value="Terpakai">Terpakai</option>
+              <option value="Tersedia">Available</option>
               <option value="Laundry">Laundry</option>
             </select>
           </div>
         </article>
-        <button class="attire-add-card" @click="openCreateAttire"><Plus :size="25" /><strong>Tambah busana baru</strong><span>Upload foto dan data ukuran</span></button>
+        <button class="attire-add-card" @click="openCreateAttire"><Plus :size="25" /><strong>Add New Attire</strong><span>Upload wardrobe photo and size</span></button>
       </div>
     </section>
 
-    <!-- TAB 2: PENGISIAN FORM FITTING -->
+    <!-- TAB 2: FITTING FORM ENTRY -->
     <template v-else-if="portalTab === 'form'">
       <div v-if="saveMessage" class="fitting-saved-banner">
         <div class="fitting-saved-copy">
           <CheckCircle2 :size="20" />
           <div>
             <strong>{{ saveMessage }}</strong>
-            <span>Anda dapat mengunduh PDF hasil simpanan terakhir atau melihatnya di tab Database Fitting Tersimpan.</span>
+            <span>You can download the saved fitting PDF or inspect all submissions in Tab 3 (Saved Fitting Database).</span>
           </div>
         </div>
         <div class="fitting-saved-actions">
@@ -699,7 +804,7 @@ const fittingList = computed(() =>
             <Download :size="15" />Download PDF
           </button>
           <button type="button" class="primary-button" @click="portalTab = 'database'">
-            Lihat Daftar Tersimpan
+            View Saved Forms
           </button>
         </div>
       </div>
@@ -707,28 +812,30 @@ const fittingList = computed(() =>
       <section id="booking-context" class="booking-context panel">
         <div class="booking-context-icon"><CalendarHeart :size="23" /></div>
         <div>
-          <span class="eyebrow">Pengisian form fitting</span>
-          <h3>Pilih booking yang akan dilengkapi</h3>
+          <span class="eyebrow">Fitting Form Entry</span>
+          <h3>Select a PO booking to complete</h3>
           <p v-if="selectedBooking">
-            Acara: <strong>{{ formatDate(selectedBooking.eventDate) }}</strong> · Lokasi: <strong>{{ selectedBooking.location }}</strong>
+            Event: <strong>{{ formatDate(selectedBooking.eventDate) }}</strong> · Venue: <strong>{{ selectedBooking.location }}</strong>
           </p>
-          <p v-else>Setelah klik "Simpan Form Fitting", data masuk ke Database Fitting dan form otomatis kosong kembali.</p>
+          <p v-else>Only POs without an existing fitting record are listed here. Saved POs are managed under Saved Fitting Database.</p>
         </div>
         <label>
-          <span>Nomor PO / Customer</span>
+          <span>PO Number / Customer ({{ fittingBookingOptions.length }} pending)</span>
           <select v-model="fittingForm.bookingId">
-            <option value="">Pilih booking</option>
-            <option v-for="booking in store.bookings.filter((b) => b.status !== 'Dibatalkan')" :key="booking.id" :value="booking.id">{{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }} — {{ formatDate(booking.eventDate) }}</option>
+            <option value="">Select PO booking</option>
+            <option v-for="booking in fittingBookingOptions" :key="booking.id" :value="booking.id">
+              {{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }} — {{ formatDate(booking.eventDate) }}
+            </option>
           </select>
         </label>
       </section>
 
       <section id="size-chart" class="panel fitting-panel">
-        <header class="wedding-section-head"><div><span class="section-number">02</span><div><span class="eyebrow">Blank form</span><h3>Size Chart <small>cm</small></h3><p>Isi hasil pengukuran saat fitting. Kolom bertanda * wajib.</p></div></div><Ruler :size="23" /></header>
+        <header class="wedding-section-head"><div><span class="section-number">02</span><div><span class="eyebrow">Size chart</span><h3>Body Measurements <small>cm</small></h3><p>Enter measurements recorded during fitting. Fields marked * are required.</p></div></div><Ruler :size="23" /></header>
         <div class="measurement-grid">
           <article v-for="group in measurementGroups" :key="group.key" class="measurement-card">
             <h4>{{ group.label }}</h4>
-            <div><label v-for="field in group.fields" :key="field"><span>{{ field }}<b v-if="group.required?.includes(field)">*</b></span><input v-model="fittingForm.measurements[group.key]![field]" :placeholder="field === 'Shoes' || field === 'Slop' ? 'Ukuran' : '0'" /></label></div>
+            <div><label v-for="field in group.fields" :key="field"><span>{{ field }}<b v-if="group.required?.includes(field)">*</b></span><input v-model="fittingForm.measurements[group.key]![field]" :placeholder="field === 'Shoes' || field === 'Slop' ? 'Size' : '0'" /></label></div>
           </article>
         </div>
       </section>
@@ -738,9 +845,9 @@ const fittingList = computed(() =>
           <div>
             <span class="section-number">03</span>
             <div>
-              <span class="eyebrow">Acara & pilihan busana</span>
-              <h3>Rincian Acara & Busana</h3>
-              <p>Pilih busana Bride & Groom langsung dari katalog di dalam masing-masing acara.</p>
+              <span class="eyebrow">Sessions &amp; wardrobe</span>
+              <h3>Event Sessions &amp; Attire Selection</h3>
+              <p>Assign Bride &amp; Groom wardrobe pieces directly from the catalog per wedding session.</p>
             </div>
           </div>
         </header>
@@ -748,32 +855,32 @@ const fittingList = computed(() =>
           <article v-for="(event, index) in fittingForm.events" :key="event.number" class="event-detail-card">
             <header>
               <div class="event-card-title">
-                <span>Acara {{ event.number }}</span>
-                <strong>{{ event.name || 'Belum diberi nama' }}</strong>
+                <span>Session {{ event.number }}</span>
+                <strong>{{ event.name || 'Untitled session' }}</strong>
               </div>
               <button
                 v-if="index > 0"
                 type="button"
                 class="event-remove-button"
-                title="Hapus acara ini"
-                @click="removeEventSection(index)"
+                title="Remove this session"
+                @click="removeEventSectionFrom(fittingForm, index)"
               >
-                <Trash2 :size="14" />Hapus Acara {{ event.number }}
+                <Trash2 :size="14" />Remove Session {{ event.number }}
               </button>
             </header>
 
             <div class="event-basic-fields event-basic-fields--three">
               <label>
-                <span>Nama Acara</span>
-                <input v-model="event.name" placeholder="Contoh: Akad / Resepsi / Ngunduh Mantu" />
+                <span>Session Name</span>
+                <input v-model="event.name" placeholder="e.g. Akad Nikah / Reception / Ngunduh Mantu" />
               </label>
               <label>
-                <span>Pukul</span>
+                <span>Ready Time</span>
                 <input v-model="event.readyTime" type="time" />
               </label>
               <label>
-                <span>Keterangan Waktu</span>
-                <input v-model="event.timeNote" type="text" placeholder="Contoh: Ready 04.00 / Pagi" />
+                <span>Time Note</span>
+                <input v-model="event.timeNote" type="text" placeholder="e.g. Ready 04:00 AM / Morning" />
               </label>
             </div>
 
@@ -781,11 +888,11 @@ const fittingList = computed(() =>
               <section class="couple-detail-card">
                 <h4>Bride</h4>
                 <div class="couple-span-2">
-                  <span class="attire-field-label">Pilih Busana Bride (Katalog)</span>
+                  <span class="attire-field-label">Select Bride Attire (Catalog)</span>
                   <AttireSelect
                     v-model="event.bride.attireId"
                     :options="brideAttireOptions"
-                    placeholder="Pilih busana Bride dari katalog"
+                    placeholder="Select Bride attire from catalog"
                   />
                 </div>
 
@@ -794,15 +901,15 @@ const fittingList = computed(() =>
                     v-if="selectedAttire(event.bride.attireId)?.imageUrl"
                     type="button"
                     class="selected-outfit-thumb"
-                    title="Perbesar foto busana"
+                    title="Zoom attire photo"
                     @click="openZoom(selectedAttire(event.bride.attireId)!)"
                   >
                     <img :src="selectedAttire(event.bride.attireId)?.imageUrl" :alt="selectedAttire(event.bride.attireId)?.name" loading="lazy" decoding="async" />
                   </button>
                   <span v-else class="selected-outfit-placeholder"><Shirt :size="20" /></span>
                   <div>
-                    <strong>{{ selectedAttire(event.bride.attireId)?.name ?? 'Belum ada busana dipilih' }}</strong>
-                    <small>{{ selectedAttire(event.bride.attireId) ? `${selectedAttire(event.bride.attireId)?.code} · Size ${selectedAttire(event.bride.attireId)?.size}` : 'Nama dan gambar busana tampil otomatis setelah dipilih' }}</small>
+                    <strong>{{ selectedAttire(event.bride.attireId)?.name ?? 'No attire selected' }}</strong>
+                    <small>{{ selectedAttire(event.bride.attireId) ? `${selectedAttire(event.bride.attireId)?.code} · Size ${selectedAttire(event.bride.attireId)?.size}` : 'Attire name and preview photo appear automatically once selected' }}</small>
                   </div>
                 </div>
 
@@ -811,19 +918,19 @@ const fittingList = computed(() =>
                   <span>{{ attireSelectionAlert(event.bride.attireId) }}</span>
                 </div>
 
-                <label><span>Look</span><input v-model="event.bride.look" placeholder="Detail look" /></label>
-                <label><span>Acc</span><input v-model="event.bride.accessories" placeholder="Aksesori" /></label>
-                <label class="couple-span-2"><span>Shoes</span><input v-model="event.bride.shoes" placeholder="Sepatu" /></label>
+                <label><span>Look</span><input v-model="event.bride.look" placeholder="Makeup look details" /></label>
+                <label><span>Accessories</span><input v-model="event.bride.accessories" placeholder="Accessories" /></label>
+                <label class="couple-span-2"><span>Footwear</span><input v-model="event.bride.shoes" placeholder="Shoes / heels" /></label>
               </section>
 
               <section class="couple-detail-card">
                 <h4>Groom</h4>
                 <div class="couple-span-2">
-                  <span class="attire-field-label">Pilih Busana Groom (Katalog)</span>
+                  <span class="attire-field-label">Select Groom Attire (Catalog)</span>
                   <AttireSelect
                     v-model="event.groom.attireId"
                     :options="groomAttireOptions"
-                    placeholder="Pilih busana Groom dari katalog"
+                    placeholder="Select Groom attire from catalog"
                   />
                 </div>
 
@@ -832,15 +939,15 @@ const fittingList = computed(() =>
                     v-if="selectedAttire(event.groom.attireId)?.imageUrl"
                     type="button"
                     class="selected-outfit-thumb"
-                    title="Perbesar foto busana"
+                    title="Zoom attire photo"
                     @click="openZoom(selectedAttire(event.groom.attireId)!)"
                   >
                     <img :src="selectedAttire(event.groom.attireId)?.imageUrl" :alt="selectedAttire(event.groom.attireId)?.name" loading="lazy" decoding="async" />
                   </button>
                   <span v-else class="selected-outfit-placeholder"><Shirt :size="20" /></span>
                   <div>
-                    <strong>{{ selectedAttire(event.groom.attireId)?.name ?? 'Belum ada busana dipilih' }}</strong>
-                    <small>{{ selectedAttire(event.groom.attireId) ? `${selectedAttire(event.groom.attireId)?.code} · Size ${selectedAttire(event.groom.attireId)?.size}` : 'Nama dan gambar busana tampil otomatis setelah dipilih' }}</small>
+                    <strong>{{ selectedAttire(event.groom.attireId)?.name ?? 'No attire selected' }}</strong>
+                    <small>{{ selectedAttire(event.groom.attireId) ? `${selectedAttire(event.groom.attireId)?.code} · Size ${selectedAttire(event.groom.attireId)?.size}` : 'Attire name and preview photo appear automatically once selected' }}</small>
                   </div>
                 </div>
 
@@ -849,16 +956,16 @@ const fittingList = computed(() =>
                   <span>{{ attireSelectionAlert(event.groom.attireId) }}</span>
                 </div>
 
-                <label><span>Look</span><input v-model="event.groom.look" placeholder="Detail look" /></label>
-                <label><span>Acc</span><input v-model="event.groom.accessories" placeholder="Aksesori" /></label>
-                <label class="couple-span-2"><span>Shoes</span><input v-model="event.groom.shoes" placeholder="Sepatu" /></label>
+                <label><span>Look</span><input v-model="event.groom.look" placeholder="Groom styling details" /></label>
+                <label><span>Accessories</span><input v-model="event.groom.accessories" placeholder="Blangkon / keris / pins" /></label>
+                <label class="couple-span-2"><span>Footwear</span><input v-model="event.groom.shoes" placeholder="Shoes / slop" /></label>
               </section>
             </div>
           </article>
 
           <div v-if="fittingForm.events.length < 3" class="add-event-row">
-            <button type="button" class="outline-button add-event-button" @click="addEventSection">
-              <Plus :size="16" />+ Tambah Acara
+            <button type="button" class="outline-button add-event-button" @click="addEventSectionTo(fittingForm)">
+              <Plus :size="16" />+ Add Session
             </button>
           </div>
         </div>
@@ -870,9 +977,9 @@ const fittingList = computed(() =>
             <div>
               <span class="section-number">04</span>
               <div>
-                <span class="eyebrow">Keluarga & tambahan</span>
-                <h3>Seragam dan Detail</h3>
-                <p>Kelompok Domas, Manggolo, Softlens, serta seragam keluarga dan tambahan.</p>
+                <span class="eyebrow">Family &amp; extras</span>
+                <h3>Uniforms &amp; Details</h3>
+                <p>Domas, Manggolo, Softlens, family attire, and add-on floral/henna requests.</p>
               </div>
             </div>
             <UsersRound :size="21" />
@@ -880,35 +987,35 @@ const fittingList = computed(() =>
 
           <div class="uniform-sections">
             <div class="uniform-group-box">
-              <h4>Kelompok Domas</h4>
+              <h4>Domas Group</h4>
               <div class="uniform-group-fields">
                 <label>
-                  <span>Seragam & Detail Domas</span>
-                  <input v-model="fittingForm.uniforms.domas" placeholder="Warna / model / opsi hijab" />
+                  <span>Domas Uniform &amp; Details</span>
+                  <input v-model="fittingForm.uniforms.domas" placeholder="Color / style / hijab option" />
                 </label>
               </div>
             </div>
 
             <div class="uniform-group-box">
-              <h4>Kelompok Manggolo</h4>
+              <h4>Manggolo Group</h4>
               <div class="uniform-group-fields uniform-group-fields--manggolo">
                 <label class="uniform-span-2">
-                  <span>Seragam & Detail Manggolo</span>
-                  <input v-model="fittingForm.uniforms.manggolo" placeholder="Detail seragam Manggolo" />
+                  <span>Manggolo Uniform &amp; Details</span>
+                  <input v-model="fittingForm.uniforms.manggolo" placeholder="Manggolo uniform details" />
                 </label>
                 <label>
-                  <span>Jumlah Blangkon</span>
+                  <span>Blangkon Qty</span>
                   <input v-model.number="fittingForm.manggoloBlangkon" type="number" min="0" placeholder="0" />
                 </label>
                 <label>
-                  <span>Jumlah Slop</span>
+                  <span>Slippers Qty</span>
                   <input v-model.number="fittingForm.manggoloSlop" type="number" min="0" placeholder="0" />
                 </label>
               </div>
             </div>
 
             <div class="uniform-group-box">
-              <h4>Keluarga & Penerima Tamu</h4>
+              <h4>Family &amp; Guest Greeters</h4>
               <div class="uniform-group-fields uniform-group-fields--two">
                 <label v-for="([key, label, placeholder]) in familyUniformFields" :key="key">
                   <span>{{ label }}</span>
@@ -918,12 +1025,12 @@ const fittingList = computed(() =>
             </div>
 
             <div class="uniform-group-box">
-              <h4>Softlens & Tambahan</h4>
+              <h4>Contact Lenses &amp; Extras</h4>
               <div class="uniform-group-fields uniform-group-fields--two">
                 <label>
-                  <span>Softlens</span>
+                  <span>Contact Lenses</span>
                   <select v-model="fittingForm.uniforms.softlens">
-                    <option value="">Pilih jenis softlens</option>
+                    <option value="">Select lens type</option>
                     <option v-for="opt in softlensOptions" :key="opt" :value="opt">{{ opt }}</option>
                   </select>
                 </label>
@@ -941,9 +1048,9 @@ const fittingList = computed(() =>
             <div>
               <span class="section-number">05</span>
               <div>
-                <span class="eyebrow">List vendor</span>
-                <h3>Vendor Pernikahan</h3>
-                <p>Catat seluruh vendor pendukung acara.</p>
+                <span class="eyebrow">Vendor directory</span>
+                <h3>Partner Wedding Vendors</h3>
+                <p>Track all supporting vendors for this wedding day.</p>
               </div>
             </div>
             <Store :size="21" />
@@ -951,7 +1058,7 @@ const fittingList = computed(() =>
           <div class="mini-field-grid">
             <label v-for="([key, label]) in vendorFields" :key="key">
               <span>{{ label }}</span>
-              <input v-model="fittingForm.vendors[key]" placeholder="Nama vendor / kontak / catatan" />
+              <input v-model="fittingForm.vendors[key]" placeholder="Vendor name / contact / notes" />
             </label>
           </div>
         </section>
@@ -959,8 +1066,8 @@ const fittingList = computed(() =>
 
       <section class="wedding-save-bar">
         <div>
-          <strong>{{ selectedBooking ? `${selectedBooking.poNumber} · ${store.customerFor(selectedBooking.customerId)?.name}` : 'Belum ada booking dipilih' }}</strong>
-          <span>Simpan ke Database Fitting; form akan kosong kembali setelah tersimpan.</span>
+          <strong>{{ selectedBooking ? `${selectedBooking.poNumber} · ${store.customerFor(selectedBooking.customerId)?.name}` : 'No PO booking selected yet' }}</strong>
+          <span>Saves to Fitting Database and clears the form for your next entry.</span>
         </div>
         <p v-if="formError" class="form-error">{{ formError }}</p>
         <div class="wedding-save-actions">
@@ -971,38 +1078,38 @@ const fittingList = computed(() =>
             :disabled="downloadingPdf"
             @click="downloadSavedPdf(savedFormForCurrentBooking)"
           >
-            <Download :size="17" />{{ downloadingPdf ? 'Menyiapkan PDF…' : 'Download PDF' }}
+            <Download :size="17" />{{ downloadingPdf ? 'Generating PDF…' : 'Download PDF' }}
           </button>
-          <button class="primary-button" @click="saveForm"><Save :size="17" />Simpan Form Fitting</button>
+          <button class="primary-button" @click="saveForm"><Save :size="17" />Save Fitting Form</button>
         </div>
       </section>
     </template>
 
-    <!-- TAB 3: DAFTAR FORM FITTING TERSIMPAN -->
+    <!-- TAB 3: SAVED FITTING DATABASE -->
     <section v-else class="panel fitting-db-panel">
       <header class="wedding-section-head">
         <div>
           <span class="section-number">DB</span>
           <div>
-            <span class="eyebrow">Database fitting tersimpan</span>
-            <h3>Daftar Form Fitting Customer</h3>
-            <p>Edit ulang atau unduh PDF untuk setiap form fitting yang sudah tersimpan.</p>
+            <span class="eyebrow">Saved fitting records</span>
+            <h3>Customer Fitting Form Database</h3>
+            <p>Edit existing submissions or download high-resolution fitting PDFs with attire photos.</p>
           </div>
         </div>
         <button type="button" class="primary-button" @click="portalTab = 'form'">
-          <Plus :size="17" />Isi Form Fitting Baru
+          <Plus :size="17" />Fill New Fitting Form
         </button>
       </header>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
             <tr>
-              <th>Nomor PO</th>
+              <th>PO Number</th>
               <th>Customer</th>
-              <th>Tanggal & Lokasi Acara</th>
-              <th>Acara & Busana Terpilih</th>
-              <th>Diperbarui</th>
-              <th>Aksi</th>
+              <th>Event Date &amp; Venue</th>
+              <th>Sessions &amp; Assigned Wardrobe</th>
+              <th>Updated</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1010,7 +1117,7 @@ const fittingList = computed(() =>
               <td><strong class="mono-code">{{ row.booking?.poNumber ?? '-' }}</strong></td>
               <td>
                 <strong>{{ row.customer?.name ?? '-' }}</strong>
-                <span v-if="row.booking?.status === 'Dibatalkan'" class="subtle-line">Status: Dibatalkan</span>
+                <span v-if="row.booking?.status === 'Dibatalkan'" class="subtle-line">Status: Cancelled</span>
               </td>
               <td>
                 <strong>{{ row.booking?.eventDate ? formatDate(row.booking.eventDate) : '-' }}</strong>
@@ -1019,7 +1126,7 @@ const fittingList = computed(() =>
               <td>
                 <div class="fitting-attire-pills">
                   <span v-for="ev in row.form.events" :key="ev.number" class="item-pill">
-                    Acara {{ ev.number }}:
+                    Session {{ ev.number }}:
                     {{ selectedAttire(ev.bride.attireId)?.name || '—' }} / {{ selectedAttire(ev.groom.attireId)?.name || '—' }}
                   </span>
                 </div>
@@ -1027,10 +1134,10 @@ const fittingList = computed(() =>
               <td>{{ row.form.updatedAt ? formatDate(row.form.updatedAt.slice(0, 10)) : '-' }}</td>
               <td>
                 <div class="row-actions">
-                  <button type="button" class="icon-button" title="Edit form fitting" @click="editSavedFitting(row.form.bookingId)">
+                  <button type="button" class="icon-button" title="Edit fitting form" @click="editSavedFitting(row.form.bookingId)">
                     <Pencil :size="15" />
                   </button>
-                  <button type="button" class="icon-button" title="Download PDF fitting" @click="downloadSavedPdf(row.form)">
+                  <button type="button" class="icon-button" title="Download Fitting PDF" @click="downloadSavedPdf(row.form)">
                     <Download :size="15" />
                   </button>
                 </div>
@@ -1040,8 +1147,8 @@ const fittingList = computed(() =>
               <td colspan="6">
                 <div class="empty-state">
                   <ClipboardList :size="26" />
-                  <strong>Database fitting masih kosong</strong>
-                  <span>Buka tab "2. Pengisian Form Fitting" untuk melengkapi data fitting customer.</span>
+                  <strong>No fitting forms saved yet</strong>
+                  <span>Open Tab "2. Fitting Form Entry" to complete a customer's fitting details.</span>
                 </div>
               </td>
             </tr>
@@ -1050,38 +1157,44 @@ const fittingList = computed(() =>
       </div>
     </section>
 
-    <UiModal :open="showAttireForm" :title="editingAttireId ? 'Edit Busana' : 'Tambah Busana'" description="Lengkapi data dan unggah foto busana untuk katalog dan PDF." wide @close="showAttireForm = false">
+    <UiModal :open="showAttireForm" :title="editingAttireId ? 'Edit Attire' : 'Add New Attire'" description="Complete wardrobe details and upload photo for catalog and PDF reports." wide @close="showAttireForm = false">
       <form class="form-grid" @submit.prevent="submitAttire">
-        <label><span>Nama busana *</span><input v-model="attireForm.name" placeholder="Contoh: Kebaya Sekar Arum" /></label>
-        <label><span>Kategori *</span><select v-model="attireForm.category"><option>Bride</option><option>Groom</option></select></label>
-        <label><span>Ukuran *</span><input v-model="attireForm.size" placeholder="S / M / L / Custom" /></label>
-        <label><span>Status *</span><select v-model="attireForm.status"><option value="Tersedia">Tersedia</option><option value="Terpakai">Terpakai</option><option value="Laundry">Laundry</option></select></label>
-        <label class="span-2"><span>Catatan</span><textarea v-model="attireForm.notes" rows="2" placeholder="Warna, bahan, detail set, atau kondisi busana" /></label>
+        <label><span>Attire Name *</span><input v-model="attireForm.name" placeholder="e.g. Kebaya Sekar Arum Putih" /></label>
+        <label><span>Category *</span><select v-model="attireForm.category"><option>Bride</option><option>Groom</option></select></label>
+        <label><span>Size *</span><input v-model="attireForm.size" placeholder="S / M / L / Custom" /></label>
+        <label>
+          <span>Manual Status *</span>
+          <select v-model="attireForm.status">
+            <option value="Tersedia">Available</option>
+            <option value="Laundry">Laundry</option>
+          </select>
+        </label>
+        <label class="span-2"><span>Notes</span><textarea v-model="attireForm.notes" rows="2" placeholder="Color, fabric, full set accessories, or condition notes" /></label>
         <div class="span-2 attire-upload-block">
-          <span class="upload-field-label">Foto busana</span>
+          <span class="upload-field-label">Attire Photo</span>
           <label class="upload-zone">
-            <img v-if="imagePreview" :src="imagePreview" alt="Preview busana" />
-            <div v-else><UploadCloud :size="25" /><strong>Klik untuk pilih foto JPG, PNG, atau WebP</strong><span>Maksimal 5 MB (tersimpan otomatis)</span></div>
+            <img v-if="imagePreview" :src="imagePreview" alt="Attire preview" />
+            <div v-else><UploadCloud :size="25" /><strong>Click to choose JPG, PNG, or WebP photo</strong><span>Max 5 MB (rendered inside PDF reports)</span></div>
             <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleAttirePhoto" />
           </label>
           <button v-if="imagePreview" type="button" class="soft-button remove-photo-btn" @click="imagePreview = ''; attireForm.imageUrl = ''">
-            Hapus foto
+            Remove photo
           </button>
         </div>
-        <p v-if="uploading" class="upload-state span-2"><LoaderCircle class="spin" :size="16" />Memproses foto…</p>
+        <p v-if="uploading" class="upload-state span-2"><LoaderCircle class="spin" :size="16" />Processing image…</p>
         <p v-if="uploadError" class="form-error span-2">{{ uploadError }}</p>
         <div class="modal-actions span-2">
-          <button type="button" class="secondary-button" @click="showAttireForm = false">Batal</button>
-          <button class="primary-button" :disabled="uploading">{{ editingAttireId ? 'Simpan Perubahan' : 'Simpan Busana' }}</button>
+          <button type="button" class="secondary-button" @click="showAttireForm = false">Cancel</button>
+          <button class="primary-button" :disabled="uploading">{{ editingAttireId ? 'Save Changes' : 'Save Attire' }}</button>
         </div>
       </form>
     </UiModal>
 
-    <UiModal :open="showZoom" title="Detail Busana" @close="showZoom = false">
-      <div v-if="zoomedAttire" class="attire-zoom"><div :class="`attire-${zoomedAttire.category.toLowerCase()}`"><img v-if="zoomedAttire.imageUrl" :src="zoomedAttire.imageUrl" :alt="zoomedAttire.name" /><ImageIcon v-else :size="48" /></div><h3>{{ zoomedAttire.name }}</h3><p>{{ zoomedAttire.code }} · {{ zoomedAttire.category }} · Size {{ zoomedAttire.size }}</p><StatusBadge :label="effectiveStatus(zoomedAttire)" /><span>{{ zoomedAttire.notes || 'Belum ada catatan busana.' }}</span></div>
+    <UiModal :open="showZoom" title="Attire Details" @close="showZoom = false">
+      <div v-if="zoomedAttire" class="attire-zoom"><div :class="`attire-${zoomedAttire.category.toLowerCase()}`"><img v-if="zoomedAttire.imageUrl" :src="zoomedAttire.imageUrl" :alt="zoomedAttire.name" /><ImageIcon v-else :size="48" /></div><h3>{{ zoomedAttire.name }}</h3><p>{{ zoomedAttire.code }} · {{ zoomedAttire.category }} · Size {{ zoomedAttire.size }}</p><StatusBadge :label="displayAttireStatus(effectiveStatus(zoomedAttire))" /><span>{{ zoomedAttire.notes || 'No wardrobe notes yet.' }}</span></div>
     </UiModal>
 
-    <UiModal :open="showCalendarModal" :title="calendarAttire ? `Kalender Busana — ${calendarAttire.name}` : 'Kalender Busana'" description="Tanggal terpakai ditarik otomatis dari Database Fitting berdasarkan tanggal acara customer." wide @close="showCalendarModal = false">
+    <UiModal :open="showCalendarModal" :title="calendarAttire ? `Attire Calendar — ${calendarAttire.name}` : 'Attire Calendar'" description="Reserved dates are synced automatically from the Fitting Database by customer event date." wide @close="showCalendarModal = false">
       <div v-if="calendarAttire" class="attire-calendar-modal">
         <div class="attire-calendar-nav">
           <button type="button" class="icon-button" @click="shiftCalendarMonth(-1)"><ChevronLeft :size="16" /></button>
@@ -1089,7 +1202,7 @@ const fittingList = computed(() =>
           <button type="button" class="icon-button" @click="shiftCalendarMonth(1)"><ChevronRight :size="16" /></button>
         </div>
         <div class="attire-calendar-weekdays">
-          <span>Sen</span><span>Sel</span><span>Rab</span><span>Kam</span><span>Jum</span><span>Sab</span><span>Min</span>
+          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
         </div>
         <div class="attire-calendar-grid">
           <button
@@ -1114,7 +1227,7 @@ const fittingList = computed(() =>
 
         <div class="attire-calendar-events">
           <h4>
-            {{ selectedCalendarDate ? `Jadwal pada ${formatDate(selectedCalendarDate)}` : 'Semua Jadwal Pemakaian Busana Ini' }}
+            {{ selectedCalendarDate ? `Schedule on ${formatDate(selectedCalendarDate)}` : 'All Scheduled Events for This Attire' }}
           </h4>
           <div v-if="selectedDateBookings.length" class="calendar-event-list">
             <article v-for="entry in selectedDateBookings" :key="`${entry.bookingId}-${entry.eventNumber}`" class="calendar-event-item">
@@ -1124,51 +1237,59 @@ const fittingList = computed(() =>
               </div>
               <div class="calendar-event-badges">
                 <span class="item-pill">{{ entry.eventName }} ({{ entry.role }})</span>
-                <span class="calendar-status-pill" :class="`is-${calendarEntryStatus(entry).toLowerCase()}`">
+                <span class="calendar-status-pill" :class="`is-${calendarEntryStatus(entry).toLowerCase().replace(/\s+/g, '-')}`">
                   {{ calendarEntryStatus(entry) }}
                 </span>
               </div>
             </article>
           </div>
-          <p v-else class="calendar-empty-note">Busana ini belum dijadwalkan pada tanggal manapun di Database Fitting.</p>
+          <p v-else class="calendar-empty-note">This attire has no reservations in the Fitting Database yet.</p>
         </div>
       </div>
-      <div class="modal-actions"><button class="primary-button" @click="showCalendarModal = false">Tutup</button></div>
+      <div class="modal-actions"><button class="primary-button" @click="showCalendarModal = false">Close</button></div>
     </UiModal>
 
-    <UiModal :open="showStatusAlert" title="Peringatan Jadwal Busana (H-1 / Hari Ini)" description="Busana ini dijadwalkan dipakai hari ini atau besok (H-1) di Database Fitting." @close="cancelStatusAlertOverride">
+    <UiModal
+      :open="showStatusAlert"
+      :title="statusAlertBlocked ? 'Cannot Change Status to Available — Scheduled Today' : 'Urgent Schedule Warning (H-1 / Event Day)'"
+      :description="statusAlertBlocked ? 'This attire is currently assigned to an event taking place today based on the event date.' : 'This attire is scheduled for today or tomorrow (H-1) in the Fitting Database.'"
+      @close="cancelStatusAlertOverride"
+    >
       <div v-if="pendingAlertAttire" class="laundry-alert-body">
         <div class="laundry-alert-banner">
           <AlertTriangle :size="20" />
           <div>
-            <strong>{{ pendingAlertAttire.name }} dipakai hari ini / besok (H-1)!</strong>
-            <p v-if="pendingAlertTargetStatus === 'Laundry'">
-              Jika diubah ke status <b>Laundry</b>, pastikan busana siap tepat waktu sebelum acara berikut:
+            <strong v-if="statusAlertBlocked">{{ pendingAlertAttire.name }} is booked for an event today and cannot be switched to Available!</strong>
+            <strong v-else>{{ pendingAlertAttire.name }} is needed today or tomorrow (H-1)!</strong>
+            <p v-if="statusAlertBlocked">
+              Status changes to <b>Available</b> are locked while an active booking exists on today's date:
             </p>
             <p v-else>
-              Anda mengubah status ke <b>Tersedia</b>, padahal busana terjadwal dipakai hari ini / besok (H-1) pada acara berikut:
+              If you switch status to <b>Laundry</b>, make sure it is cleaned and ready in time for:
             </p>
           </div>
         </div>
         <ul class="laundry-conflict-list">
-          <li v-for="entry in store.urgentAttireSchedules(pendingAlertAttire.id)" :key="`${entry.bookingId}-${entry.eventNumber}`">
+          <li v-for="entry in statusAlertConflicts" :key="`${entry.bookingId}-${entry.eventNumber}`">
             <strong>{{ formatDate(entry.eventDate) }}</strong> — {{ entry.customerName }} ({{ entry.poNumber }}) · {{ entry.eventName }}
           </li>
         </ul>
       </div>
       <div class="modal-actions">
-        <button type="button" class="secondary-button" @click="cancelStatusAlertOverride">Batal</button>
-        <button type="button" class="danger-button" @click="confirmStatusAlertOverride">
-          {{ pendingAlertTargetStatus === 'Laundry' ? 'Tetap Ubah ke Laundry' : 'Tetap Lanjutkan' }}
+        <button type="button" :class="statusAlertBlocked ? 'primary-button' : 'secondary-button'" @click="cancelStatusAlertOverride">
+          {{ statusAlertBlocked ? 'Understood' : 'Cancel' }}
+        </button>
+        <button v-if="!statusAlertBlocked" type="button" class="danger-button" @click="confirmStatusAlertOverride">
+          Set to Laundry Anyway
         </button>
       </div>
     </UiModal>
 
-    <UiModal :open="showSaveSuccessModal" title="Berhasil Input Form Fitting" description="Data form fitting telah disimpan ke Database Fitting dan form telah dikosongkan kembali." @close="showSaveSuccessModal = false">
+    <UiModal :open="showSaveSuccessModal" title="Fitting Form Saved Successfully" description="Fitting record has been saved to Fitting Database and the form has been cleared." @close="showSaveSuccessModal = false">
       <div class="save-success-modal-body">
         <div class="save-success-icon"><CheckCircle2 :size="30" /></div>
-        <strong>{{ lastSavedSummary || 'Form Fitting Tersimpan' }}</strong>
-        <p>Anda dapat langsung mengunduh PDF hasil fitting yang barusan disimpan, membuka daftar database fitting, atau melanjutkan input customer berikutnya.</p>
+        <strong>{{ lastSavedSummary || 'Fitting Form Saved' }}</strong>
+        <p>You can immediately download the fitting form PDF, view all saved forms, or continue filling another PO.</p>
       </div>
       <div class="modal-actions">
         <button
@@ -1185,11 +1306,191 @@ const fittingList = computed(() =>
           class="secondary-button"
           @click="showSaveSuccessModal = false; portalTab = 'database'"
         >
-          Lihat Daftar Tersimpan
+          View Saved List
         </button>
         <button type="button" class="primary-button" @click="showSaveSuccessModal = false">
-          OK, Isi Form Baru
+          OK, New Entry
         </button>
+      </div>
+    </UiModal>
+
+    <UiModal
+      :open="showEditFittingModal"
+      :title="modalEditingBooking ? `Edit Fitting Form — ${modalEditingBooking.poNumber}` : 'Edit Fitting Form'"
+      :description="modalEditingBooking ? `${store.customerFor(modalEditingBooking.customerId)?.name ?? '-'} · Event: ${formatDate(modalEditingBooking.eventDate)} · ${modalEditingBooking.location}` : 'Update saved fitting measurements, sessions, uniforms, and vendors.'"
+      wide
+      @close="showEditFittingModal = false"
+    >
+      <div class="fitting-modal-body">
+        <div class="fitting-modal-section">
+          <div class="fitting-modal-section-head">
+            <Ruler :size="17" />
+            <strong>Body Measurements (cm)</strong>
+          </div>
+          <div class="measurement-grid">
+            <article v-for="group in measurementGroups" :key="group.key" class="measurement-card">
+              <h4>{{ group.label }}</h4>
+              <div>
+                <label v-for="field in group.fields" :key="field">
+                  <span>{{ field }}<b v-if="group.required?.includes(field)">*</b></span>
+                  <input v-model="editModalForm.measurements[group.key]![field]" :placeholder="field === 'Shoes' || field === 'Slop' ? 'Size' : '0'" />
+                </label>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="fitting-modal-section">
+          <div class="fitting-modal-section-head">
+            <Shirt :size="17" />
+            <strong>Event Sessions &amp; Attire Selection</strong>
+          </div>
+          <div class="event-detail-list">
+            <article v-for="(event, index) in editModalForm.events" :key="event.number" class="event-detail-card">
+              <header>
+                <div class="event-card-title">
+                  <span>Session {{ event.number }}</span>
+                  <strong>{{ event.name || 'Untitled session' }}</strong>
+                </div>
+                <button
+                  v-if="index > 0"
+                  type="button"
+                  class="event-remove-button"
+                  title="Remove this session"
+                  @click="removeEventSectionFrom(editModalForm, index)"
+                >
+                  <Trash2 :size="14" />Remove Session {{ event.number }}
+                </button>
+              </header>
+
+              <div class="event-basic-fields event-basic-fields--three">
+                <label>
+                  <span>Session Name</span>
+                  <input v-model="event.name" placeholder="e.g. Akad Nikah / Reception / Ngunduh Mantu" />
+                </label>
+                <label>
+                  <span>Ready Time</span>
+                  <input v-model="event.readyTime" type="time" />
+                </label>
+                <label>
+                  <span>Time Note</span>
+                  <input v-model="event.timeNote" type="text" placeholder="e.g. Ready 04:00 AM / Morning" />
+                </label>
+              </div>
+
+              <div class="couple-detail-grid">
+                <section class="couple-detail-card">
+                  <h4>Bride</h4>
+                  <div class="couple-span-2">
+                    <span class="attire-field-label">Select Bride Attire (Catalog)</span>
+                    <AttireSelect
+                      v-model="event.bride.attireId"
+                      :options="modalBrideAttireOptions"
+                      placeholder="Select Bride attire from catalog"
+                    />
+                  </div>
+                  <div v-if="attireSelectionAlert(event.bride.attireId, modalEditingBooking)" class="attire-inline-alert couple-span-2">
+                    <AlertTriangle :size="14" />
+                    <span>{{ attireSelectionAlert(event.bride.attireId, modalEditingBooking) }}</span>
+                  </div>
+                  <label><span>Look</span><input v-model="event.bride.look" placeholder="Makeup look details" /></label>
+                  <label><span>Accessories</span><input v-model="event.bride.accessories" placeholder="Accessories" /></label>
+                  <label class="couple-span-2"><span>Footwear</span><input v-model="event.bride.shoes" placeholder="Shoes / heels" /></label>
+                </section>
+
+                <section class="couple-detail-card">
+                  <h4>Groom</h4>
+                  <div class="couple-span-2">
+                    <span class="attire-field-label">Select Groom Attire (Catalog)</span>
+                    <AttireSelect
+                      v-model="event.groom.attireId"
+                      :options="modalGroomAttireOptions"
+                      placeholder="Select Groom attire from catalog"
+                    />
+                  </div>
+                  <div v-if="attireSelectionAlert(event.groom.attireId, modalEditingBooking)" class="attire-inline-alert couple-span-2">
+                    <AlertTriangle :size="14" />
+                    <span>{{ attireSelectionAlert(event.groom.attireId, modalEditingBooking) }}</span>
+                  </div>
+                  <label><span>Look</span><input v-model="event.groom.look" placeholder="Groom styling details" /></label>
+                  <label><span>Accessories</span><input v-model="event.groom.accessories" placeholder="Blangkon / keris / pins" /></label>
+                  <label class="couple-span-2"><span>Footwear</span><input v-model="event.groom.shoes" placeholder="Shoes / slop" /></label>
+                </section>
+              </div>
+            </article>
+
+            <div v-if="editModalForm.events.length < 3" class="add-event-row">
+              <button type="button" class="outline-button add-event-button" @click="addEventSectionTo(editModalForm)">
+                <Plus :size="16" />+ Add Session
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="fitting-modal-section">
+          <div class="fitting-modal-section-head">
+            <UsersRound :size="17" />
+            <strong>Uniforms &amp; Extras</strong>
+          </div>
+          <div class="uniform-sections">
+            <div class="uniform-group-box">
+              <h4>Domas &amp; Manggolo</h4>
+              <div class="uniform-group-fields uniform-group-fields--manggolo">
+                <label><span>Domas Uniform</span><input v-model="editModalForm.uniforms.domas" placeholder="Color / style / hijab option" /></label>
+                <label><span>Manggolo Uniform</span><input v-model="editModalForm.uniforms.manggolo" placeholder="Manggolo uniform details" /></label>
+                <label><span>Blangkon Qty</span><input v-model.number="editModalForm.manggoloBlangkon" type="number" min="0" placeholder="0" /></label>
+                <label><span>Slippers Qty</span><input v-model.number="editModalForm.manggoloSlop" type="number" min="0" placeholder="0" /></label>
+              </div>
+            </div>
+            <div class="uniform-group-box">
+              <h4>Family, Greeters, Lenses &amp; Extras</h4>
+              <div class="uniform-group-fields uniform-group-fields--two">
+                <label v-for="([key, label, placeholder]) in familyUniformFields" :key="key">
+                  <span>{{ label }}</span>
+                  <input v-model="editModalForm.uniforms[key]" :placeholder="placeholder" />
+                </label>
+                <label>
+                  <span>Contact Lenses</span>
+                  <select v-model="editModalForm.uniforms.softlens">
+                    <option value="">Select lens type</option>
+                    <option v-for="opt in softlensOptions" :key="opt" :value="opt">{{ opt }}</option>
+                  </select>
+                </label>
+                <label v-for="([key, label, placeholder]) in addonUniformFields" :key="key">
+                  <span>{{ label }}</span>
+                  <input v-model="editModalForm.uniforms[key]" :placeholder="placeholder" />
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fitting-modal-section">
+          <div class="fitting-modal-section-head">
+            <Store :size="17" />
+            <strong>Partner Wedding Vendors</strong>
+          </div>
+          <div class="mini-field-grid">
+            <label v-for="([key, label]) in vendorFields" :key="key">
+              <span>{{ label }}</span>
+              <input v-model="editModalForm.vendors[key]" placeholder="Vendor name / contact / notes" />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <p v-if="modalFormError" class="form-error" role="alert">{{ modalFormError }}</p>
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="secondary-button"
+          :disabled="downloadingPdf"
+          @click="downloadSavedPdf(editModalForm)"
+        >
+          <Download :size="16" />Download PDF
+        </button>
+        <button type="button" class="secondary-button" @click="showEditFittingModal = false">Cancel</button>
+        <button type="button" class="primary-button" @click="saveEditModalForm"><Save :size="16" />Save Changes</button>
       </div>
     </UiModal>
   </div>

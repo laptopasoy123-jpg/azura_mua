@@ -5,9 +5,9 @@ import { useCrmStore } from '../stores/crm'
 import UiModal from './UiModal.vue'
 import {
   LayoutDashboard, UsersRound, ShoppingBag, Layers, FileText, CreditCard,
-  BookOpen, CircleDollarSign, Boxes, BarChart3, Building2,
+  BookOpen, CircleDollarSign, Boxes, BarChart3, Building2, SlidersHorizontal,
   Bell, Search, Menu, X, ChevronLeft, ChevronRight,
-  Shirt, Briefcase, Calendar, Clock,
+  Shirt, Briefcase, Calendar, Clock, CheckCircle2, AlertTriangle, Trash2, Info,
 } from '@lucide/vue'
 
 const route = useRoute()
@@ -30,7 +30,7 @@ onUnmounted(() => {
 })
 
 const todayDateLabel = computed(() =>
-  new Intl.DateTimeFormat('id-ID', {
+  new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
     day: '2-digit',
     month: 'short',
@@ -47,31 +47,42 @@ const liveClockLabel = computed(() => {
 
 const sections = [
   {
-    label: 'Ruang Kerja',
+    label: 'Overview',
     items: [
-      { to: '/dashboard', label: 'Dasbor', icon: LayoutDashboard },
-      { to: '/wedding-portal', label: 'Portal Pernikahan', icon: Shirt },
-      { to: '/customers', label: 'Data Pelanggan', icon: UsersRound },
-      { to: '/orders', label: 'Pesanan', icon: ShoppingBag },
-      { to: '/jobs', label: 'Penugasan Tim', icon: Briefcase },
-      { to: '/additional', label: 'Layanan Tambahan', icon: Layers },
-      { to: '/invoices', label: 'Faktur Tagihan', icon: FileText },
-      { to: '/payments', label: 'Pembayaran', icon: CreditCard },
-      { to: '/catalog', label: 'Katalog Jasa', icon: BookOpen },
+      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     ],
   },
   {
-    label: 'Bisnis',
+    label: 'Client & Billing',
     items: [
-      { to: '/expenses', label: 'Pengeluaran', icon: CircleDollarSign },
-      { to: '/inventory', label: 'Inventaris', icon: Boxes },
-      { to: '/reports', label: 'Laporan', icon: BarChart3 },
+      { to: '/customers', label: 'Customers', icon: UsersRound },
+      { to: '/catalog', label: 'Service Catalog', icon: BookOpen },
+      { to: '/orders', label: 'Orders', icon: ShoppingBag },
+      { to: '/additional', label: 'Add-on Services', icon: Layers },
+      { to: '/invoices', label: 'Invoices', icon: FileText },
+      { to: '/payments', label: 'Payments', icon: CreditCard },
     ],
   },
   {
-    label: 'Pengaturan',
+    label: 'Operations',
     items: [
-      { to: '/profile', label: 'Profil Bisnis', icon: Building2 },
+      { to: '/wedding-portal', label: 'Wedding Portal', icon: Shirt },
+      { to: '/jobs', label: 'Team Assignments', icon: Briefcase },
+    ],
+  },
+  {
+    label: 'Finance & Stock',
+    items: [
+      { to: '/expenses', label: 'Expenses', icon: CircleDollarSign },
+      { to: '/inventory', label: 'Inventory', icon: Boxes },
+      { to: '/reports', label: 'Reports', icon: BarChart3 },
+    ],
+  },
+  {
+    label: 'Settings',
+    items: [
+      { to: '/profile', label: 'Business Profile', icon: Building2 },
+      { to: '/settings', label: 'Dropdown Settings', icon: SlidersHorizontal },
     ],
   },
 ]
@@ -79,7 +90,7 @@ const sections = [
 const currentNavItem = computed(() =>
   sections.flatMap((s) => s.items).find((item) => item.to === route.path),
 )
-const pageTitle = computed(() => String(route.meta.title ?? 'Dasbor'))
+const pageTitle = computed(() => String(route.meta.title ?? 'Dashboard'))
 const closeMobile = () => { mobileOpen.value = false }
 </script>
 
@@ -101,7 +112,7 @@ const closeMobile = () => { mobileOpen.value = false }
           <strong>{{ store.businessProfile.name || 'AZURA' }}</strong>
           <span>{{ store.businessProfile.tagline || 'MAKEUP ARTIST' }}</span>
         </div>
-        <button class="icon-button mobile-close" aria-label="Tutup menu" @click="closeMobile"><X :size="19" /></button>
+        <button class="icon-button mobile-close" aria-label="Close menu" @click="closeMobile"><X :size="19" /></button>
       </div>
 
       <a
@@ -109,7 +120,7 @@ const closeMobile = () => { mobileOpen.value = false }
         target="_blank"
         rel="noopener noreferrer"
         class="daysheet-sidebar-credit"
-        :title="collapsed ? 'Powered by DaySheet (daysheet.id)' : 'Kunjungi daysheet.id'"
+        :title="collapsed ? 'Powered by DaySheet (daysheet.id)' : 'Visit daysheet.id'"
       >
         <span class="daysheet-logo-circle" aria-hidden="true">
           <svg viewBox="0 0 64 40" width="26" height="17">
@@ -119,11 +130,11 @@ const closeMobile = () => { mobileOpen.value = false }
         </span>
         <div v-if="!collapsed" class="daysheet-credit-copy">
           <strong>DaySheet.</strong>
-          <span>Hak Cipta © {{ new Date().getFullYear() }} Daysheet.id</span>
+          <span>Copyright © {{ new Date().getFullYear() }} Daysheet.id</span>
         </div>
       </a>
 
-      <nav class="side-nav" aria-label="Navigasi utama">
+      <nav class="side-nav" aria-label="Main navigation">
         <section v-for="section in sections" :key="section.label" class="nav-section">
           <p v-if="!collapsed" class="nav-label">{{ section.label }}</p>
           <div v-else class="nav-divider" />
@@ -144,7 +155,7 @@ const closeMobile = () => { mobileOpen.value = false }
       <div class="sidebar-foot">
         <button class="collapse-button" @click="collapsed = !collapsed">
           <component :is="collapsed ? ChevronRight : ChevronLeft" :size="17" />
-          <span v-if="!collapsed">Ciutkan menu</span>
+          <span v-if="!collapsed">Collapse menu</span>
         </button>
       </div>
     </aside>
@@ -152,7 +163,7 @@ const closeMobile = () => { mobileOpen.value = false }
     <div class="workspace">
       <header class="topbar">
         <div class="topbar-title">
-          <button class="icon-button mobile-menu" aria-label="Buka menu" @click="mobileOpen = true"><Menu :size="21" /></button>
+          <button class="icon-button mobile-menu" aria-label="Open menu" @click="mobileOpen = true"><Menu :size="21" /></button>
           <div>
             <p>{{ store.businessProfile.name }} {{ store.businessProfile.tagline }} <span>/</span></p>
             <h1>
@@ -167,7 +178,7 @@ const closeMobile = () => { mobileOpen.value = false }
           <i class="live-clock-sep" aria-hidden="true" />
           <strong class="live-time-part"><Clock :size="14" :stroke-width="1.8" />{{ liveClockLabel }} WIB</strong>
           <i class="live-clock-sep" aria-hidden="true" />
-          <a href="https://daysheet.id" target="_blank" rel="noopener noreferrer" class="topbar-daysheet-link" title="Kunjungi daysheet.id">
+          <a href="https://daysheet.id" target="_blank" rel="noopener noreferrer" class="topbar-daysheet-link" title="Visit daysheet.id">
             <span class="daysheet-pill-dot" />
             <span class="daysheet-text-day">Day</span><span class="daysheet-text-sheet">Sheet.</span>
           </a>
@@ -176,23 +187,13 @@ const closeMobile = () => { mobileOpen.value = false }
         <div class="topbar-actions">
           <label class="global-search">
             <Search :size="17" />
-            <input type="search" placeholder="Cari PO, customer, invoice…" />
+            <input type="search" placeholder="Search PO, customer, invoice…" />
             <kbd>⌘ K</kbd>
           </label>
-          <button
-            type="button"
-            class="topbar-db-pill"
-            :class="store.dbSyncState.connected ? 'is-online' : 'is-local'"
-            :title="store.dbSyncState.lastError || (store.dbSyncState.connected ? 'Terhubung ke Supabase — klik untuk tarik data ulang' : 'Mode lokal — klik untuk tarik data Supabase')"
-            @click="store.refreshFromDatabase()"
-          >
-            <i class="db-dot" />
-            <span>{{ store.dbSyncState.syncing ? 'Sync…' : (store.dbSyncState.connected ? 'DB Live' : 'DB Lokal') }}</span>
-          </button>
-          <button class="icon-button notification-button" aria-label="Notifikasi" @click="showNotifications = true"><Bell :size="19" /><i /></button>
+          <button class="icon-button notification-button" aria-label="Notifications" @click="showNotifications = true"><Bell :size="19" /><i /></button>
           <div class="profile-chip">
             <div class="profile-avatar">AR</div>
-            <div><strong>Aura Rahma</strong><span>Pemilik</span></div>
+            <div><strong>Aura Rahma</strong><span>Owner</span></div>
           </div>
         </div>
       </header>
@@ -205,23 +206,48 @@ const closeMobile = () => { mobileOpen.value = false }
         </RouterView>
         <footer class="workspace-footer">
           <a href="https://daysheet.id" target="_blank" rel="noopener noreferrer" class="daysheet-copyright-link">
-            Hak Cipta © {{ new Date().getFullYear() }} Daysheet.id
+            Copyright © {{ new Date().getFullYear() }} Daysheet.id
           </a>
         </footer>
       </main>
     </div>
 
-    <UiModal :open="showNotifications" title="Notifikasi" description="Peringatan jadwal busana dan aktivitas terbaru." @close="showNotifications = false">
+    <UiModal :open="showNotifications" title="Notifications" description="Attire schedule reminders and recent studio activity." @close="showNotifications = false">
       <div v-if="store.laundryUrgentAlerts.length" class="notification-urgent-box">
         <article v-for="alert in store.laundryUrgentAlerts" :key="`${alert.attireId}-${alert.bookingId}`" class="notification-urgent-item">
-          <strong>Segera Siapkan Busana ({{ alert.daysLeft === 0 ? 'Hari Ini' : 'H-1 Besok' }})</strong>
+          <strong>Prepare Attire Immediately ({{ alert.daysLeft === 0 ? 'Event Today' : 'H-1 Tomorrow' }})</strong>
           <span>{{ alert.message }}</span>
         </article>
       </div>
       <div class="notification-list">
-        <article v-for="activity in store.activities.slice(0, 6)" :key="activity.id"><i :class="`activity-${activity.tone}`" /><div><strong>{{ activity.title }}</strong><span>{{ activity.detail }}</span></div><time>{{ new Date(activity.at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) }}</time></article>
+        <article v-for="activity in store.activities.slice(0, 6)" :key="activity.id"><i :class="`activity-${activity.tone}`" /><div><strong>{{ activity.title }}</strong><span>{{ activity.detail }}</span></div><time>{{ new Date(activity.at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) }}</time></article>
       </div>
-      <div class="modal-actions"><button class="primary-button" @click="showNotifications = false">Tutup</button></div>
+      <div class="modal-actions"><button class="primary-button" @click="showNotifications = false">Close</button></div>
     </UiModal>
+
+    <Transition name="toast-slide">
+      <div
+        v-if="store.actionToast"
+        :key="store.actionToast.id"
+        class="action-toast-popup"
+        :class="`is-${store.actionToast.tone}`"
+        role="status"
+        aria-live="polite"
+      >
+        <span class="action-toast-icon" aria-hidden="true">
+          <Trash2 v-if="store.actionToast.tone === 'rose'" :size="18" />
+          <AlertTriangle v-else-if="store.actionToast.tone === 'amber'" :size="18" />
+          <CheckCircle2 v-else-if="store.actionToast.tone === 'green' || store.actionToast.tone === 'blue'" :size="18" />
+          <Info v-else :size="18" />
+        </span>
+        <div class="action-toast-copy">
+          <strong>{{ store.actionToast.title }}</strong>
+          <span>{{ store.actionToast.detail }}</span>
+        </div>
+        <button type="button" class="action-toast-close" aria-label="Dismiss notification" @click="store.dismissActionToast">
+          <X :size="15" />
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>

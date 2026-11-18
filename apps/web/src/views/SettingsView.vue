@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import {
   Building2,
-  ListChecks,
   LoaderCircle,
   Pencil,
   Plus,
@@ -14,17 +13,21 @@ import {
   Receipt,
   Check,
   X,
-  Database,
-  RefreshCw,
+  Sparkles,
+  Boxes,
+  Ruler,
+  Package,
 } from '@lucide/vue'
-import { useCrmStore, type DropdownOptionGroup, type EmployeeRecord } from '../stores/crm'
+import { useCrmStore, type DropdownOptionGroup, type EmployeeRecord, type InventoryItem } from '../stores/crm'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import UiModal from '../components/UiModal.vue'
 
-defineProps<{ section?: 'profile' | 'system' | 'users' }>()
+const props = withDefaults(defineProps<{ section?: 'profile' | 'dropdown' }>(), {
+  section: 'profile',
+})
 const store = useCrmStore()
 
-const activeTab = ref<'profile' | 'dropdown'>('profile')
+const isDropdownMode = computed(() => props.section === 'dropdown')
 
 const profileForm = reactive({
   name: store.businessProfile.name,
@@ -67,7 +70,7 @@ const handleLogoUpload = async (event: Event) => {
     profileForm.logoUrl = res.url
     store.updateBusinessProfile({ logoUrl: res.url })
   } catch (err) {
-    uploadError.value = err instanceof Error ? err.message : 'Gagal mengunggah gambar logo.'
+    uploadError.value = err instanceof Error ? err.message : 'Failed to upload logo image.'
   } finally {
     uploadingLogo.value = false
     inputEl.value = ''
@@ -95,8 +98,8 @@ const saveProfile = () => {
 // --- Dropdown & Master List Management ---
 const dropdownFeedback = ref('')
 
-// Karyawan
-const newEmployee = reactive({ name: '', role: 'MUA / Tim', phone: '' })
+// Employees
+const newEmployee = reactive({ name: '', role: 'MUA / Team', phone: '' })
 const editingEmpId = ref('')
 const editEmpDraft = reactive({ name: '', role: '', phone: '' })
 
@@ -105,15 +108,15 @@ const handleAddEmployee = () => {
   try {
     store.addEmployee({
       name: newEmployee.name,
-      role: newEmployee.role,
+      role: newEmployee.role || 'MUA / Team',
       phone: newEmployee.phone,
       active: true,
     })
     newEmployee.name = ''
-    newEmployee.role = 'MUA / Tim'
+    newEmployee.role = 'MUA / Team'
     newEmployee.phone = ''
   } catch (err) {
-    dropdownFeedback.value = err instanceof Error ? err.message : 'Gagal menambah karyawan.'
+    dropdownFeedback.value = err instanceof Error ? err.message : 'Failed to add employee.'
   }
 }
 
@@ -127,12 +130,12 @@ const startEditEmployee = (emp: EmployeeRecord) => {
 const saveEditEmployee = (emp: EmployeeRecord) => {
   dropdownFeedback.value = ''
   if (!editEmpDraft.name.trim()) {
-    dropdownFeedback.value = 'Nama karyawan tidak boleh kosong.'
+    dropdownFeedback.value = 'Employee name cannot be empty.'
     return
   }
   store.updateEmployee(emp.id, {
     name: editEmpDraft.name,
-    role: editEmpDraft.role || 'MUA / Tim',
+    role: editEmpDraft.role || 'MUA / Team',
     phone: editEmpDraft.phone,
   })
   editingEmpId.value = ''
@@ -143,6 +146,9 @@ const newOptionInput = reactive<Record<DropdownOptionGroup, string>>({
   paymentMethods: '',
   poExpenseCategories: '',
   generalExpenseCategories: '',
+  stylingTypes: '',
+  inventoryCategories: '',
+  units: '',
 })
 const editingOption = reactive<{ group: DropdownOptionGroup | ''; oldLabel: string; draft: string }>({
   group: '',
@@ -156,7 +162,7 @@ const handleAddOption = (group: DropdownOptionGroup) => {
     store.addDropdownOption(group, newOptionInput[group])
     newOptionInput[group] = ''
   } catch (err) {
-    dropdownFeedback.value = err instanceof Error ? err.message : 'Gagal menambah opsi.'
+    dropdownFeedback.value = err instanceof Error ? err.message : 'Failed to add option.'
   }
 }
 
@@ -175,7 +181,7 @@ const saveEditOption = () => {
     editingOption.oldLabel = ''
     editingOption.draft = ''
   } catch (err) {
-    dropdownFeedback.value = err instanceof Error ? err.message : 'Gagal mengubah opsi.'
+    dropdownFeedback.value = err instanceof Error ? err.message : 'Failed to update option.'
   }
 }
 
@@ -184,29 +190,134 @@ const handleRemoveOption = (group: DropdownOptionGroup, label: string) => {
   try {
     store.removeDropdownOption(group, label)
   } catch (err) {
-    dropdownFeedback.value = err instanceof Error ? err.message : 'Gagal menghapus opsi.'
+    dropdownFeedback.value = err instanceof Error ? err.message : 'Failed to remove option.'
   }
 }
 
-const syncFeedback = ref('')
+// Inventory Item Names & Product Photos master dropdown management
+const newInvItem = reactive({
+  name: '',
+  category: store.inventoryCategories[0] ?? 'Complexion',
+  unit: store.units[0] ?? 'pcs',
+  imageUrl: '',
+})
+const uploadingNewInvPhoto = ref(false)
+const uploadingInvId = ref('')
+const editingInvId = ref('')
+const editInvDraft = reactive({ name: '', category: '', unit: '', imageUrl: '' })
 
-const handlePullFromDb = async () => {
-  syncFeedback.value = ''
-  const pulled = await store.refreshFromDatabase()
-  syncFeedback.value = store.dbSyncState.lastError
-    ? `Gagal: ${store.dbSyncState.lastError}`
-    : (pulled
-        ? 'Seluruh data terbaru berhasil ditarik langsung dari Supabase.'
-        : 'Terhubung ke Supabase. Saat ini seluruh tabel di database masih kosong (0 baris).')
+const handleNewInvPhoto = async (event: Event) => {
+  const inputEl = event.target as HTMLInputElement
+  const file = inputEl.files?.[0]
+  if (!file) return
+  dropdownFeedback.value = ''
+  uploadingNewInvPhoto.value = true
+  try {
+    const res = await uploadImageWithFallback(file, 'inventory')
+    newInvItem.imageUrl = res.url
+  } catch (err) {
+    dropdownFeedback.value = err instanceof Error ? err.message : 'Failed to upload inventory product photo.'
+  } finally {
+    uploadingNewInvPhoto.value = false
+    inputEl.value = ''
+  }
 }
 
-const handlePushToDb = async () => {
-  syncFeedback.value = ''
+const handleRowInvPhoto = async (item: InventoryItem, event: Event) => {
+  const inputEl = event.target as HTMLInputElement
+  const file = inputEl.files?.[0]
+  if (!file) return
+  dropdownFeedback.value = ''
+  uploadingInvId.value = item.id
   try {
-    await store.syncLocalDataToDatabase()
-    syncFeedback.value = 'Seluruh data saat ini berhasil disimpan ke database Supabase.'
+    const res = await uploadImageWithFallback(file, 'inventory')
+    store.updateInventoryItem(item.id, {
+      name: item.name,
+      category: item.category,
+      unit: item.unit,
+      location: item.location,
+      initialStock: item.initialStock,
+      minimumStock: item.minimumStock,
+      imageUrl: res.url,
+    })
+    if (editingInvId.value === item.id) {
+      editInvDraft.imageUrl = res.url
+    }
   } catch (err) {
-    syncFeedback.value = err instanceof Error ? err.message : 'Gagal mengirim data ke Supabase.'
+    dropdownFeedback.value = err instanceof Error ? err.message : 'Failed to upload product photo.'
+  } finally {
+    uploadingInvId.value = ''
+    inputEl.value = ''
+  }
+}
+
+const clearRowInvPhoto = (item: InventoryItem) => {
+  store.updateInventoryItem(item.id, {
+    name: item.name,
+    category: item.category,
+    unit: item.unit,
+    location: item.location,
+    initialStock: item.initialStock,
+    minimumStock: item.minimumStock,
+    imageUrl: '',
+  })
+  if (editingInvId.value === item.id) {
+    editInvDraft.imageUrl = ''
+  }
+}
+
+const handleAddInvItem = () => {
+  dropdownFeedback.value = ''
+  const name = newInvItem.name.trim()
+  if (!name) {
+    dropdownFeedback.value = 'Inventory item name cannot be empty.'
+    return
+  }
+  store.addInventoryItem({
+    name,
+    category: newInvItem.category || store.inventoryCategories[0] || 'Complexion',
+    unit: newInvItem.unit || store.units[0] || 'pcs',
+    location: 'Studio Rack',
+    initialStock: 0,
+    minimumStock: 2,
+    imageUrl: newInvItem.imageUrl || undefined,
+  })
+  newInvItem.name = ''
+  newInvItem.imageUrl = ''
+}
+
+const startEditInvItem = (item: InventoryItem) => {
+  editingInvId.value = item.id
+  editInvDraft.name = item.name
+  editInvDraft.category = item.category
+  editInvDraft.unit = item.unit
+  editInvDraft.imageUrl = item.imageUrl ?? ''
+}
+
+const saveEditInvItem = (item: InventoryItem) => {
+  dropdownFeedback.value = ''
+  if (!editInvDraft.name.trim()) {
+    dropdownFeedback.value = 'Inventory item name cannot be empty.'
+    return
+  }
+  store.updateInventoryItem(item.id, {
+    name: editInvDraft.name,
+    category: editInvDraft.category || item.category,
+    unit: editInvDraft.unit || item.unit,
+    location: item.location,
+    initialStock: item.initialStock,
+    minimumStock: item.minimumStock,
+    imageUrl: editInvDraft.imageUrl,
+  })
+  editingInvId.value = ''
+}
+
+const handleDeleteInvItem = (item: InventoryItem) => {
+  dropdownFeedback.value = ''
+  try {
+    store.deleteInventoryItem(item.id)
+  } catch (err) {
+    dropdownFeedback.value = err instanceof Error ? err.message : 'Failed to delete inventory item.'
   }
 }
 </script>
@@ -215,67 +326,69 @@ const handlePushToDb = async () => {
   <div class="page-stack">
     <section class="page-heading">
       <div>
-        <span class="eyebrow">Pengaturan</span>
-        <h2>{{ activeTab === 'profile' ? 'Profil Bisnis' : 'Pengaturan Dropdown & Tim' }}</h2>
-        <p>Kelola identitas usaha, logo dokumen, daftar karyawan, metode pembayaran, dan kategori pengeluaran.</p>
+        <span class="eyebrow">Settings</span>
+        <h2>{{ isDropdownMode ? 'Dropdown Settings & Master Lists' : 'Business Profile' }}</h2>
+        <p>
+          {{
+            isDropdownMode
+              ? 'Manage all selectable dropdown lists used across Bookings, Payments, Expenses, Service Catalog, and Inventory.'
+              : 'Configure studio identity, logo, and footer notes displayed across web views, invoices, receipts, and PDF reports.'
+          }}
+        </p>
       </div>
-      <div class="heading-actions">
-        <div class="segmented-tabs">
-          <button type="button" :class="{ active: activeTab === 'profile' }" @click="activeTab = 'profile'">
-            <Building2 :size="15" />Profil Bisnis
-          </button>
-          <button type="button" :class="{ active: activeTab === 'dropdown' }" @click="activeTab = 'dropdown'">
-            <ListChecks :size="15" />Pengaturan Dropdown
-          </button>
-        </div>
-        <button v-if="activeTab === 'profile'" type="button" class="primary-button" :disabled="uploadingLogo" @click="saveProfile">
-          <Save :size="17" />Simpan Perubahan
+      <div v-if="!isDropdownMode" class="heading-actions">
+        <button type="button" class="primary-button" :disabled="uploadingLogo" @click="saveProfile">
+          <Save :size="17" />Save Changes
         </button>
       </div>
     </section>
 
-    <section v-if="activeTab === 'profile'" class="settings-layout">
+    <!-- BUSINESS PROFILE SECTION -->
+    <section v-if="!isDropdownMode" class="settings-layout">
       <article class="panel settings-card">
         <header>
           <span class="settings-icon"><Building2 :size="21" /></span>
           <div>
-            <h3>Identitas &amp; Logo Bisnis</h3>
-            <p>Digunakan pada header aplikasi web, dokumen invoice, serta bukti kwitansi pembayaran.</p>
+            <h3>Business Identity &amp; Logo</h3>
+            <p>Displayed in the sidebar header, invoices, payment receipts, and all downloadable PDF documents.</p>
           </div>
         </header>
 
         <div class="form-grid">
           <div class="span-2 attire-upload-block">
-            <span class="upload-field-label">Upload Logo Bisnis (Tampil di Web, Invoice &amp; Kwitansi)</span>
+            <span class="upload-field-label">Studio Brand Logo (Used on Web, Invoices &amp; Receipts)</span>
             <label class="upload-zone logo-upload-zone">
-              <img v-if="profileForm.logoUrl" :src="profileForm.logoUrl" alt="Logo bisnis" class="uploaded-logo-preview" />
+              <img v-if="profileForm.logoUrl" :src="profileForm.logoUrl" alt="Business logo" class="uploaded-logo-preview" />
               <div v-else>
-                <UploadCloud :size="24" />
-                <strong>Unggah logo JPG, PNG (transparan), atau WebP</strong>
-                <span>Disarankan rasio persegi · Maksimal 5 MB</span>
+                <span class="logo-upload-cta-icon"><UploadCloud :size="22" /></span>
+                <div class="logo-upload-cta-copy">
+                  <strong>Upload JPG, PNG (transparent), or WebP logo</strong>
+                  <span>Square aspect ratio recommended · Max 5 MB</span>
+                </div>
+                <span class="logo-upload-cta-pill">Choose File</span>
               </div>
               <input type="file" accept="image/jpeg,image/png,image/webp,image/svg+xml" @change="handleLogoUpload" />
             </label>
             <div v-if="profileForm.logoUrl" class="logo-upload-actions">
               <button type="button" class="soft-button remove-photo-btn" @click="removeLogo">
-                <Trash2 :size="14" />Hapus Logo &amp; Gunakan Monogram Default
+                <Trash2 :size="14" />Remove Logo &amp; Use Default Monogram
               </button>
             </div>
-            <p v-if="uploadingLogo" class="upload-state"><LoaderCircle class="spin" :size="15" />Memproses logo…</p>
+            <p v-if="uploadingLogo" class="upload-state"><LoaderCircle class="spin" :size="15" />Processing logo…</p>
             <p v-if="uploadError" class="form-error">{{ uploadError }}</p>
           </div>
 
-          <label><span>Nama brand / bisnis *</span><input v-model="profileForm.name" placeholder="Contoh: AZURA" /></label>
-          <label><span>Subjudul / Tagline</span><input v-model="profileForm.tagline" placeholder="Contoh: MAKEUP ARTIST" /></label>
-          <label><span>Telepon / WhatsApp</span><input v-model="profileForm.phone" placeholder="08xxxxxxxxxx" /></label>
-          <label><span>Email</span><input v-model="profileForm.email" type="email" placeholder="hello@azuramakeup.id" /></label>
-          <label class="span-2"><span>Alamat studio</span><textarea v-model="profileForm.address" rows="2" /></label>
-          <label class="span-2"><span>Catatan kaki invoice &amp; kwitansi</span><textarea v-model="profileForm.invoiceNote" rows="2" /></label>
+          <label><span>Brand / Business Name *</span><input v-model="profileForm.name" placeholder="e.g. AZURA" /></label>
+          <label><span>Subtitle / Tagline</span><input v-model="profileForm.tagline" placeholder="e.g. MAKEUP ARTIST" /></label>
+          <label><span>Phone / WhatsApp</span><input v-model="profileForm.phone" placeholder="08xxxxxxxxxx" /></label>
+          <label><span>Email Address</span><input v-model="profileForm.email" type="email" placeholder="hello@azuramakeup.id" /></label>
+          <label class="span-2"><span>Studio Address</span><textarea v-model="profileForm.address" rows="2" /></label>
+          <label class="span-2"><span>Invoice &amp; Receipt Footer Note</span><textarea v-model="profileForm.invoiceNote" rows="2" /></label>
         </div>
       </article>
 
       <aside class="panel brand-preview">
-        <span class="eyebrow">Preview Identitas Web &amp; Dokumen</span>
+        <span class="eyebrow">Brand &amp; Document Preview</span>
         <div class="preview-logo" :class="{ 'has-custom-logo': Boolean(profileForm.logoUrl) }">
           <img v-if="profileForm.logoUrl" :src="profileForm.logoUrl" :alt="profileForm.name" />
           <template v-else>{{ (profileForm.name || 'A').slice(0, 1).toUpperCase() }}</template>
@@ -284,71 +397,52 @@ const handlePushToDb = async () => {
         <small class="brand-preview-tagline">{{ profileForm.tagline || 'MAKEUP ARTIST' }}</small>
         <p>{{ profileForm.address }}</p>
         <span>{{ profileForm.phone }} · {{ profileForm.email }}</span>
-
-        <div class="db-sync-box">
-          <div class="db-sync-head">
-            <Database :size="15" />
-            <strong>Database Supabase</strong>
-            <span class="db-sync-pill" :class="store.dbSyncState.connected ? 'is-online' : 'is-offline'">
-              {{ store.dbSyncState.syncing ? 'Sinkronisasi…' : (store.dbSyncState.connected ? 'Terhubung' : 'Lokal') }}
-            </span>
-          </div>
-          <small v-if="store.dbSyncState.lastSyncedAt" class="db-sync-time">
-            Sinkron terakhir: {{ new Date(store.dbSyncState.lastSyncedAt).toLocaleTimeString('id-ID') }}
-          </small>
-          <p v-if="syncFeedback || store.dbSyncState.lastError" class="db-sync-msg">
-            {{ syncFeedback || store.dbSyncState.lastError }}
-          </p>
-          <div class="db-sync-actions">
-            <button type="button" class="primary-button" :disabled="store.dbSyncState.syncing" @click="handlePullFromDb">
-              <RefreshCw :size="14" :class="{ spin: store.dbSyncState.syncing }" />Tarik Ulang dari Supabase
-            </button>
-          </div>
-        </div>
       </aside>
     </section>
 
+    <!-- DROPDOWN SETTINGS SECTION (DEDICATED) -->
     <section v-else class="dropdown-settings-grid">
       <p v-if="dropdownFeedback" class="form-error dropdown-feedback-banner" role="alert">{{ dropdownFeedback }}</p>
 
-      <!-- Card 1: Nama Karyawan -->
+      <!-- Card 1: Employees -->
       <article class="panel settings-card dropdown-setting-card">
         <header>
           <span class="settings-icon"><Users :size="20" /></span>
           <div>
-            <h3>Daftar Nama Karyawan</h3>
-            <p>Muncul pada dropdown &amp; pilihan Penugasan Job Karyawan.</p>
+            <h3>Employee Roster</h3>
+            <p>Used in Team Job Assignments and Inventory PIC dropdowns.</p>
           </div>
+          <span class="dropdown-count-pill">{{ store.employees.length }}</span>
         </header>
 
         <form class="dropdown-add-row dropdown-add-employee" @submit.prevent="handleAddEmployee">
-          <input v-model="newEmployee.name" placeholder="Nama karyawan *" />
-          <input v-model="newEmployee.role" placeholder="Jabatan / peran" />
-          <button type="submit" class="primary-button"><Plus :size="15" />Tambah</button>
+          <input v-model="newEmployee.name" placeholder="Employee name *" />
+          <input v-model="newEmployee.role" placeholder="Role / position" />
+          <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
         <ul class="dropdown-option-list">
           <li v-for="emp in store.employees" :key="emp.id" class="dropdown-option-row" :class="{ 'is-inactive': !emp.active }">
             <template v-if="editingEmpId === emp.id">
               <div class="dropdown-edit-inline">
-                <input v-model="editEmpDraft.name" placeholder="Nama karyawan" />
-                <input v-model="editEmpDraft.role" placeholder="Jabatan" />
+                <input v-model="editEmpDraft.name" placeholder="Employee name" />
+                <input v-model="editEmpDraft.role" placeholder="Role" />
               </div>
               <div class="action-row">
-                <button type="button" class="icon-button" title="Simpan" @click="saveEditEmployee(emp)"><Check :size="15" /></button>
-                <button type="button" class="icon-button" title="Batal" @click="editingEmpId = ''"><X :size="15" /></button>
+                <button type="button" class="icon-button" title="Save" @click="saveEditEmployee(emp)"><Check :size="15" /></button>
+                <button type="button" class="icon-button" title="Cancel" @click="editingEmpId = ''"><X :size="15" /></button>
               </div>
             </template>
             <template v-else>
               <div class="dropdown-option-label">
                 <strong>{{ emp.name }}</strong>
-                <small>{{ emp.role }} · {{ emp.active ? 'Aktif' : 'Nonaktif' }}</small>
+                <small>{{ emp.role }} · {{ emp.active ? 'Active' : 'Inactive' }}</small>
               </div>
               <div class="action-row">
                 <button type="button" class="soft-button" @click="store.toggleEmployeeStatus(emp.id)">
-                  {{ emp.active ? 'Nonaktifkan' : 'Aktifkan' }}
+                  {{ emp.active ? 'Deactivate' : 'Activate' }}
                 </button>
-                <button type="button" class="icon-button" title="Ubah nama karyawan" @click="startEditEmployee(emp)">
+                <button type="button" class="icon-button" title="Edit employee" @click="startEditEmployee(emp)">
                   <Pencil :size="14" />
                 </button>
               </div>
@@ -357,111 +451,303 @@ const handlePushToDb = async () => {
         </ul>
       </article>
 
-      <!-- Card 2: Metode Pembayaran -->
+      <!-- Card 2: Payment Methods -->
       <article class="panel settings-card dropdown-setting-card">
         <header>
           <span class="settings-icon"><WalletCards :size="20" /></span>
           <div>
-            <h3>Metode Pembayaran</h3>
-            <p>Digunakan pada Pembayaran, Refund Pelanggan, dan Pengeluaran.</p>
+            <h3>Payment Methods</h3>
+            <p>Appears in Payments, Customer Refunds, and Expense recording.</p>
           </div>
+          <span class="dropdown-count-pill">{{ store.paymentMethods.length }}</span>
         </header>
 
         <form class="dropdown-add-row" @submit.prevent="handleAddOption('paymentMethods')">
-          <input v-model="newOptionInput.paymentMethods" placeholder="Tambah metode, mis. Debit BCA / EDC" />
-          <button type="submit" class="primary-button"><Plus :size="15" />Tambah</button>
+          <input v-model="newOptionInput.paymentMethods" placeholder="Add method, e.g. Bank Transfer / EDC" />
+          <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
         <ul class="dropdown-option-list">
           <li v-for="item in store.paymentMethods" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'paymentMethods' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
-                <input v-model="editingOption.draft" placeholder="Nama metode" />
+                <input v-model="editingOption.draft" placeholder="Method name" />
               </div>
               <div class="action-row">
-                <button type="button" class="icon-button" title="Simpan" @click="saveEditOption"><Check :size="15" /></button>
-                <button type="button" class="icon-button" title="Batal" @click="editingOption.group = ''"><X :size="15" /></button>
+                <button type="button" class="icon-button" title="Save" @click="saveEditOption"><Check :size="15" /></button>
+                <button type="button" class="icon-button" title="Cancel" @click="editingOption.group = ''"><X :size="15" /></button>
               </div>
             </template>
             <template v-else>
               <div class="dropdown-option-label"><strong>{{ item }}</strong></div>
               <div class="action-row">
-                <button type="button" class="icon-button" title="Ubah metode" @click="startEditOption('paymentMethods', item)"><Pencil :size="14" /></button>
-                <button type="button" class="icon-button danger-icon-btn" title="Hapus metode" @click="handleRemoveOption('paymentMethods', item)"><Trash2 :size="14" /></button>
+                <button type="button" class="icon-button" title="Edit method" @click="startEditOption('paymentMethods', item)"><Pencil :size="14" /></button>
+                <button type="button" class="icon-button danger-icon-btn" title="Remove method" @click="handleRemoveOption('paymentMethods', item)"><Trash2 :size="14" /></button>
               </div>
             </template>
           </li>
         </ul>
       </article>
 
-      <!-- Card 3: Kategori Pengeluaran Berdasarkan PO -->
+      <!-- Card 3: PO Expense Categories -->
       <article class="panel settings-card dropdown-setting-card">
         <header>
           <span class="settings-icon"><Receipt :size="20" /></span>
           <div>
-            <h3>Kategori Pengeluaran (Berdasarkan PO)</h3>
-            <p>Muncul saat mencatat pengeluaran yang terhubung ke Nomor PO.</p>
+            <h3>PO Expense Categories</h3>
+            <p>Selectable when recording expenses linked to a customer PO.</p>
           </div>
+          <span class="dropdown-count-pill">{{ store.poExpenseCategories.length }}</span>
         </header>
 
         <form class="dropdown-add-row" @submit.prevent="handleAddOption('poExpenseCategories')">
-          <input v-model="newOptionInput.poExpenseCategories" placeholder="Mis. Fee Freelancer / Bunga Segar" />
-          <button type="submit" class="primary-button"><Plus :size="15" />Tambah</button>
+          <input v-model="newOptionInput.poExpenseCategories" placeholder="e.g. Freelance Fee / Fresh Jasmine" />
+          <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
         <ul class="dropdown-option-list">
           <li v-for="item in store.poExpenseCategories" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'poExpenseCategories' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
-                <input v-model="editingOption.draft" placeholder="Nama kategori PO" />
+                <input v-model="editingOption.draft" placeholder="PO category name" />
               </div>
               <div class="action-row">
-                <button type="button" class="icon-button" title="Simpan" @click="saveEditOption"><Check :size="15" /></button>
-                <button type="button" class="icon-button" title="Batal" @click="editingOption.group = ''"><X :size="15" /></button>
+                <button type="button" class="icon-button" title="Save" @click="saveEditOption"><Check :size="15" /></button>
+                <button type="button" class="icon-button" title="Cancel" @click="editingOption.group = ''"><X :size="15" /></button>
               </div>
             </template>
             <template v-else>
               <div class="dropdown-option-label"><strong>{{ item }}</strong></div>
               <div class="action-row">
-                <button type="button" class="icon-button" title="Ubah kategori" @click="startEditOption('poExpenseCategories', item)"><Pencil :size="14" /></button>
-                <button type="button" class="icon-button danger-icon-btn" title="Hapus kategori" @click="handleRemoveOption('poExpenseCategories', item)"><Trash2 :size="14" /></button>
+                <button type="button" class="icon-button" title="Edit category" @click="startEditOption('poExpenseCategories', item)"><Pencil :size="14" /></button>
+                <button type="button" class="icon-button danger-icon-btn" title="Remove category" @click="handleRemoveOption('poExpenseCategories', item)"><Trash2 :size="14" /></button>
               </div>
             </template>
           </li>
         </ul>
       </article>
 
-      <!-- Card 4: Kategori Pengeluaran Umum (Di Luar PO) -->
+      <!-- Card 4: General Expense Categories -->
       <article class="panel settings-card dropdown-setting-card">
         <header>
           <span class="settings-icon"><Receipt :size="20" /></span>
           <div>
-            <h3>Kategori Pengeluaran Umum (Di Luar PO)</h3>
-            <p>Muncul saat mencatat pengeluaran operasional studio di luar PO.</p>
+            <h3>General Studio Expense Categories</h3>
+            <p>Selectable when logging studio overhead expenses outside a PO.</p>
           </div>
+          <span class="dropdown-count-pill">{{ store.generalExpenseCategories.length }}</span>
         </header>
 
         <form class="dropdown-add-row" @submit.prevent="handleAddOption('generalExpenseCategories')">
-          <input v-model="newOptionInput.generalExpenseCategories" placeholder="Mis. Sewa Studio / Listrik &amp; Air" />
-          <button type="submit" class="primary-button"><Plus :size="15" />Tambah</button>
+          <input v-model="newOptionInput.generalExpenseCategories" placeholder="e.g. Studio Rent / Electricity" />
+          <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
         <ul class="dropdown-option-list">
           <li v-for="item in store.generalExpenseCategories" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'generalExpenseCategories' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
-                <input v-model="editingOption.draft" placeholder="Nama kategori umum" />
+                <input v-model="editingOption.draft" placeholder="General category name" />
               </div>
               <div class="action-row">
-                <button type="button" class="icon-button" title="Simpan" @click="saveEditOption"><Check :size="15" /></button>
-                <button type="button" class="icon-button" title="Batal" @click="editingOption.group = ''"><X :size="15" /></button>
+                <button type="button" class="icon-button" title="Save" @click="saveEditOption"><Check :size="15" /></button>
+                <button type="button" class="icon-button" title="Cancel" @click="editingOption.group = ''"><X :size="15" /></button>
               </div>
             </template>
             <template v-else>
               <div class="dropdown-option-label"><strong>{{ item }}</strong></div>
               <div class="action-row">
-                <button type="button" class="icon-button" title="Ubah kategori" @click="startEditOption('generalExpenseCategories', item)"><Pencil :size="14" /></button>
-                <button type="button" class="icon-button danger-icon-btn" title="Hapus kategori" @click="handleRemoveOption('generalExpenseCategories', item)"><Trash2 :size="14" /></button>
+                <button type="button" class="icon-button" title="Edit category" @click="startEditOption('generalExpenseCategories', item)"><Pencil :size="14" /></button>
+                <button type="button" class="icon-button danger-icon-btn" title="Remove category" @click="handleRemoveOption('generalExpenseCategories', item)"><Trash2 :size="14" /></button>
+              </div>
+            </template>
+          </li>
+        </ul>
+      </article>
+
+      <!-- Card 5: Styling Types -->
+      <article class="panel settings-card dropdown-setting-card">
+        <header>
+          <span class="settings-icon"><Sparkles :size="20" /></span>
+          <div>
+            <h3>Styling Types</h3>
+            <p>Appears in Customer Bookings &amp; PO event forms (Hairdo, Hijabdo, Paes).</p>
+          </div>
+          <span class="dropdown-count-pill">{{ store.stylingTypes.length }}</span>
+        </header>
+
+        <form class="dropdown-add-row" @submit.prevent="handleAddOption('stylingTypes')">
+          <input v-model="newOptionInput.stylingTypes" placeholder="e.g. Modern Sanggul / Paes Solo" />
+          <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
+        </form>
+
+        <ul class="dropdown-option-list">
+          <li v-for="item in store.stylingTypes" :key="item" class="dropdown-option-row">
+            <template v-if="editingOption.group === 'stylingTypes' && editingOption.oldLabel === item">
+              <div class="dropdown-edit-inline">
+                <input v-model="editingOption.draft" placeholder="Styling type" />
+              </div>
+              <div class="action-row">
+                <button type="button" class="icon-button" title="Save" @click="saveEditOption"><Check :size="15" /></button>
+                <button type="button" class="icon-button" title="Cancel" @click="editingOption.group = ''"><X :size="15" /></button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="dropdown-option-label"><strong>{{ item }}</strong></div>
+              <div class="action-row">
+                <button type="button" class="icon-button" title="Edit styling" @click="startEditOption('stylingTypes', item)"><Pencil :size="14" /></button>
+                <button type="button" class="icon-button danger-icon-btn" title="Remove styling" @click="handleRemoveOption('stylingTypes', item)"><Trash2 :size="14" /></button>
+              </div>
+            </template>
+          </li>
+        </ul>
+      </article>
+
+      <!-- Card 6: Inventory Categories -->
+      <article class="panel settings-card dropdown-setting-card">
+        <header>
+          <span class="settings-icon"><Boxes :size="20" /></span>
+          <div>
+            <h3>Inventory Categories</h3>
+            <p>Category dropdown options for organizing makeup &amp; studio supply items.</p>
+          </div>
+          <span class="dropdown-count-pill">{{ store.inventoryCategories.length }}</span>
+        </header>
+
+        <form class="dropdown-add-row" @submit.prevent="handleAddOption('inventoryCategories')">
+          <input v-model="newOptionInput.inventoryCategories" placeholder="e.g. Brush Set / Adhesives" />
+          <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
+        </form>
+
+        <ul class="dropdown-option-list">
+          <li v-for="item in store.inventoryCategories" :key="item" class="dropdown-option-row">
+            <template v-if="editingOption.group === 'inventoryCategories' && editingOption.oldLabel === item">
+              <div class="dropdown-edit-inline">
+                <input v-model="editingOption.draft" placeholder="Category name" />
+              </div>
+              <div class="action-row">
+                <button type="button" class="icon-button" title="Save" @click="saveEditOption"><Check :size="15" /></button>
+                <button type="button" class="icon-button" title="Cancel" @click="editingOption.group = ''"><X :size="15" /></button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="dropdown-option-label"><strong>{{ item }}</strong></div>
+              <div class="action-row">
+                <button type="button" class="icon-button" title="Edit category" @click="startEditOption('inventoryCategories', item)"><Pencil :size="14" /></button>
+                <button type="button" class="icon-button danger-icon-btn" title="Remove category" @click="handleRemoveOption('inventoryCategories', item)"><Trash2 :size="14" /></button>
+              </div>
+            </template>
+          </li>
+        </ul>
+      </article>
+
+      <!-- Card 7: Measurement Units -->
+      <article class="panel settings-card dropdown-setting-card">
+        <header>
+          <span class="settings-icon"><Ruler :size="20" /></span>
+          <div>
+            <h3>Units of Measure</h3>
+            <p>Shared unit options across Service Catalog and Inventory items.</p>
+          </div>
+          <span class="dropdown-count-pill">{{ store.units.length }}</span>
+        </header>
+
+        <form class="dropdown-add-row" @submit.prevent="handleAddOption('units')">
+          <input v-model="newOptionInput.units" placeholder="e.g. box / tube / ml" />
+          <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
+        </form>
+
+        <ul class="dropdown-option-list">
+          <li v-for="item in store.units" :key="item" class="dropdown-option-row">
+            <template v-if="editingOption.group === 'units' && editingOption.oldLabel === item">
+              <div class="dropdown-edit-inline">
+                <input v-model="editingOption.draft" placeholder="Unit label" />
+              </div>
+              <div class="action-row">
+                <button type="button" class="icon-button" title="Save" @click="saveEditOption"><Check :size="15" /></button>
+                <button type="button" class="icon-button" title="Cancel" @click="editingOption.group = ''"><X :size="15" /></button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="dropdown-option-label"><strong>{{ item }}</strong></div>
+              <div class="action-row">
+                <button type="button" class="icon-button" title="Edit unit" @click="startEditOption('units', item)"><Pencil :size="14" /></button>
+                <button type="button" class="icon-button danger-icon-btn" title="Remove unit" @click="handleRemoveOption('units', item)"><Trash2 :size="14" /></button>
+              </div>
+            </template>
+          </li>
+        </ul>
+      </article>
+
+      <!-- Card 8: Inventory Item Names & Product Photos -->
+      <article class="panel settings-card dropdown-setting-card">
+        <header>
+          <span class="settings-icon"><Package :size="20" /></span>
+          <div>
+            <h3>Inventory Item Names &amp; Photos</h3>
+            <p>Upload product images and manage item names synced with Inventory Catalog, Stock Monitor, and Stock PDFs.</p>
+          </div>
+          <span class="dropdown-count-pill">{{ store.inventory.length }}</span>
+        </header>
+
+        <form class="dropdown-add-row dropdown-add-inventory" @submit.prevent="handleAddInvItem">
+          <label class="inv-photo-pick-btn" :title="newInvItem.imageUrl ? 'Change product photo' : 'Upload product photo'">
+            <img v-if="newInvItem.imageUrl" :src="newInvItem.imageUrl" alt="New item preview" />
+            <LoaderCircle v-else-if="uploadingNewInvPhoto" class="spin" :size="16" />
+            <UploadCloud v-else :size="16" />
+            <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleNewInvPhoto" />
+          </label>
+          <input v-model="newInvItem.name" placeholder="Item name *" />
+          <select v-model="newInvItem.category">
+            <option v-for="c in store.inventoryCategories" :key="c" :value="c">{{ c }}</option>
+          </select>
+          <button type="submit" class="primary-button" :disabled="uploadingNewInvPhoto"><Plus :size="15" />Add</button>
+        </form>
+
+        <ul class="dropdown-option-list">
+          <li v-for="item in store.inventory" :key="item.id" class="dropdown-option-row">
+            <template v-if="editingInvId === item.id">
+              <label class="inv-photo-pick-btn" title="Upload product photo">
+                <img v-if="editInvDraft.imageUrl" :src="editInvDraft.imageUrl" :alt="item.name" />
+                <LoaderCircle v-else-if="uploadingInvId === item.id" class="spin" :size="15" />
+                <UploadCloud v-else :size="15" />
+                <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleRowInvPhoto(item, $event)" />
+              </label>
+              <div class="dropdown-edit-inline">
+                <input v-model="editInvDraft.name" placeholder="Item name" />
+                <select v-model="editInvDraft.category">
+                  <option v-for="c in store.inventoryCategories" :key="c" :value="c">{{ c }}</option>
+                </select>
+                <select v-model="editInvDraft.unit">
+                  <option v-for="u in store.units" :key="u" :value="u">{{ u }}</option>
+                </select>
+              </div>
+              <div class="action-row">
+                <button type="button" class="icon-button" title="Save" @click="saveEditInvItem(item)"><Check :size="15" /></button>
+                <button type="button" class="icon-button" title="Cancel" @click="editingInvId = ''"><X :size="15" /></button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="inv-setting-item-left">
+                <label class="inv-setting-thumb-btn" :title="item.imageUrl ? 'Replace product photo' : 'Upload product photo'">
+                  <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.name" />
+                  <LoaderCircle v-else-if="uploadingInvId === item.id" class="spin" :size="15" />
+                  <span v-else>{{ item.name.slice(0, 1).toUpperCase() }}</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleRowInvPhoto(item, $event)" />
+                </label>
+                <div class="dropdown-option-label">
+                  <strong>{{ item.name }}</strong>
+                  <small>{{ item.code }} · {{ item.category }} · {{ item.unit }}</small>
+                </div>
+              </div>
+              <div class="action-row">
+                <label class="icon-button inv-upload-icon-label" title="Upload / change product photo">
+                  <UploadCloud :size="14" />
+                  <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleRowInvPhoto(item, $event)" />
+                </label>
+                <button v-if="item.imageUrl" type="button" class="icon-button" title="Remove product photo" @click="clearRowInvPhoto(item)"><X :size="14" /></button>
+                <button type="button" class="icon-button" title="Rename item" @click="startEditInvItem(item)"><Pencil :size="14" /></button>
+                <button type="button" class="icon-button danger-icon-btn" title="Delete item" @click="handleDeleteInvItem(item)"><Trash2 :size="14" /></button>
               </div>
             </template>
           </li>
@@ -469,8 +755,8 @@ const handlePushToDb = async () => {
       </article>
     </section>
 
-    <UiModal :open="showSaved" title="Profil Bisnis Tersimpan" description="Identitas dan logo berhasil diterapkan ke tampilan web, invoice, serta kwitansi." @close="showSaved = false">
-      <div class="modal-actions"><button class="primary-button" @click="showSaved = false">Selesai</button></div>
+    <UiModal :open="showSaved" title="Business Profile Saved" description="Identity and logo updates are now applied to the web app, invoices, and receipts." @close="showSaved = false">
+      <div class="modal-actions"><button class="primary-button" @click="showSaved = false">Done</button></div>
     </UiModal>
   </div>
 </template>

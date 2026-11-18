@@ -3,13 +3,12 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, Download, Printer, Search, ReceiptText, ShoppingBag,
-  Sparkles, CircleDollarSign, BarChart3, FileText, Trash2, CalendarDays, Eye, Check, X, Pencil, CheckSquare, Square,
+  Sparkles, CircleDollarSign, BarChart3, Trash2, CalendarDays, Eye, Check, X, Pencil, CheckSquare, Square,
   UploadCloud, LoaderCircle, Image as ImageIcon,
 } from '@lucide/vue'
 import { useCrmStore, type CatalogType, type Expense, type Invoice, type OrderGroup } from '../stores/crm'
 import { formatCurrency, formatDate } from '../utils/format'
-import { REPORT_CATALOG, downloadSelectedReportsPdf, type ReportKey } from '../utils/reportPdf'
-import { downloadInvoicePdf } from '../utils/invoicePdf'
+import { REPORT_CATALOG, type ReportKey } from '../utils/reportCatalog'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -29,15 +28,15 @@ const selectedOrderBookingId = ref('')
 const orderSearch = ref('')
 const expenseError = ref('')
 const orderError = ref('')
+const exportingReports = ref(false)
 
-// Progressive "+ Pesanan" form state (only visible after clicking "+ Pesanan")
 interface OrderLine {
   key: string
   id?: string
   catalogItemId: string
   serviceName: string
   serviceKind?: CatalogType
-  filterType?: 'Semua' | CatalogType
+  filterType?: 'All' | CatalogType
   quantity: number
   customerPrice: number
 }
@@ -52,7 +51,6 @@ const addGroupForm = reactive<{
   items: [],
 })
 
-// Inline edit per group (pencil icon)
 const editingGroupId = ref('')
 const editGroupError = ref('')
 const editGroupForm = reactive<{
@@ -69,7 +67,7 @@ const reportFromDate = ref('')
 const reportToDate = ref('')
 const reportError = ref('')
 
-const expenseScopeFilter = ref<'Semua' | 'Berdasarkan PO' | 'Di Luar PO'>('Semua')
+const expenseScopeFilter = ref<'All' | 'Berdasarkan PO' | 'Di Luar PO' | 'Cancel'>('All')
 const editingExpenseId = ref('')
 const expenseUploading = ref(false)
 const expenseUploadError = ref('')
@@ -125,6 +123,7 @@ const expenseBatchTotal = computed(() =>
 )
 const filteredExpenses = computed(() =>
   store.expenses.filter((e) => {
+    if (expenseScopeFilter.value === 'Cancel') return e.source === 'Bayar Cancel'
     if (expenseScopeFilter.value === 'Berdasarkan PO') return Boolean(e.bookingId)
     if (expenseScopeFilter.value === 'Di Luar PO') return !e.bookingId
     return true
@@ -139,20 +138,20 @@ const order = reactive<{ bookingId: string; issuedAt: string; orderDate: string;
 })
 
 const meta = computed(() => ({
-  orders: { eyebrow: 'Ruang Kerja', title: 'Pesanan Pelanggan', description: 'Kelola pesanan awal, ubah tiap kelompok pesanan, dan tambah layanan Inti atau Tambahan per Nomor PO.', icon: ShoppingBag },
-  additional: { eyebrow: 'Ruang Kerja', title: 'Pesanan Tambahan', description: 'Riwayat, perubahan, dan penambahan layanan tambahan yang terhubung pada Nomor PO yang sama.', icon: Sparkles },
-  invoices: { eyebrow: 'Ruang Kerja', title: 'Faktur Tagihan', description: 'Dokumen tagihan dengan urutan layanan Inti di atas Tambahan dan pengelompokan tanggal pemesanan.', icon: ReceiptText },
-  expenses: { eyebrow: 'Bisnis', title: 'Pengeluaran', description: 'Biaya berdasarkan Nomor PO maupun pengeluaran di luar PO beserta bukti pembayaran opsional.', icon: CircleDollarSign },
-  reports: { eyebrow: 'Bisnis', title: 'Laporan', description: 'Centang bagian laporan yang dibutuhkan lalu unduh sebagai satu dokumen PDF yang rapi.', icon: BarChart3 },
+  orders: { eyebrow: 'Workspace', title: 'Customer Orders', description: 'Create initial PO orders, edit order packages, and append core or add-on service groups.', icon: ShoppingBag },
+  additional: { eyebrow: 'Workspace', title: 'Add-on Services', description: 'Track, edit, and append extra add-on service batches linked to existing customer POs.', icon: Sparkles },
+  invoices: { eyebrow: 'Workspace', title: 'Invoices', description: 'Official client billing statements ordering core services ahead of add-on packages.', icon: ReceiptText },
+  expenses: { eyebrow: 'Business', title: 'Expenses', description: 'Record PO-linked expenses, studio overheads, and automatic Cancel Payment refund history.', icon: CircleDollarSign },
+  reports: { eyebrow: 'Business', title: 'Executive Reports', description: 'Select the operational and financial sections you need and export a unified aesthetic PDF.', icon: BarChart3 },
 })[props.module])
 
 const paymentStatus = (bookingId: string) => {
   const total = store.bookingTotal(bookingId)
   const paid = store.bookingPaid(bookingId)
-  if (!total) return 'Belum Ada Tagihan'
-  if (paid >= total) return 'Lunas'
-  if (paid > 0) return 'Dibayar Sebagian'
-  return 'Belum Dibayar'
+  if (!total) return 'Unbilled'
+  if (paid >= total) return 'Paid'
+  if (paid > 0) return 'Partial'
+  return 'Unpaid'
 }
 
 const eligibleBookings = computed(() => store.bookings.filter((booking) => {
@@ -248,6 +247,27 @@ const selectedInvoice = computed(() =>
   store.invoices.find((inv) => inv.id === selectedInvoiceId.value) ?? null,
 )
 
+const selectedInvoiceFlattened = computed(() => {
+  if (!selectedInvoice.value) return []
+  const list: Array<{ name: string; serviceType: CatalogType; groupTitle: string; quantity: number; unit?: string; unitPrice: number }> = []
+  store.sortedOrderGroups(selectedInvoice.value).forEach((group, gIdx) => {
+    const groupTitle = group.kind === 'Awal'
+      ? `Initial Order (${formatDate(group.orderDate)})`
+      : `Add-on #${gIdx} (${formatDate(group.orderDate)})`
+    for (const item of store.sortInvoiceItemsIntiFirst(group.items)) {
+      list.push({
+        name: item.name,
+        serviceType: item.serviceType === 'Inti' ? 'Inti' : 'Additional',
+        groupTitle,
+        quantity: item.quantity,
+        unit: item.unit,
+        unitPrice: item.unitPrice,
+      })
+    }
+  })
+  return list
+})
+
 const orderTotal = computed(() => order.items.reduce((sum, item) => sum + item.quantity * item.customerPrice, 0))
 const addGroupTotal = computed(() => addGroupForm.items.reduce((sum, item) => sum + item.quantity * item.customerPrice, 0))
 const editGroupTotal = computed(() => editGroupForm.items.reduce((sum, item) => sum + item.quantity * item.customerPrice, 0))
@@ -283,13 +303,13 @@ const openOrder = (catalogItemId = '') => {
 const submitOrder = () => {
   try {
     orderError.value = ''
-    if (!order.bookingId) throw new Error('Pilih Nomor PO terlebih dahulu.')
-    if (!order.issuedAt) throw new Error('Tanggal Invoice Dibuat wajib diisi.')
-    if (!order.orderDate) throw new Error('Tanggal Pemesanan wajib diisi.')
+    if (!order.bookingId) throw new Error('Please select a PO Number first.')
+    if (!order.issuedAt) throw new Error('Invoice issue date is required.')
+    if (!order.orderDate) throw new Error('Order date is required.')
     if (!order.items.length) {
-      throw new Error(props.module === 'additional' ? 'Klik + Additional untuk menambahkan layanan.' : 'Klik + Layanan Inti atau + Additional untuk menambahkan layanan.')
+      throw new Error(props.module === 'additional' ? 'Click + Add-on to add a service item.' : 'Click + Core Service or + Add-on to add items.')
     }
-    if (order.items.some((line) => !line.catalogItemId)) throw new Error('Pilih layanan pada seluruh baris.')
+    if (order.items.some((line) => !line.catalogItemId)) throw new Error('Please choose a service on all lines.')
     const saved = store.createInvoiceFromOrder({
       bookingId: order.bookingId,
       kind: props.module === 'additional' ? 'Additional' : 'Utama',
@@ -301,7 +321,7 @@ const submitOrder = () => {
     selectedOrderBookingId.value = saved.bookingId
     showOrder.value = false
   } catch (error) {
-    orderError.value = error instanceof Error ? error.message : 'Pesanan gagal disimpan.'
+    orderError.value = error instanceof Error ? error.message : 'Failed to save order.'
   }
 }
 
@@ -344,7 +364,7 @@ const confirmDeleteAdditional = () => {
     deletingAdditionalTarget.value = null
     showDeleteAdditionalModal.value = false
   } catch (err) {
-    deleteAdditionalError.value = err instanceof Error ? err.message : 'Gagal menghapus kelompok tambahan.'
+    deleteAdditionalError.value = err instanceof Error ? err.message : 'Failed to remove add-on group.'
   }
 }
 
@@ -362,7 +382,7 @@ const cancelAddGroupForm = () => {
   addGroupForm.items = []
 }
 
-const addGroupRowByType = (targetList: OrderLine[], filterType: 'Semua' | CatalogType) => {
+const addGroupRowByType = (targetList: OrderLine[], filterType: 'All' | CatalogType) => {
   targetList.push({
     key: crypto.randomUUID(),
     catalogItemId: '',
@@ -382,11 +402,11 @@ const catalogOptionsForLine = (line: OrderLine) => {
 const submitAdditionalGroup = () => {
   try {
     addGroupError.value = ''
-    if (!selectedOrderBookingId.value) throw new Error('Pilih Nomor PO terlebih dahulu.')
-    if (!addGroupForm.orderDate) throw new Error('Tanggal pemesanan wajib diisi.')
-    if (!addGroupForm.items.length) throw new Error('Tambahkan minimal satu layanan.')
+    if (!selectedOrderBookingId.value) throw new Error('Select a PO Number first.')
+    if (!addGroupForm.orderDate) throw new Error('Order date is required.')
+    if (!addGroupForm.items.length) throw new Error('Add at least one service item.')
     if (addGroupForm.items.some((line) => !line.catalogItemId)) {
-      throw new Error('Pilih layanan pada seluruh baris.')
+      throw new Error('Select a service on every row.')
     }
     store.addOrderGroupToBooking({
       bookingId: selectedOrderBookingId.value,
@@ -396,11 +416,10 @@ const submitAdditionalGroup = () => {
     showAddGroupForm.value = false
     addGroupForm.items = []
   } catch (err) {
-    addGroupError.value = err instanceof Error ? err.message : 'Gagal menyimpan pesanan tambahan.'
+    addGroupError.value = err instanceof Error ? err.message : 'Failed to save add-on package.'
   }
 }
 
-// Inline pencil edit per order group
 const startEditGroup = (group: OrderGroup) => {
   showAddGroupForm.value = false
   editingGroupId.value = group.id
@@ -414,7 +433,7 @@ const startEditGroup = (group: OrderGroup) => {
       catalogItemId: matchedCatalog?.id ?? item.catalogItemId ?? '',
       serviceName: item.name,
       serviceKind: item.serviceType ?? matchedCatalog?.type,
-      filterType: 'Semua',
+      filterType: 'All',
       quantity: item.quantity,
       customerPrice: item.unitPrice,
     }
@@ -430,11 +449,11 @@ const cancelEditGroup = () => {
 const saveEditGroup = (groupId: string) => {
   try {
     editGroupError.value = ''
-    if (!activeOrderBooking.value) throw new Error('Booking tidak ditemukan.')
-    if (!editGroupForm.orderDate) throw new Error('Tanggal pemesanan wajib diisi.')
-    if (!editGroupForm.items.length) throw new Error('Minimal harus ada satu item layanan.')
+    if (!activeOrderBooking.value) throw new Error('Booking not found.')
+    if (!editGroupForm.orderDate) throw new Error('Order date is required.')
+    if (!editGroupForm.items.length) throw new Error('At least one service item is required.')
     if (editGroupForm.items.some((line) => !line.catalogItemId)) {
-      throw new Error('Pilih layanan pada seluruh baris.')
+      throw new Error('Select a service on every row.')
     }
     store.updateOrderGroup(activeOrderBooking.value.id, groupId, {
       orderDate: editGroupForm.orderDate,
@@ -448,7 +467,7 @@ const saveEditGroup = (groupId: string) => {
     editingGroupId.value = ''
     editGroupForm.items = []
   } catch (err) {
-    editGroupError.value = err instanceof Error ? err.message : 'Gagal menyimpan perubahan kelompok pesanan.'
+    editGroupError.value = err instanceof Error ? err.message : 'Failed to save package changes.'
   }
 }
 
@@ -505,7 +524,7 @@ const handleExpenseProofUpload = async (event: Event) => {
     const res = await uploadImageWithFallback(file, 'expense-proof')
     expense.proofImageUrl = res.url
   } catch (err) {
-    expenseUploadError.value = err instanceof Error ? err.message : 'Gagal mengunggah bukti pembayaran.'
+    expenseUploadError.value = err instanceof Error ? err.message : 'Failed to upload proof image.'
   } finally {
     expenseUploading.value = false
     inputEl.value = ''
@@ -528,17 +547,17 @@ const submitExpense = () => {
   try {
     expenseError.value = ''
     if (!expense.items.length) {
-      expenseError.value = 'Tambahkan minimal satu baris pengeluaran.'
+      expenseError.value = 'Add at least one expense line.'
       return
     }
     if (expense.expenseScope === 'Berdasarkan PO' && !expense.bookingId) {
-      expenseError.value = 'Pilih Nomor PO untuk pengeluaran berdasarkan PO.'
+      expenseError.value = 'Please select a PO Number for PO-linked expenses.'
       return
     }
     if (editingExpenseId.value) {
       const line = expense.items[0]!
       if (!line.description.trim() || line.amount <= 0) {
-        expenseError.value = 'Deskripsi dan nominal wajib diisi.'
+        expenseError.value = 'Description and amount are required.'
         return
       }
       store.updateExpense(editingExpenseId.value, {
@@ -570,13 +589,13 @@ const submitExpense = () => {
       date: new Date().toISOString().slice(0, 10),
       expenseScope: 'Berdasarkan PO',
       bookingId: '',
-      method: 'Transfer',
+      method: store.paymentMethods[0] || 'Transfer',
       proofImageUrl: '',
       items: [createExpenseLine()],
     })
     showExpense.value = false
   } catch (err) {
-    expenseError.value = err instanceof Error ? err.message : 'Gagal menyimpan pengeluaran.'
+    expenseError.value = err instanceof Error ? err.message : 'Failed to save expense.'
   }
 }
 
@@ -584,7 +603,8 @@ const previewInvoice = (invoice: Invoice) => {
   selectedInvoiceId.value = invoice.id
   showInvoice.value = true
 }
-const downloadInvoice = (invoice: Invoice) => {
+const downloadInvoice = async (invoice: Invoice) => {
+  const { downloadInvoicePdf } = await import('../utils/invoicePdf')
   const booking = store.bookingFor(invoice.bookingId)
   const customer = booking ? store.customerFor(booking.customerId) : undefined
   downloadInvoicePdf({
@@ -620,12 +640,14 @@ const clearAllReports = () => {
   selectedReportKeys.value = []
 }
 
-const exportSelectedReportsPdf = (overrideKeys?: ReportKey[]) => {
+const exportSelectedReportsPdf = async (overrideKeys?: ReportKey[]) => {
   try {
     reportError.value = ''
     const keys = overrideKeys ?? selectedReportKeys.value
-    if (!keys.length) throw new Error('Ceklis minimal satu laporan untuk diunduh sebagai PDF.')
-    downloadSelectedReportsPdf({
+    if (!keys.length) throw new Error('Select at least one report section to export as PDF.')
+    exportingReports.value = true
+    const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
+    await downloadSelectedReportsPdf({
       selectedKeys: keys,
       fromDate: reportFromDate.value,
       toDate: reportToDate.value,
@@ -639,6 +661,7 @@ const exportSelectedReportsPdf = (overrideKeys?: ReportKey[]) => {
         inventory: store.inventory,
         movements: store.movements,
         stockOpnames: store.stockOpnames,
+        businessProfile: store.businessProfile,
         sortedOrderGroups: store.sortedOrderGroups,
         groupTotal: store.groupTotal,
         invoiceTotal: store.invoiceTotal,
@@ -650,7 +673,9 @@ const exportSelectedReportsPdf = (overrideKeys?: ReportKey[]) => {
       },
     })
   } catch (err) {
-    reportError.value = err instanceof Error ? err.message : 'Gagal membuat PDF laporan.'
+    reportError.value = err instanceof Error ? err.message : 'Failed to generate PDF report.'
+  } finally {
+    exportingReports.value = false
   }
 }
 
@@ -669,40 +694,40 @@ watch(() => route.query.catalog, (catalog) => {
         <button
           v-if="module === 'reports'"
           class="primary-button"
-          :disabled="!selectedReportKeys.length"
+          :disabled="!selectedReportKeys.length || exportingReports"
           @click="exportSelectedReportsPdf()"
         >
-          <Download :size="17" />Unduh PDF ({{ selectedReportKeys.length }} Laporan)
+          <Download :size="17" />{{ exportingReports ? 'Building PDF…' : `Download PDF (${selectedReportKeys.length} Reports)` }}
         </button>
-        <button v-else-if="module === 'expenses'" class="primary-button" @click="openCreateExpense"><Plus :size="18" />Catat Pengeluaran</button>
-        <button v-else-if="module !== 'invoices'" class="primary-button" @click="openOrder()"><Plus :size="18" />{{ module === 'orders' ? 'Buat Pesanan' : 'Tambah Layanan Tambahan' }}</button>
+        <button v-else-if="module === 'expenses'" class="primary-button" @click="openCreateExpense"><Plus :size="18" />Record Expense</button>
+        <button v-else-if="module !== 'invoices'" class="primary-button" @click="openOrder()"><Plus :size="18" />{{ module === 'orders' ? 'Create Order' : 'Add Service Batch' }}</button>
       </div>
     </section>
 
     <template v-if="module === 'invoices'">
       <section class="summary-strip">
-        <div><span>Total invoice</span><strong>{{ store.invoices.length }}</strong></div>
-        <div><span>Nilai tagihan</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
-        <div><span>Dibayar</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
-        <div><span>Piutang</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
+        <div><span>Total Invoices</span><strong>{{ store.invoices.length }}</strong></div>
+        <div><span>Total Billed</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
+        <div><span>Collected</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
+        <div><span>Receivables</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
       </section>
       <section class="invoice-card-list">
         <article v-for="invoice in store.invoices" :key="invoice.id" class="invoice-row-card">
           <span class="document-icon"><ReceiptText :size="22" /></span>
           <div class="invoice-main">
-            <span>Invoice dibuat {{ formatDate(invoice.issuedAt) }} · {{ store.sortedOrderGroups(invoice).length }} kelompok pesanan</span>
+            <span>Issued {{ formatDate(invoice.issuedAt) }} · {{ store.sortedOrderGroups(invoice).length }} order group(s)</span>
             <h3>{{ invoice.invoiceNumber }}</h3>
             <p>{{ store.customerFor(store.bookingFor(invoice.bookingId)?.customerId ?? '')?.name }} · {{ store.bookingFor(invoice.bookingId)?.poNumber }}</p>
           </div>
           <div class="invoice-amount">
-            <span>Total tagihan · Sisa {{ formatCurrency(store.bookingBalance(invoice.bookingId)) }}</span>
+            <span>Total billed · Balance {{ formatCurrency(store.bookingBalance(invoice.bookingId)) }}</span>
             <strong>{{ formatCurrency(store.invoiceTotal(invoice)) }}</strong>
           </div>
           <StatusBadge :label="paymentStatus(invoice.bookingId)" />
           <div class="row-actions">
-            <button class="icon-button" title="Lihat detail faktur" @click="previewInvoice(invoice)"><Eye :size="16" /></button>
-            <button class="icon-button" title="Cetak faktur" @click="previewInvoice(invoice)"><Printer :size="16" /></button>
-            <button class="icon-button" title="Unduh PDF Faktur" @click="downloadInvoice(invoice)"><Download :size="16" /></button>
+            <button class="icon-button" title="Preview official invoice" @click="previewInvoice(invoice)"><Eye :size="16" /></button>
+            <button class="icon-button" title="Print invoice" @click="previewInvoice(invoice)"><Printer :size="16" /></button>
+            <button class="icon-button" title="Download Invoice PDF" @click="downloadInvoice(invoice)"><Download :size="16" /></button>
           </div>
         </article>
       </section>
@@ -710,28 +735,28 @@ watch(() => route.query.catalog, (catalog) => {
 
     <template v-else-if="module === 'orders'">
       <section class="summary-strip">
-        <div><span>Pesanan PO</span><strong>{{ store.invoices.length }}</strong></div>
-        <div><span>Total tagihan</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
-        <div><span>Pembayaran diterima</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
-        <div><span>Sisa tagihan</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
+        <div><span>PO Orders</span><strong>{{ store.invoices.length }}</strong></div>
+        <div><span>Total Billed</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
+        <div><span>Payments Received</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
+        <div><span>Balance Due</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
       </section>
 
       <section class="panel table-panel">
         <div class="table-toolbar">
-          <label class="table-search"><Search :size="17" /><input v-model="orderSearch" placeholder="Cari Nomor PO, invoice, atau customer" /></label>
+          <label class="table-search"><Search :size="17" /><input v-model="orderSearch" placeholder="Search PO number, invoice, or customer" /></label>
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Nomor PO</th>
+                <th>PO Number</th>
                 <th>Customer</th>
-                <th>Tanggal Invoice Dibuat</th>
-                <th>Total Tagihan</th>
-                <th>Sisa Pembayaran</th>
+                <th>Invoice Issued</th>
+                <th>Total Billing</th>
+                <th>Balance Due</th>
                 <th>Status</th>
-                <th>Invoice</th>
-                <th>Aksi</th>
+                <th>Invoice No.</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -751,9 +776,9 @@ watch(() => route.query.catalog, (catalog) => {
                 <td>{{ invoice.invoiceNumber }}</td>
                 <td>
                   <div class="row-actions" @click.stop>
-                    <button class="icon-button" title="Lihat detail pesanan" @click="selectBookingOrder(invoice.bookingId, true, false)"><Eye :size="16" /></button>
-                    <button class="icon-button" title="Edit pesanan" @click="selectBookingOrder(invoice.bookingId, true, true)"><Pencil :size="15" /></button>
-                    <button class="icon-button" title="Lihat invoice" @click="previewInvoice(invoice)"><ReceiptText :size="16" /></button>
+                    <button class="icon-button" title="View order details" @click="selectBookingOrder(invoice.bookingId, true, false)"><Eye :size="16" /></button>
+                    <button class="icon-button" title="Edit order" @click="selectBookingOrder(invoice.bookingId, true, true)"><Pencil :size="15" /></button>
+                    <button class="icon-button" title="Preview invoice" @click="previewInvoice(invoice)"><ReceiptText :size="16" /></button>
                   </div>
                 </td>
               </tr>
@@ -761,8 +786,8 @@ watch(() => route.query.catalog, (catalog) => {
                 <td colspan="8">
                   <div class="empty-state">
                     <ShoppingBag :size="28" />
-                    <strong>Belum ada pesanan</strong>
-                    <span>Klik tombol "Buat Pesanan" untuk mencatat pesanan awal customer.</span>
+                    <strong>No orders yet</strong>
+                    <span>Click "Create Order" to build a customer's initial PO package.</span>
                   </div>
                 </td>
               </tr>
@@ -775,19 +800,19 @@ watch(() => route.query.catalog, (catalog) => {
     <template v-else-if="module === 'additional'">
       <section class="panel table-panel">
         <div class="table-toolbar">
-          <label class="table-search"><Search :size="17" /><input v-model="orderSearch" placeholder="Cari Nomor PO, faktur, atau pelanggan" /></label>
+          <label class="table-search"><Search :size="17" /><input v-model="orderSearch" placeholder="Search PO number, invoice, or customer" /></label>
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th>Nomor PO</th>
-                <th>Pelanggan</th>
-                <th>Tanggal Pesanan</th>
-                <th>Item Layanan</th>
-                <th>Total Harga Paket</th>
-                <th>Faktur</th>
-                <th>Aksi</th>
+                <th>PO Number</th>
+                <th>Customer</th>
+                <th>Order Date</th>
+                <th>Service Items</th>
+                <th>Package Total</th>
+                <th>Invoice</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -804,13 +829,13 @@ watch(() => route.query.catalog, (catalog) => {
                 <td>{{ row.invoice.invoiceNumber }}</td>
                 <td>
                   <div class="row-actions">
-                    <button type="button" class="icon-button" title="Lihat detail pesanan PO" @click="selectBookingOrder(row.bookingId, true, false)">
+                    <button type="button" class="icon-button" title="View PO orders" @click="selectBookingOrder(row.bookingId, true, false)">
                       <Eye :size="15" />
                     </button>
-                    <button type="button" class="icon-button" title="Ubah pesanan tambahan ini" @click="selectBookingOrder(row.bookingId, true, row.id)">
+                    <button type="button" class="icon-button" title="Edit this add-on batch" @click="selectBookingOrder(row.bookingId, true, row.id)">
                       <Pencil :size="15" />
                     </button>
-                    <button type="button" class="icon-button danger-icon-button" title="Hapus kelompok tambahan ini" @click="openDeleteAdditionalModal(row)">
+                    <button type="button" class="icon-button danger-icon-button" title="Delete add-on batch" @click="openDeleteAdditionalModal(row)">
                       <Trash2 :size="15" />
                     </button>
                   </div>
@@ -820,8 +845,8 @@ watch(() => route.query.catalog, (catalog) => {
                 <td colspan="7">
                   <div class="empty-state">
                     <Sparkles :size="28" />
-                    <strong>Belum ada pesanan tambahan</strong>
-                    <span>Layanan tambahan baru akan tercatat sebagai kelompok pesanan pada PO dan faktur yang sama.</span>
+                    <strong>No add-on services yet</strong>
+                    <span>New add-on batches append to the client's PO and invoice automatically.</span>
                   </div>
                 </td>
               </tr>
@@ -833,50 +858,56 @@ watch(() => route.query.catalog, (catalog) => {
 
     <template v-else-if="module === 'expenses'">
       <section class="summary-strip">
-        <div><span>Total pengeluaran</span><strong>{{ formatCurrency(store.totalExpenses) }}</strong></div>
-        <div><span>Berdasarkan PO</span><strong>{{ formatCurrency(store.expenses.filter((e) => e.bookingId).reduce((s, e) => s + e.amount, 0)) }}</strong></div>
-        <div><span>Di Luar PO</span><strong>{{ formatCurrency(store.expenses.filter((e) => !e.bookingId).reduce((s, e) => s + e.amount, 0)) }}</strong></div>
-        <div><span>Jumlah transaksi</span><strong>{{ store.expenses.length }}</strong></div>
+        <div><span>Total Expenses</span><strong>{{ formatCurrency(store.totalExpenses) }}</strong></div>
+        <div><span>PO Linked</span><strong>{{ formatCurrency(store.expenses.filter((e) => e.bookingId).reduce((s, e) => s + e.amount, 0)) }}</strong></div>
+        <div><span>Cancel Payouts</span><strong>{{ formatCurrency(store.expenses.filter((e) => e.source === 'Bayar Cancel').reduce((s, e) => s + e.amount, 0)) }}</strong></div>
+        <div><span>Transactions</span><strong>{{ store.expenses.length }}</strong></div>
       </section>
       <section class="panel table-panel">
         <div class="table-toolbar">
           <div class="segmented-tabs">
-            <button :class="{ active: expenseScopeFilter === 'Semua' }" @click="expenseScopeFilter = 'Semua'">Semua</button>
-            <button :class="{ active: expenseScopeFilter === 'Berdasarkan PO' }" @click="expenseScopeFilter = 'Berdasarkan PO'">Berdasarkan PO</button>
-            <button :class="{ active: expenseScopeFilter === 'Di Luar PO' }" @click="expenseScopeFilter = 'Di Luar PO'">Di Luar PO</button>
+            <button :class="{ active: expenseScopeFilter === 'All' }" @click="expenseScopeFilter = 'All'">All</button>
+            <button :class="{ active: expenseScopeFilter === 'Berdasarkan PO' }" @click="expenseScopeFilter = 'Berdasarkan PO'">PO Linked</button>
+            <button :class="{ active: expenseScopeFilter === 'Di Luar PO' }" @click="expenseScopeFilter = 'Di Luar PO'">Studio Overhead</button>
+            <button :class="{ active: expenseScopeFilter === 'Cancel' }" @click="expenseScopeFilter = 'Cancel'">Cancel Payment</button>
           </div>
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
-            <thead><tr><th>Tanggal</th><th>Sumber</th><th>Pengeluaran</th><th>Kategori</th><th>Nomor PO</th><th>Metode</th><th>Nominal</th><th>Bukti</th><th>Aksi</th></tr></thead>
+            <thead><tr><th>Date</th><th>Source</th><th>Description</th><th>Category</th><th>PO Ref</th><th>Method</th><th>Amount</th><th>Proof</th><th>Actions</th></tr></thead>
             <tbody>
               <tr v-for="row in filteredExpenses" :key="row.id">
                 <td>{{ formatDate(row.date) }}</td>
                 <td>
-                  <span class="expense-scope-badge" :class="row.bookingId ? 'is-po' : 'is-non-po'">
-                    {{ row.bookingId ? 'Berdasarkan PO' : 'Di Luar PO' }}
-                  </span>
+                  <div class="badge-stack">
+                    <span class="expense-scope-badge" :class="row.bookingId ? 'is-po' : 'is-non-po'">
+                      {{ row.bookingId ? 'PO Linked' : 'Studio Overhead' }}
+                    </span>
+                    <span v-if="row.source === 'Bayar Cancel'" class="source-pill is-cancel">
+                      Cancel Payment
+                    </span>
+                  </div>
                 </td>
                 <td><strong>{{ row.description }}</strong></td>
                 <td>{{ row.category }}</td>
-                <td>{{ row.bookingId ? store.bookingFor(row.bookingId)?.poNumber : 'Di Luar PO (Operasional)' }}</td>
-                <td>{{ row.method === 'Cash' ? 'Tunai' : row.method }}</td>
+                <td>{{ row.bookingId ? store.bookingFor(row.bookingId)?.poNumber : 'Studio Overhead' }}</td>
+                <td>{{ row.method === 'Cash' || row.method === 'Tunai' ? 'Cash' : row.method }}</td>
                 <td><strong>{{ formatCurrency(row.amount) }}</strong></td>
                 <td>
-                  <button v-if="row.proofImageUrl" type="button" class="proof-thumb-btn" title="Lihat bukti pembayaran" @click="zoomedExpenseProof = row.proofImageUrl; showExpenseProofZoom = true">
-                    <img :src="row.proofImageUrl" alt="Bukti pengeluaran" />
+                  <button v-if="row.proofImageUrl" type="button" class="proof-thumb-btn" title="View payment proof" @click="zoomedExpenseProof = row.proofImageUrl; showExpenseProofZoom = true">
+                    <img :src="row.proofImageUrl" alt="Expense proof" />
                   </button>
                   <span v-else class="subtle-line">—</span>
                 </td>
                 <td>
                   <div class="row-actions">
-                    <button type="button" class="icon-button" title="Lihat detail pengeluaran" @click="selectedExpenseDetail = row; showExpenseDetail = true">
+                    <button type="button" class="icon-button" title="View expense details" @click="selectedExpenseDetail = row; showExpenseDetail = true">
                       <Eye :size="15" />
                     </button>
-                    <button type="button" class="icon-button" title="Ubah pengeluaran" @click="openEditExpense(row)">
+                    <button type="button" class="icon-button" title="Edit expense" @click="openEditExpense(row)">
                       <Pencil :size="15" />
                     </button>
-                    <button type="button" class="icon-button danger-icon-button" title="Hapus pengeluaran" @click="openDeleteExpenseModal(row)">
+                    <button type="button" class="icon-button danger-icon-button" title="Delete expense" @click="openDeleteExpenseModal(row)">
                       <Trash2 :size="15" />
                     </button>
                   </div>
@@ -886,8 +917,8 @@ watch(() => route.query.catalog, (catalog) => {
                 <td colspan="9">
                   <div class="empty-state">
                     <CircleDollarSign :size="28" />
-                    <strong>Belum ada data pengeluaran</strong>
-                    <span>Klik "Catat Pengeluaran" untuk menambahkan pengeluaran baru.</span>
+                    <strong>No expense records yet</strong>
+                    <span>Click "Record Expense" or log a cancellation refund to track expenses here.</span>
                   </div>
                 </td>
               </tr>
@@ -900,13 +931,13 @@ watch(() => route.query.catalog, (catalog) => {
     <template v-else>
       <section class="panel report-toolbar-panel">
         <div class="report-filter-row">
-          <label><span>Dari Tanggal (Opsional)</span><input v-model="reportFromDate" type="date" /></label>
-          <label><span>Sampai Tanggal (Opsional)</span><input v-model="reportToDate" type="date" /></label>
-          <button v-if="reportFromDate || reportToDate" type="button" class="soft-button" @click="reportFromDate = ''; reportToDate = ''">Reset Periode</button>
+          <label><span>From Date (Optional)</span><input v-model="reportFromDate" type="date" /></label>
+          <label><span>To Date (Optional)</span><input v-model="reportToDate" type="date" /></label>
+          <button v-if="reportFromDate || reportToDate" type="button" class="soft-button" @click="reportFromDate = ''; reportToDate = ''">Reset Dates</button>
         </div>
         <div class="report-select-controls">
-          <button type="button" class="soft-button" @click="selectAllReports"><CheckSquare :size="15" />Pilih Semua ({{ REPORT_CATALOG.length }})</button>
-          <button type="button" class="soft-button" @click="clearAllReports"><Square :size="15" />Kosongkan</button>
+          <button type="button" class="soft-button" @click="selectAllReports"><CheckSquare :size="15" />Select All ({{ REPORT_CATALOG.length }})</button>
+          <button type="button" class="soft-button" @click="clearAllReports"><Square :size="15" />Clear</button>
         </div>
       </section>
 
@@ -932,7 +963,7 @@ watch(() => route.query.catalog, (catalog) => {
             <p>{{ report.description }}</p>
           </div>
           <div class="report-actions" @click.stop>
-            <button type="button" title="Download PDF bagian ini saja" @click="exportSelectedReportsPdf([report.key])">
+            <button type="button" title="Download this section only" @click="exportSelectedReportsPdf([report.key])">
               <Download :size="16" />
             </button>
           </div>
@@ -942,50 +973,50 @@ watch(() => route.query.catalog, (catalog) => {
 
       <section class="report-download-bar">
         <div>
-          <strong>{{ selectedReportKeys.length }} dari {{ REPORT_CATALOG.length }} bagian laporan dipilih</strong>
-          <span>Hasil ekspor disusun dalam format tabel PDF profesional lengkap dengan nomor halaman.</span>
+          <strong>{{ selectedReportKeys.length }} of {{ REPORT_CATALOG.length }} report sections selected</strong>
+          <span>Exports into an executive Azura stationery PDF complete with KPI cards, thumbnails, and page numbers.</span>
         </div>
-        <button type="button" class="primary-button" :disabled="!selectedReportKeys.length" @click="exportSelectedReportsPdf()">
-          <Download :size="17" />Download PDF Laporan
+        <button type="button" class="primary-button" :disabled="!selectedReportKeys.length || exportingReports" @click="exportSelectedReportsPdf()">
+          <Download :size="17" />{{ exportingReports ? 'Building PDF…' : 'Download PDF Report' }}
         </button>
       </section>
     </template>
 
-    <UiModal :open="showExpense" :title="editingExpenseId ? 'Ubah Data Pengeluaran' : 'Catat Pengeluaran (Bisa Banyak Item)'" description="Pilih jenis pengeluaran, lalu tambahkan satu atau beberapa item pengeluaran sekaligus dalam satu kali simpan." wide @close="showExpense = false">
+    <UiModal :open="showExpense" :title="editingExpenseId ? 'Edit Expense Record' : 'Record Expenses (Batch Enabled)'" description="Select expense scope and log one or more expense lines at once." wide @close="showExpense = false">
       <form class="form-grid" @submit.prevent="submitExpense">
         <div class="span-2 expense-scope-toggle">
-          <span>Jenis Pengeluaran *</span>
+          <span>Expense Scope *</span>
           <div class="segmented-tabs">
             <button
               type="button"
               :class="{ active: expense.expenseScope === 'Berdasarkan PO' }"
               @click="expense.expenseScope = 'Berdasarkan PO'; expense.items.forEach((l) => { if (!store.poExpenseCategories.includes(l.category)) l.category = store.poExpenseCategories[0] ?? l.category })"
             >
-              Berdasarkan PO
+              PO Linked
             </button>
             <button
               type="button"
               :class="{ active: expense.expenseScope === 'Di Luar PO' }"
               @click="expense.expenseScope = 'Di Luar PO'; expense.bookingId = ''; expense.items.forEach((l) => { if (!store.generalExpenseCategories.includes(l.category)) l.category = store.generalExpenseCategories[0] ?? l.category })"
             >
-              Di Luar PO (Operasional Umum)
+              Studio Overhead (Outside PO)
             </button>
           </div>
         </div>
-        <label><span>Tanggal *</span><input v-model="expense.date" type="date" /></label>
+        <label><span>Date *</span><input v-model="expense.date" type="date" /></label>
         <label>
-          <span>Metode Pembayaran *</span>
+          <span>Payment Method *</span>
           <select v-model="expense.method">
             <option v-for="m in store.paymentMethods" :key="m" :value="m">{{ m }}</option>
             <option v-if="expense.method && !store.paymentMethods.includes(expense.method)" :value="expense.method">
-              {{ expense.method === 'Cash' ? 'Tunai' : expense.method }}
+              {{ expense.method === 'Cash' || expense.method === 'Tunai' ? 'Cash' : expense.method }}
             </option>
           </select>
         </label>
         <label v-if="expense.expenseScope === 'Berdasarkan PO'" class="span-2">
-          <span>Pilih Nomor PO *</span>
+          <span>Select PO Number *</span>
           <select v-model="expense.bookingId">
-            <option value="">Pilih Nomor PO terkait</option>
+            <option value="">Select linked PO</option>
             <option v-for="booking in store.bookings.filter((b) => b.status !== 'Dibatalkan')" :key="booking.id" :value="booking.id">
               {{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }}
             </option>
@@ -995,17 +1026,17 @@ watch(() => route.query.catalog, (catalog) => {
         <div class="order-lines span-2">
           <div class="order-lines-head">
             <div>
-              <strong>Daftar Item Pengeluaran ({{ expense.items.length }} Baris)</strong>
-              <span>Tambahkan beberapa pengeluaran sekaligus agar tidak perlu input satu per satu.</span>
+              <strong>Expense Line Items ({{ expense.items.length }} Row(s))</strong>
+              <span>Log multiple items together in a single batch save.</span>
             </div>
             <button v-if="!editingExpenseId" type="button" class="soft-button" @click="addExpenseLine">
-              <Plus :size="15" />+ Tambah Baris
+              <Plus :size="15" />+ Add Line
             </button>
           </div>
 
           <div v-for="(line, idx) in expense.items" :key="line.key" class="expense-batch-row">
             <label>
-              <span>Kategori {{ idx + 1 }} *</span>
+              <span>Category {{ idx + 1 }} *</span>
               <select v-model="line.category">
                 <option v-for="cat in expenseCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
                 <option v-if="line.category && !expenseCategoryOptions.includes(line.category)" :value="line.category">
@@ -1014,19 +1045,19 @@ watch(() => route.query.catalog, (catalog) => {
               </select>
             </label>
             <label>
-              <span>Deskripsi Pengeluaran *</span>
-              <input v-model="line.description" placeholder="Contoh: Transportasi venue / beli perlengkapan" />
+              <span>Description *</span>
+              <input v-model="line.description" placeholder="e.g. Crew transport to venue / supplies" />
             </label>
             <label>
-              <span>Nominal *</span>
-              <CurrencyInput v-model="line.amount" aria-label="Nominal pengeluaran" />
+              <span>Amount *</span>
+              <CurrencyInput v-model="line.amount" aria-label="Expense amount" />
             </label>
             <button
               v-if="!editingExpenseId"
               type="button"
               class="icon-button order-line-remove"
               :disabled="expense.items.length === 1"
-              title="Hapus baris pengeluaran"
+              title="Remove row"
               @click="expense.items.splice(idx, 1)"
             >
               <Trash2 :size="16" />
@@ -1035,136 +1066,136 @@ watch(() => route.query.catalog, (catalog) => {
         </div>
 
         <div class="order-grand-total span-2">
-          <span>Total Pengeluaran ({{ expense.items.length }} Item)</span>
+          <span>Batch Total ({{ expense.items.length }} Item(s))</span>
           <strong>{{ formatCurrency(expenseBatchTotal) }}</strong>
         </div>
 
         <div class="span-2 attire-upload-block">
-          <span class="upload-field-label">Bukti Pembayaran (Opsional)</span>
+          <span class="upload-field-label">Payment Receipt / Proof (Optional)</span>
           <label class="upload-zone">
-            <img v-if="expense.proofImageUrl" :src="expense.proofImageUrl" alt="Bukti pembayaran pengeluaran" />
-            <div v-else><UploadCloud :size="24" /><strong>Unggah bukti nota atau transfer JPG, PNG, atau WebP</strong><span>Opsional · Maksimal 5 MB</span></div>
+            <img v-if="expense.proofImageUrl" :src="expense.proofImageUrl" alt="Expense proof" />
+            <div v-else><UploadCloud :size="24" /><strong>Upload JPG, PNG, or WebP receipt or proof</strong><span>Optional · Max 5 MB</span></div>
             <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleExpenseProofUpload" />
           </label>
-          <button v-if="expense.proofImageUrl" type="button" class="soft-button remove-photo-btn" @click="expense.proofImageUrl = ''">Hapus bukti</button>
-          <p v-if="expenseUploading" class="upload-state"><LoaderCircle class="spin" :size="15" />Memproses foto…</p>
+          <button v-if="expense.proofImageUrl" type="button" class="soft-button remove-photo-btn" @click="expense.proofImageUrl = ''">Remove proof</button>
+          <p v-if="expenseUploading" class="upload-state"><LoaderCircle class="spin" :size="15" />Processing image…</p>
           <p v-if="expenseUploadError" class="form-error">{{ expenseUploadError }}</p>
         </div>
         <p v-if="expenseError" class="form-error span-2">{{ expenseError }}</p>
         <div class="modal-actions span-2">
-          <button type="button" class="secondary-button" @click="showExpense = false">Batal</button>
+          <button type="button" class="secondary-button" @click="showExpense = false">Cancel</button>
           <button class="primary-button" :disabled="expenseUploading">
-            {{ editingExpenseId ? 'Simpan Perubahan' : `Simpan Pengeluaran (${expense.items.length} Item)` }}
+            {{ editingExpenseId ? 'Save Changes' : `Save Expenses (${expense.items.length} Item(s))` }}
           </button>
         </div>
       </form>
     </UiModal>
 
-    <UiModal :open="showExpenseDetail && Boolean(selectedExpenseDetail)" title="Detail Pengeluaran" description="Rincian biaya dan bukti pembayaran opsional." @close="showExpenseDetail = false">
+    <UiModal :open="showExpenseDetail && Boolean(selectedExpenseDetail)" title="Expense Details" description="Breakdown and optional proof of payment." @close="showExpenseDetail = false">
       <div v-if="selectedExpenseDetail" class="detail-grid">
-        <div><span>Tanggal</span><strong>{{ formatDate(selectedExpenseDetail.date) }}</strong></div>
-        <div><span>Jenis Pengeluaran</span><strong>{{ selectedExpenseDetail.bookingId ? 'Berdasarkan PO' : 'Di Luar PO' }}</strong></div>
-        <div><span>Kategori</span><strong>{{ selectedExpenseDetail.category }}</strong></div>
-        <div><span>Nomor PO</span><strong>{{ selectedExpenseDetail.bookingId ? store.bookingFor(selectedExpenseDetail.bookingId)?.poNumber : 'Di Luar PO (Operasional)' }}</strong></div>
-        <div><span>Metode</span><strong>{{ selectedExpenseDetail.method === 'Cash' ? 'Tunai' : selectedExpenseDetail.method }}</strong></div>
-        <div><span>Nominal</span><strong>{{ formatCurrency(selectedExpenseDetail.amount) }}</strong></div>
-        <div class="span-2"><span>Deskripsi</span><strong>{{ selectedExpenseDetail.description }}</strong></div>
+        <div><span>Date</span><strong>{{ formatDate(selectedExpenseDetail.date) }}</strong></div>
+        <div><span>Source</span><strong>{{ selectedExpenseDetail.source === 'Bayar Cancel' ? 'Cancel Payment (Auto)' : (selectedExpenseDetail.bookingId ? 'PO Linked' : 'Studio Overhead') }}</strong></div>
+        <div><span>Category</span><strong>{{ selectedExpenseDetail.category }}</strong></div>
+        <div><span>PO Number</span><strong>{{ selectedExpenseDetail.bookingId ? store.bookingFor(selectedExpenseDetail.bookingId)?.poNumber : 'Studio Overhead' }}</strong></div>
+        <div><span>Method</span><strong>{{ selectedExpenseDetail.method === 'Cash' || selectedExpenseDetail.method === 'Tunai' ? 'Cash' : selectedExpenseDetail.method }}</strong></div>
+        <div><span>Amount</span><strong>{{ formatCurrency(selectedExpenseDetail.amount) }}</strong></div>
+        <div class="span-2"><span>Description</span><strong>{{ selectedExpenseDetail.description }}</strong></div>
         <div v-if="selectedExpenseDetail.proofImageUrl" class="span-2">
-          <span>Bukti Pembayaran</span>
-          <img :src="selectedExpenseDetail.proofImageUrl" alt="Bukti pembayaran" class="expense-detail-proof-img" />
+          <span>Payment Proof</span>
+          <img :src="selectedExpenseDetail.proofImageUrl" alt="Expense proof" class="expense-detail-proof-img" />
         </div>
       </div>
       <div class="modal-actions">
-        <button class="secondary-button" @click="showExpenseDetail = false">Tutup</button>
-        <button v-if="selectedExpenseDetail" class="primary-button" @click="showExpenseDetail = false; openEditExpense(selectedExpenseDetail)"><Pencil :size="15" />Ubah Pengeluaran</button>
+        <button class="secondary-button" @click="showExpenseDetail = false">Close</button>
+        <button v-if="selectedExpenseDetail" class="primary-button" @click="showExpenseDetail = false; openEditExpense(selectedExpenseDetail)"><Pencil :size="15" />Edit Expense</button>
       </div>
     </UiModal>
 
-    <UiModal :open="showDeleteExpenseModal && Boolean(deletingExpense)" title="Hapus Data Pengeluaran?" description="Pengeluaran yang dihapus akan memperbarui perhitungan arus kas bersih." @close="showDeleteExpenseModal = false">
+    <UiModal :open="showDeleteExpenseModal && Boolean(deletingExpense)" title="Delete Expense Record?" description="Removing this expense will recalculate net cashflow." @close="showDeleteExpenseModal = false">
       <div v-if="deletingExpense" class="cancel-impact-box">
         <strong>{{ deletingExpense.description }}</strong>
         <ul>
-          <li>Tanggal: {{ formatDate(deletingExpense.date) }} · Kategori: {{ deletingExpense.category }}</li>
-          <li>Nominal: <b>{{ formatCurrency(deletingExpense.amount) }}</b></li>
+          <li>Date: {{ formatDate(deletingExpense.date) }} · Category: {{ deletingExpense.category }}</li>
+          <li>Amount: <b>{{ formatCurrency(deletingExpense.amount) }}</b></li>
         </ul>
       </div>
       <div class="modal-actions" style="margin-top: 16px;">
-        <button type="button" class="secondary-button" @click="showDeleteExpenseModal = false">Batal</button>
-        <button type="button" class="danger-button" @click="confirmDeleteExpense">Ya, Hapus Pengeluaran</button>
+        <button type="button" class="secondary-button" @click="showDeleteExpenseModal = false">Cancel</button>
+        <button type="button" class="danger-button" @click="confirmDeleteExpense">Yes, Delete Expense</button>
       </div>
     </UiModal>
 
-    <UiModal :open="showExpenseProofZoom" title="Bukti Pembayaran Pengeluaran" @close="showExpenseProofZoom = false">
+    <UiModal :open="showExpenseProofZoom" title="Expense Payment Proof" @close="showExpenseProofZoom = false">
       <div class="attire-zoom">
         <div>
-          <img v-if="zoomedExpenseProof" :src="zoomedExpenseProof" alt="Bukti pembayaran pengeluaran" />
+          <img v-if="zoomedExpenseProof" :src="zoomedExpenseProof" alt="Expense proof" />
           <ImageIcon v-else :size="48" />
         </div>
       </div>
     </UiModal>
 
-    <UiModal :open="showDeleteAdditionalModal && Boolean(deletingAdditionalTarget)" title="Hapus Kelompok Tambahan?" description="Kelompok pesanan tambahan akan dihapus dari PO dan nilai faktur diperbarui otomatis." @close="showDeleteAdditionalModal = false">
+    <UiModal :open="showDeleteAdditionalModal && Boolean(deletingAdditionalTarget)" title="Delete Add-on Group?" description="The add-on service batch will be removed from the PO and invoice totals recalculated." @close="showDeleteAdditionalModal = false">
       <div v-if="deletingAdditionalTarget" class="cancel-impact-box">
         <strong>{{ deletingAdditionalTarget.poNumber }} — {{ deletingAdditionalTarget.customerName }}</strong>
         <ul>
-          <li>Tanggal Pemesanan: {{ formatDate(deletingAdditionalTarget.orderDate) }}</li>
+          <li>Order Date: {{ formatDate(deletingAdditionalTarget.orderDate) }}</li>
         </ul>
       </div>
       <p v-if="deleteAdditionalError" class="form-error" style="margin-top: 12px;">{{ deleteAdditionalError }}</p>
       <div class="modal-actions" style="margin-top: 16px;">
-        <button type="button" class="secondary-button" @click="showDeleteAdditionalModal = false">Batal</button>
-        <button type="button" class="danger-button" @click="confirmDeleteAdditional">Ya, Hapus Kelompok Tambahan</button>
+        <button type="button" class="secondary-button" @click="showDeleteAdditionalModal = false">Cancel</button>
+        <button type="button" class="danger-button" @click="confirmDeleteAdditional">Yes, Delete Batch</button>
       </div>
     </UiModal>
 
-    <UiModal :open="showOrder" :title="module === 'additional' ? 'Tambah Additional' : 'Buat Pesanan'" :description="module === 'additional' ? 'Menambahkan kelompok pesanan additional pada Nomor PO yang sama tanpa mengubah tanggal invoice dibuat.' : 'Catat pesanan awal customer dan terbitkan invoice PO.'" wide @close="showOrder = false">
+    <UiModal :open="showOrder" :title="module === 'additional' ? 'Add Service Batch' : 'Create Order'" :description="module === 'additional' ? 'Append an add-on batch to an existing PO without altering the original invoice issue date.' : 'Record initial customer services and issue a PO invoice.'" wide @close="showOrder = false">
       <form class="form-grid" @submit.prevent="submitOrder">
         <label class="span-2">
-          <span>Nomor PO *</span>
+          <span>PO Number *</span>
           <select v-model="order.bookingId">
-            <option value="">Pilih booking</option>
+            <option value="">Select PO booking</option>
             <option v-for="booking in eligibleBookings" :key="booking.id" :value="booking.id">{{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }} — {{ formatDate(booking.eventDate) }}</option>
           </select>
         </label>
         <template v-if="module === 'orders'">
-          <label><span>Tanggal Invoice Dibuat *</span><input v-model="order.issuedAt" type="date" /></label>
-          <label><span>Tanggal Pemesanan *</span><input v-model="order.orderDate" type="date" /></label>
-          <label class="span-2"><span>Jatuh tempo (opsional)</span><input v-model="order.dueDate" type="date" /></label>
+          <label><span>Invoice Issue Date *</span><input v-model="order.issuedAt" type="date" /></label>
+          <label><span>Order Date *</span><input v-model="order.orderDate" type="date" /></label>
+          <label class="span-2"><span>Due Date (optional)</span><input v-model="order.dueDate" type="date" /></label>
         </template>
         <template v-else>
-          <label class="span-2"><span>Tanggal Pemesanan Additional *</span><input v-model="order.orderDate" type="date" /></label>
+          <label class="span-2"><span>Add-on Order Date *</span><input v-model="order.orderDate" type="date" /></label>
         </template>
 
         <div class="order-lines span-2">
           <div class="order-lines-head">
             <div>
-              <strong>{{ module === 'additional' ? 'Item layanan Additional' : 'Item layanan (Inti & Additional)' }}</strong>
-              <span>{{ module === 'additional' ? 'Klik + Additional di samping untuk menambahkan layanan additional; nama & harga tersimpan saat transaksi.' : 'Klik + Layanan Inti atau + Additional di samping untuk menambahkan layanan; nama & harga tersimpan saat transaksi.' }}</span>
+              <strong>{{ module === 'additional' ? 'Add-on Service Items' : 'Order Services (Core & Add-ons)' }}</strong>
+              <span>{{ module === 'additional' ? 'Click + Add-on to add extra services; item snapshot pricing is stored automatically.' : 'Click + Core Service or + Add-on to build this customer order.' }}</span>
             </div>
             <div class="add-group-add-trigger">
               <button v-if="module === 'orders'" type="button" class="soft-button add-inti-button" @click="addGroupRowByType(order.items, 'Inti')">
-                <Plus :size="14" />+ Layanan Inti
+                <Plus :size="14" />+ Core Service
               </button>
               <button type="button" class="soft-button add-additional-button" @click="addGroupRowByType(order.items, 'Additional')">
-                <Plus :size="14" />+ Additional
+                <Plus :size="14" />+ Add-on
               </button>
             </div>
           </div>
 
           <div v-if="!order.items.length" class="empty-order-lines-hint">
             <template v-if="module === 'additional'">
-              Belum ada layanan ditambahkan. Klik <strong>+ Additional</strong> untuk menambahkan item.
+              No services added yet. Click <strong>+ Add-on</strong> to insert a service row.
             </template>
             <template v-else>
-              Belum ada layanan ditambahkan. Klik <strong>+ Layanan Inti</strong> atau <strong>+ Additional</strong> untuk menambahkan item.
+              No services added yet. Click <strong>+ Core Service</strong> or <strong>+ Add-on</strong> to insert items.
             </template>
           </div>
 
           <div v-else class="order-lines-grid">
             <div class="order-lines-columns">
-              <span>Nama Layanan</span>
+              <span>Service Name</span>
               <span>Qty</span>
-              <span>Harga Satuan</span>
+              <span>Unit Price</span>
               <span class="align-right">Subtotal</span>
               <span />
             </div>
@@ -1176,28 +1207,28 @@ watch(() => route.query.catalog, (catalog) => {
                     class="service-kind-tag"
                     :class="(line.filterType === 'Inti' || line.serviceKind === 'Inti') ? 'is-inti' : 'is-add'"
                   >
-                    {{ line.filterType === 'Inti' ? 'Inti' : line.filterType === 'Additional' ? 'Additional' : (line.serviceKind ?? 'Layanan') }}
+                    {{ line.filterType === 'Inti' ? 'Core' : line.filterType === 'Additional' ? 'Add-on' : (line.serviceKind === 'Inti' ? 'Core' : 'Add-on') }}
                   </span>
                   <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                    <option value="">{{ line.filterType === 'Inti' ? 'Pilih layanan inti' : line.filterType === 'Additional' ? 'Pilih layanan additional' : 'Pilih layanan' }}</option>
+                    <option value="">{{ line.filterType === 'Inti' ? 'Select core service' : line.filterType === 'Additional' ? 'Select add-on service' : 'Select service' }}</option>
                     <option v-for="item in (line.filterType === 'Inti' ? coreCatalog : line.filterType === 'Additional' ? additionalCatalog : eligibleCatalog)" :key="item.id" :value="item.id">
                       {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
                     </option>
                   </select>
                 </div>
                 <small v-if="line.catalogItemId">
-                  Satuan: {{ store.catalog.find((item) => item.id === line.catalogItemId)?.unit ?? 'unit' }} · Harga katalog: {{ formatCurrency(store.catalog.find((item) => item.id === line.catalogItemId)?.price ?? 0) }}
+                  Unit: {{ store.catalog.find((item) => item.id === line.catalogItemId)?.unit ?? 'unit' }} · Catalog rate: {{ formatCurrency(store.catalog.find((item) => item.id === line.catalogItemId)?.price ?? 0) }}
                 </small>
               </div>
               <input v-model.number="line.quantity" type="number" min="1" aria-label="Qty" />
-              <CurrencyInput v-model="line.customerPrice" aria-label="Harga satuan" />
+              <CurrencyInput v-model="line.customerPrice" aria-label="Unit price" />
               <div class="order-line-subtotal">
                 <strong>{{ formatCurrency(line.quantity * line.customerPrice) }}</strong>
               </div>
               <button
                 type="button"
                 class="icon-button order-line-remove"
-                title="Hapus baris"
+                title="Remove line"
                 @click="order.items.splice(index, 1)"
               >
                 <Trash2 :size="16" />
@@ -1207,31 +1238,31 @@ watch(() => route.query.catalog, (catalog) => {
         </div>
 
         <div class="order-grand-total span-2">
-          <span>Total {{ module === 'additional' ? 'additional' : 'pesanan awal' }}</span>
+          <span>{{ module === 'additional' ? 'Add-on Package Total' : 'Initial Order Total' }}</span>
           <strong>{{ formatCurrency(orderTotal) }}</strong>
         </div>
         <p v-if="orderError" class="form-error span-2">{{ orderError }}</p>
         <div class="modal-actions span-2">
-          <button type="button" class="secondary-button" @click="showOrder = false">Batal</button>
-          <button class="primary-button">{{ module === 'additional' ? 'Simpan Additional' : 'Simpan & Buat Invoice' }}</button>
+          <button type="button" class="secondary-button" @click="showOrder = false">Cancel</button>
+          <button class="primary-button">{{ module === 'additional' ? 'Save Add-on Batch' : 'Save & Issue Invoice' }}</button>
         </div>
       </form>
     </UiModal>
 
-    <UiModal :open="showOrderDetail && Boolean(activeOrderInvoice && activeOrderBooking)" :title="activeOrderBooking ? `Pesanan ${activeOrderBooking.poNumber} — ${store.customerFor(activeOrderBooking.customerId)?.name}` : 'Detail Pesanan'" description="Edit per kelompok pesanan, tambah layanan Inti/Additional bertahap, dan pantau sisa tagihan." wide @close="showOrderDetail = false">
+    <UiModal :open="showOrderDetail && Boolean(activeOrderInvoice && activeOrderBooking)" :title="activeOrderBooking ? `Orders ${activeOrderBooking.poNumber} — ${store.customerFor(activeOrderBooking.customerId)?.name}` : 'Order Details'" description="Edit per order group, add incremental core or add-on packages, and check remaining balance." wide @close="showOrderDetail = false">
       <div v-if="activeOrderInvoice && activeOrderBooking" class="order-detail-modal-body">
         <header class="order-detail-header order-detail-header--modal">
           <div>
             <p>
-              Nomor Invoice: <strong>{{ activeOrderInvoice.invoiceNumber }}</strong> ·
-              Tanggal Invoice Dibuat: <strong>{{ formatDate(activeOrderInvoice.issuedAt) }}</strong> ·
-              Acara: <strong>{{ formatDate(activeOrderBooking.eventDate) }}</strong>
+              Invoice No: <strong>{{ activeOrderInvoice.invoiceNumber }}</strong> ·
+              Issued: <strong>{{ formatDate(activeOrderInvoice.issuedAt) }}</strong> ·
+              Event: <strong>{{ formatDate(activeOrderBooking.eventDate) }}</strong>
             </p>
           </div>
           <div class="order-detail-header-actions">
             <StatusBadge :label="paymentStatus(activeOrderBooking.id)" />
             <button type="button" class="secondary-button" @click="showOrderDetail = false; previewInvoice(activeOrderInvoice)">
-              <ReceiptText :size="16" />Lihat Invoice
+              <ReceiptText :size="16" />Preview Invoice
             </button>
           </div>
         </header>
@@ -1241,20 +1272,20 @@ watch(() => route.query.catalog, (catalog) => {
             <header class="order-group-head">
               <div class="order-group-title">
                 <span class="order-group-badge" :class="group.kind === 'Awal' ? 'is-initial' : 'is-additional'">
-                  {{ group.kind === 'Awal' ? 'Pesanan Awal' : `Pesanan Tambahan ${gIdx}` }}
+                  {{ group.kind === 'Awal' ? 'Initial Order' : `Add-on Batch #${gIdx}` }}
                 </span>
-                <span class="order-group-date"><CalendarDays :size="14" />Tanggal Pemesanan: <strong>{{ formatDate(group.orderDate) }}</strong></span>
+                <span class="order-group-date"><CalendarDays :size="14" />Order Date: <strong>{{ formatDate(group.orderDate) }}</strong></span>
               </div>
               <div class="order-group-head-right">
                 <div class="order-group-subtotal">
-                  <span>Total harga paket</span>
+                  <span>Package Total</span>
                   <strong>{{ formatCurrency(store.groupTotal(group)) }}</strong>
                 </div>
                 <button
                   v-if="editingGroupId !== group.id"
                   type="button"
                   class="icon-button"
-                  title="Edit kelompok pesanan ini"
+                  title="Edit this order group"
                   @click="startEditGroup(group)"
                 >
                   <Pencil :size="15" />
@@ -1265,24 +1296,24 @@ watch(() => route.query.catalog, (catalog) => {
             <div v-if="editingGroupId === group.id" class="edit-group-inline">
               <div class="add-group-meta">
                 <label>
-                  <span>Tanggal Pemesanan *</span>
+                  <span>Order Date *</span>
                   <input v-model="editGroupForm.orderDate" type="date" required />
                 </label>
                 <div class="add-group-add-trigger">
                   <button type="button" class="soft-button add-inti-button" @click="addGroupRowByType(editGroupForm.items, 'Inti')">
-                    <Plus :size="14" />+ Inti
+                    <Plus :size="14" />+ Core
                   </button>
                   <button type="button" class="soft-button add-additional-button" @click="addGroupRowByType(editGroupForm.items, 'Additional')">
-                    <Plus :size="14" />+ Additional
+                    <Plus :size="14" />+ Add-on
                   </button>
                 </div>
               </div>
 
               <div class="order-lines-grid">
                 <div class="order-lines-columns">
-                  <span>Nama Layanan</span>
+                  <span>Service Name</span>
                   <span>Qty</span>
-                  <span>Harga Satuan</span>
+                  <span>Unit Price</span>
                   <span class="align-right">Subtotal</span>
                   <span />
                 </div>
@@ -1290,19 +1321,19 @@ watch(() => route.query.catalog, (catalog) => {
                 <div v-for="(line, idx) in editGroupForm.items" :key="line.key" class="order-line-row">
                   <div class="order-line-service">
                     <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                      <option value="">Pilih layanan</option>
+                      <option value="">Select service</option>
                       <template v-if="line.filterType === 'Inti' || line.filterType === 'Additional'">
                         <option v-for="item in catalogOptionsForLine(line)" :key="item.id" :value="item.id">
                           {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
                         </option>
                       </template>
                       <template v-else>
-                        <optgroup label="Layanan Inti">
+                        <optgroup label="Core Services">
                           <option v-for="item in coreCatalog" :key="item.id" :value="item.id">
                             {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
                           </option>
                         </optgroup>
-                        <optgroup label="Layanan Additional">
+                        <optgroup label="Add-on Services">
                           <option v-for="item in additionalCatalog" :key="item.id" :value="item.id">
                             {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
                           </option>
@@ -1310,11 +1341,11 @@ watch(() => route.query.catalog, (catalog) => {
                       </template>
                     </select>
                     <small v-if="line.catalogItemId">
-                      {{ store.catalog.find((c) => c.id === line.catalogItemId)?.type ?? line.serviceKind ?? 'Layanan' }} · Satuan: {{ store.catalog.find((c) => c.id === line.catalogItemId)?.unit ?? 'unit' }} · Katalog {{ formatCurrency(store.catalog.find((c) => c.id === line.catalogItemId)?.price ?? 0) }}
+                      {{ store.catalog.find((c) => c.id === line.catalogItemId)?.type === 'Inti' ? 'Core' : 'Add-on' }} · Unit: {{ store.catalog.find((c) => c.id === line.catalogItemId)?.unit ?? 'unit' }} · Catalog {{ formatCurrency(store.catalog.find((c) => c.id === line.catalogItemId)?.price ?? 0) }}
                     </small>
                   </div>
                   <input v-model.number="line.quantity" type="number" min="1" aria-label="Qty" />
-                  <CurrencyInput v-model="line.customerPrice" aria-label="Harga satuan" />
+                  <CurrencyInput v-model="line.customerPrice" aria-label="Unit price" />
                   <div class="order-line-subtotal">
                     <strong>{{ formatCurrency(line.quantity * line.customerPrice) }}</strong>
                   </div>
@@ -1322,7 +1353,7 @@ watch(() => route.query.catalog, (catalog) => {
                     type="button"
                     class="icon-button order-line-remove"
                     :disabled="editGroupForm.items.length === 1"
-                    title="Hapus baris"
+                    title="Remove line"
                     @click="editGroupForm.items.splice(idx, 1)"
                   >
                     <Trash2 :size="16" />
@@ -1332,12 +1363,12 @@ watch(() => route.query.catalog, (catalog) => {
 
               <div class="add-group-form-footer">
                 <div class="add-group-total">
-                  <span>Total harga paket (Setelah Edit)</span>
+                  <span>Updated Package Total</span>
                   <strong>{{ formatCurrency(editGroupTotal) }}</strong>
                 </div>
                 <div class="add-group-actions">
-                  <button type="button" class="secondary-button" @click="cancelEditGroup">Batal</button>
-                  <button type="button" class="primary-button" @click="saveEditGroup(group.id)"><Check :size="16" />Simpan Perubahan</button>
+                  <button type="button" class="secondary-button" @click="cancelEditGroup">Cancel</button>
+                  <button type="button" class="primary-button" @click="saveEditGroup(group.id)"><Check :size="16" />Save Changes</button>
                 </div>
               </div>
               <p v-if="editGroupError" class="form-error">{{ editGroupError }}</p>
@@ -1347,9 +1378,9 @@ watch(() => route.query.catalog, (catalog) => {
               <table class="order-group-table">
                 <thead>
                   <tr>
-                    <th>Nama Layanan</th>
+                    <th>Service Name</th>
                     <th class="col-qty">Qty</th>
-                    <th class="col-money">Harga Satuan</th>
+                    <th class="col-money">Unit Price</th>
                     <th class="col-money">Subtotal</th>
                   </tr>
                 </thead>
@@ -1358,7 +1389,7 @@ watch(() => route.query.catalog, (catalog) => {
                     <td>
                       <strong>{{ item.name }}</strong>
                       <span class="service-kind-tag" :class="item.serviceType === 'Inti' ? 'is-inti' : 'is-add'">
-                        {{ item.serviceType ?? 'Additional' }}
+                        {{ item.serviceType === 'Inti' ? 'Core' : 'Add-on' }}
                       </span>
                     </td>
                     <td class="col-qty">{{ item.quantity }} <small v-if="item.unit">{{ item.unit }}</small></td>
@@ -1373,36 +1404,36 @@ watch(() => route.query.catalog, (catalog) => {
           <form v-if="showAddGroupForm" class="add-group-form" @submit.prevent="submitAdditionalGroup">
             <header class="add-group-form-head">
               <div>
-                <strong>Tambah Kelompok Pesanan</strong>
-                <span>Pilih tanggal pemesanan dan tambahkan layanan Inti maupun Additional dari katalog.</span>
+                <strong>Add Order Group</strong>
+                <span>Pick the order date and append core or add-on service packages from catalog.</span>
               </div>
-              <button type="button" class="icon-button" title="Tutup" @click="cancelAddGroupForm"><X :size="16" /></button>
+              <button type="button" class="icon-button" title="Close" @click="cancelAddGroupForm"><X :size="16" /></button>
             </header>
 
             <div class="add-group-meta">
               <label>
-                <span>Tanggal Pesanan *</span>
+                <span>Order Date *</span>
                 <input v-model="addGroupForm.orderDate" type="date" required />
               </label>
               <div class="add-group-add-trigger">
                 <button type="button" class="soft-button add-inti-button" @click="addGroupRowByType(addGroupForm.items, 'Inti')">
-                  <Plus :size="15" />+ Inti
+                  <Plus :size="15" />+ Core
                 </button>
                 <button type="button" class="soft-button add-additional-button" @click="addGroupRowByType(addGroupForm.items, 'Additional')">
-                  <Plus :size="15" />+ Additional
+                  <Plus :size="15" />+ Add-on
                 </button>
               </div>
             </div>
 
             <div v-if="!addGroupForm.items.length" class="empty-order-lines-hint">
-              Klik tombol <strong>+ Inti</strong> atau <strong>+ Additional</strong> di atas untuk memilih dan menampilkan baris layanan.
+              Click <strong>+ Core</strong> or <strong>+ Add-on</strong> above to insert service lines.
             </div>
 
             <div v-else class="order-lines-grid">
               <div class="order-lines-columns">
-                <span>Nama Layanan</span>
+                <span>Service Name</span>
                 <span>Qty</span>
-                <span>Harga Satuan</span>
+                <span>Unit Price</span>
                 <span class="align-right">Subtotal</span>
                 <span />
               </div>
@@ -1414,22 +1445,22 @@ watch(() => route.query.catalog, (catalog) => {
                       class="service-kind-tag"
                       :class="(line.filterType === 'Inti' || line.serviceKind === 'Inti') ? 'is-inti' : 'is-add'"
                     >
-                      {{ line.filterType === 'Inti' ? 'Inti' : line.filterType === 'Additional' ? 'Additional' : (line.serviceKind ?? 'Layanan') }}
+                      {{ line.filterType === 'Inti' ? 'Core' : line.filterType === 'Additional' ? 'Add-on' : (line.serviceKind === 'Inti' ? 'Core' : 'Add-on') }}
                     </span>
                     <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                      <option value="">{{ line.filterType === 'Inti' ? 'Pilih layanan inti' : line.filterType === 'Additional' ? 'Pilih layanan additional' : 'Pilih layanan inti / additional' }}</option>
+                      <option value="">{{ line.filterType === 'Inti' ? 'Select core service' : line.filterType === 'Additional' ? 'Select add-on' : 'Select service' }}</option>
                       <template v-if="line.filterType === 'Inti' || line.filterType === 'Additional'">
                         <option v-for="item in catalogOptionsForLine(line)" :key="item.id" :value="item.id">
                           {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
                         </option>
                       </template>
                       <template v-else>
-                        <optgroup label="Layanan Inti">
+                        <optgroup label="Core Services">
                           <option v-for="item in coreCatalog" :key="item.id" :value="item.id">
                             {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
                           </option>
                         </optgroup>
-                        <optgroup label="Layanan Additional">
+                        <optgroup label="Add-on Services">
                           <option v-for="item in additionalCatalog" :key="item.id" :value="item.id">
                             {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
                           </option>
@@ -1438,18 +1469,18 @@ watch(() => route.query.catalog, (catalog) => {
                     </select>
                   </div>
                   <small v-if="line.catalogItemId">
-                    {{ store.catalog.find((c) => c.id === line.catalogItemId)?.type }} · Satuan: {{ store.catalog.find((c) => c.id === line.catalogItemId)?.unit }} · Katalog {{ formatCurrency(store.catalog.find((c) => c.id === line.catalogItemId)?.price ?? 0) }}
+                    {{ store.catalog.find((c) => c.id === line.catalogItemId)?.type === 'Inti' ? 'Core' : 'Add-on' }} · Unit: {{ store.catalog.find((c) => c.id === line.catalogItemId)?.unit }} · Catalog {{ formatCurrency(store.catalog.find((c) => c.id === line.catalogItemId)?.price ?? 0) }}
                   </small>
                 </div>
                 <input v-model.number="line.quantity" type="number" min="1" aria-label="Qty" />
-                <CurrencyInput v-model="line.customerPrice" aria-label="Harga satuan" />
+                <CurrencyInput v-model="line.customerPrice" aria-label="Unit price" />
                 <div class="order-line-subtotal">
                   <strong>{{ formatCurrency(line.quantity * line.customerPrice) }}</strong>
                 </div>
                 <button
                   type="button"
                   class="icon-button order-line-remove"
-                  title="Hapus baris"
+                  title="Remove line"
                   @click="addGroupForm.items.splice(idx, 1)"
                 >
                   <Trash2 :size="16" />
@@ -1459,12 +1490,12 @@ watch(() => route.query.catalog, (catalog) => {
 
             <div class="add-group-form-footer">
               <div class="add-group-total">
-                <span>Total Pesanan Tambahan</span>
+                <span>Add-on Batch Total</span>
                 <strong>{{ formatCurrency(addGroupTotal) }}</strong>
               </div>
               <div class="add-group-actions">
-                <button type="button" class="secondary-button" @click="cancelAddGroupForm">Batal</button>
-                <button type="submit" class="primary-button"><Check :size="16" />Simpan Pesanan Tambahan</button>
+                <button type="button" class="secondary-button" @click="cancelAddGroupForm">Cancel</button>
+                <button type="submit" class="primary-button"><Check :size="16" />Save Order Group</button>
               </div>
             </div>
             <p v-if="addGroupError" class="form-error">{{ addGroupError }}</p>
@@ -1472,28 +1503,28 @@ watch(() => route.query.catalog, (catalog) => {
 
           <div class="add-order-group-bar">
             <button v-if="!showAddGroupForm" type="button" class="outline-button add-pesanan-button" @click="openAddGroupForm">
-              <Plus :size="17" />+ Pesanan
+              <Plus :size="17" />+ Add Order Group
             </button>
           </div>
         </div>
 
         <footer class="order-financial-summary">
           <div>
-            <span>Total Tagihan</span>
+            <span>Total Billed</span>
             <strong>{{ formatCurrency(store.bookingTotal(activeOrderBooking.id)) }}</strong>
           </div>
           <div>
-            <span>Total Pembayaran Diterima</span>
+            <span>Payments Received</span>
             <strong>{{ formatCurrency(store.bookingPaid(activeOrderBooking.id)) }}</strong>
           </div>
           <div class="is-balance">
-            <span>Sisa Pembayaran</span>
+            <span>Balance Due</span>
             <strong>{{ formatCurrency(store.bookingBalance(activeOrderBooking.id)) }}</strong>
           </div>
         </footer>
 
         <section v-if="store.bookingPayments(activeOrderBooking.id).length" class="po-payment-history">
-          <strong>Riwayat Pembayaran PO ({{ store.bookingPayments(activeOrderBooking.id).length }} transaksi)</strong>
+          <strong>PO Payment History ({{ store.bookingPayments(activeOrderBooking.id).length }} transaction(s))</strong>
           <ul>
             <li v-for="pay in store.bookingPayments(activeOrderBooking.id)" :key="pay.id">
               <span class="mono-code">{{ pay.receiptNumber }}</span>
@@ -1503,123 +1534,115 @@ watch(() => route.query.catalog, (catalog) => {
           </ul>
         </section>
       </div>
-      <div class="modal-actions"><button class="primary-button" @click="showOrderDetail = false">Tutup</button></div>
+      <div class="modal-actions"><button class="primary-button" @click="showOrderDetail = false">Close</button></div>
     </UiModal>
 
-    <UiModal :open="showInvoice" title="Pratinjau Faktur Tagihan" description="Dokumen tagihan dengan urutan layanan Inti di atas Tambahan." wide @close="showInvoice = false">
-      <div v-if="selectedInvoice" class="invoice-document doc-card">
-        <header class="doc-banner">
-          <div class="doc-banner-brand">
-            <img v-if="store.businessProfile.logoUrl" :src="store.businessProfile.logoUrl" :alt="store.businessProfile.name" class="doc-banner-logo" />
-            <span v-else class="doc-banner-monogram">{{ (store.businessProfile.name || 'A').slice(0, 1).toUpperCase() }}</span>
+    <!-- INVOICE EYE PREVIEW: 100% Aligned with invoicePdf.ts Editorial Stationery -->
+    <UiModal :open="showInvoice" title="Official Invoice Preview" description="Identical layout, service sequence, and balance summary as the downloaded Invoice PDF." wide @close="showInvoice = false">
+      <article v-if="selectedInvoice" class="editorial-sheet">
+        <header class="editorial-sheet-banner">
+          <div class="editorial-sheet-brand">
+            <div class="editorial-sheet-logo">
+              <img v-if="store.businessProfile.logoUrl" :src="store.businessProfile.logoUrl" :alt="store.businessProfile.name" />
+              <template v-else>{{ (store.businessProfile.name || 'A').slice(0, 1).toUpperCase() }}</template>
+            </div>
             <div>
               <strong>{{ (store.businessProfile.name || 'AZURA').toUpperCase() }} {{ (store.businessProfile.tagline || 'MAKEUP ARTIST').toUpperCase() }}</strong>
-              <small>{{ store.businessProfile.address }} · {{ store.businessProfile.email }}<template v-if="store.businessProfile.phone"> · {{ store.businessProfile.phone }}</template></small>
+              <small>{{ store.bookingFor(selectedInvoice.bookingId)?.poNumber ? `PURCHASE ORDER · ${store.bookingFor(selectedInvoice.bookingId)?.poNumber}` : 'CLIENT BILLING STATEMENT' }}</small>
+              <span>{{ store.businessProfile.address }} | {{ store.businessProfile.email }}<template v-if="store.businessProfile.phone"> | {{ store.businessProfile.phone }}</template></span>
             </div>
           </div>
-          <div class="doc-banner-meta">
-            <span>FAKTUR TAGIHAN</span>
+          <div class="editorial-sheet-doc">
+            <small>OFFICIAL INVOICE</small>
             <strong>{{ selectedInvoice.invoiceNumber }}</strong>
-            <small>{{ formatDate(selectedInvoice.issuedAt) }}</small>
+            <span
+              :class="{
+                'is-partial': store.bookingPaid(selectedInvoice.bookingId) > 0 && store.bookingBalance(selectedInvoice.bookingId) > 0,
+                'is-unpaid': store.bookingPaid(selectedInvoice.bookingId) <= 0,
+              }"
+            >
+              {{ store.bookingBalance(selectedInvoice.bookingId) <= 0 ? 'PAID IN FULL' : store.bookingPaid(selectedInvoice.bookingId) > 0 ? 'PARTIAL PAYMENT' : 'UNPAID' }}
+            </span>
           </div>
         </header>
 
-        <section class="doc-info-grid">
-          <article>
-            <span>DITAGIHKAN KEPADA</span>
-            <strong>{{ store.customerFor(store.bookingFor(selectedInvoice.bookingId)?.customerId ?? '')?.name }}</strong>
-            <small>Telepon / WA: {{ store.customerFor(store.bookingFor(selectedInvoice.bookingId)?.customerId ?? '')?.phone }}</small>
-            <small>Tanggal Dibuat: {{ formatDate(selectedInvoice.issuedAt) }}</small>
-          </article>
-          <article>
-            <span>RINCIAN PEMESANAN</span>
-            <strong class="mono-code">{{ store.bookingFor(selectedInvoice.bookingId)?.poNumber }}</strong>
-            <small>Acara: {{ formatDate(store.bookingFor(selectedInvoice.bookingId)?.eventDate ?? '') }} · {{ store.bookingFor(selectedInvoice.bookingId)?.location }}</small>
-            <small>Pesanan Awal: {{ formatDate(store.sortedOrderGroups(selectedInvoice)[0]?.orderDate ?? selectedInvoice.issuedAt) }}</small>
-          </article>
-        </section>
-
-        <div class="invoice-groups">
-          <section v-for="(group, gIdx) in store.sortedOrderGroups(selectedInvoice)" :key="group.id" class="invoice-group-block doc-table-section">
-            <div class="doc-group-caption">
-              <strong>{{ group.kind === 'Awal' ? 'Pesanan Awal' : `Pesanan Tambahan ${gIdx}` }}</strong>
-              <span>Tanggal Pemesanan: {{ formatDate(group.orderDate) }}</span>
+        <div class="editorial-sheet-body">
+          <section class="editorial-meta-two">
+            <div class="editorial-meta-box">
+              <small>BILLED TO</small>
+              <strong>{{ store.customerFor(store.bookingFor(selectedInvoice.bookingId)?.customerId ?? '')?.name || '-' }}</strong>
+              <span>Phone / WhatsApp: {{ store.customerFor(store.bookingFor(selectedInvoice.bookingId)?.customerId ?? '')?.phone || '-' }}</span>
+              <span>Invoice Date: {{ formatDate(selectedInvoice.issuedAt) }}</span>
             </div>
-            <div class="doc-table-wrap">
-              <table class="doc-table">
-                <thead>
-                  <tr>
-                    <th>Nama Layanan</th>
-                    <th class="col-center">Jumlah</th>
-                    <th class="col-right">Harga Satuan</th>
-                    <th class="col-right">Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in store.sortInvoiceItemsIntiFirst(group.items)" :key="item.id">
-                    <td>
-                      <strong>{{ item.name }}</strong>
-                      <span class="invoice-service-tag">{{ item.serviceType === 'Inti' ? 'Inti' : 'Tambahan' }}</span>
-                    </td>
-                    <td class="col-center">{{ item.quantity }}{{ item.unit ? ` ${item.unit}` : '' }}</td>
-                    <td class="col-right">{{ formatCurrency(item.unitPrice) }}</td>
-                    <td class="col-right"><strong>{{ formatCurrency(item.quantity * item.unitPrice) }}</strong></td>
-                  </tr>
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colspan="3">Total harga paket</td>
-                    <td class="col-right"><strong>{{ formatCurrency(store.groupTotal(group)) }}</strong></td>
-                  </tr>
-                </tfoot>
-              </table>
+            <div class="editorial-meta-box">
+              <small>BOOKING &amp; EVENT DETAILS</small>
+              <strong class="mono-code">{{ store.bookingFor(selectedInvoice.bookingId)?.poNumber || '-' }}</strong>
+              <span>Event: {{ store.bookingFor(selectedInvoice.bookingId)?.eventDate ? formatDate(store.bookingFor(selectedInvoice.bookingId)!.eventDate) : '-' }}<template v-if="store.bookingFor(selectedInvoice.bookingId)?.location"> · {{ store.bookingFor(selectedInvoice.bookingId)?.location }}</template></span>
+              <span>Initial Order: {{ formatDate(store.sortedOrderGroups(selectedInvoice)[0]?.orderDate ?? selectedInvoice.issuedAt) }}</span>
+            </div>
+          </section>
+
+          <section>
+            <table class="editorial-table">
+              <thead>
+                <tr>
+                  <th>Service Description</th>
+                  <th>Order Group</th>
+                  <th class="is-num">Qty</th>
+                  <th class="is-num">Unit Price</th>
+                  <th class="is-num">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, idx) in selectedInvoiceFlattened" :key="idx">
+                  <td>
+                    <strong>{{ item.name }}</strong>
+                    <span class="subtle-line">{{ item.serviceType === 'Inti' ? 'Core Service' : 'Add-on' }}</span>
+                  </td>
+                  <td>{{ item.groupTitle }}</td>
+                  <td class="is-num">{{ item.quantity }}{{ item.unit ? ` ${item.unit}` : '' }}</td>
+                  <td class="is-num">{{ formatCurrency(item.unitPrice) }}</td>
+                  <td class="is-num"><strong>{{ formatCurrency(item.quantity * item.unitPrice) }}</strong></td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="editorial-totals">
+            <div class="editorial-meta-box">
+              <small>PAYMENT STATUS &amp; HISTORY</small>
+              <StatusBadge :label="paymentStatus(selectedInvoice.bookingId)" style="margin: 4px 0;" />
+              <ul v-if="store.bookingPayments(selectedInvoice.bookingId).length" class="doc-history-list" style="margin-top: 6px;">
+                <li v-for="pay in store.bookingPayments(selectedInvoice.bookingId)" :key="pay.id">
+                  <span>{{ pay.receiptNumber }} · {{ formatDate(pay.paidAt) }} ({{ pay.method === 'Cash' || pay.method === 'Tunai' ? 'Cash' : pay.method }})</span>
+                  <strong>{{ formatCurrency(pay.amount) }}</strong>
+                </li>
+              </ul>
+              <span v-else>No payment transactions recorded yet.</span>
+            </div>
+
+            <div class="editorial-summary-card">
+              <div><span>Invoice Total</span><strong>{{ formatCurrency(store.bookingTotal(selectedInvoice.bookingId)) }}</strong></div>
+              <div><span>Total Paid</span><strong>{{ formatCurrency(store.bookingPaid(selectedInvoice.bookingId)) }}</strong></div>
+              <div class="is-highlight"><span>Balance Due</span><strong>{{ formatCurrency(Math.max(0, store.bookingBalance(selectedInvoice.bookingId))) }}</strong></div>
             </div>
           </section>
         </div>
 
-        <section class="doc-bottom-grid">
-          <div class="doc-history-card">
-            <span class="doc-sublabel">RIWAYAT PEMBAYARAN &amp; STATUS</span>
-            <StatusBadge :label="paymentStatus(selectedInvoice.bookingId)" />
-            <ul v-if="store.bookingPayments(selectedInvoice.bookingId).length" class="doc-history-list">
-              <li v-for="pay in store.bookingPayments(selectedInvoice.bookingId)" :key="pay.id">
-                <span>{{ pay.receiptNumber }} · {{ formatDate(pay.paidAt) }} ({{ pay.method === 'Cash' ? 'Tunai' : pay.method }})</span>
-                <strong>{{ formatCurrency(pay.amount) }}</strong>
-              </li>
-            </ul>
-            <p v-else class="doc-muted-note">Belum ada transaksi pembayaran tercatat.</p>
+        <footer class="editorial-sheet-footer">
+          <div>
+            <strong style="display: block; color: #4d4237; margin-bottom: 2px;">{{ store.businessProfile.invoiceNote || 'Thank you for trusting us with your special celebration.' }}</strong>
+            <span>{{ store.businessProfile.email }} · {{ store.businessProfile.phone }} · {{ store.businessProfile.address }}</span>
           </div>
-
-          <div class="doc-espresso-card">
-            <div class="doc-espresso-line">
-              <span>Total Tagihan</span>
-              <strong>{{ formatCurrency(store.bookingTotal(selectedInvoice.bookingId)) }}</strong>
-            </div>
-            <div class="doc-espresso-line">
-              <span>Total Dibayar</span>
-              <strong>{{ formatCurrency(store.bookingPaid(selectedInvoice.bookingId)) }}</strong>
-            </div>
-            <div class="doc-espresso-line is-total">
-              <span>Sisa Pembayaran</span>
-              <strong>{{ formatCurrency(Math.max(0, store.bookingBalance(selectedInvoice.bookingId))) }}</strong>
-            </div>
-          </div>
-        </section>
-
-        <footer class="doc-footer">
-          <p>{{ store.businessProfile.invoiceNote || 'Terima kasih telah mempercayakan momen spesial Anda.' }}</p>
-          <div class="doc-footer-row">
-            <small>{{ store.businessProfile.email }} · {{ store.businessProfile.phone }} · {{ store.businessProfile.address }}</small>
-            <a href="https://daysheet.id" target="_blank" rel="noopener noreferrer" class="daysheet-copyright-link">
-              Hak Cipta © {{ new Date().getFullYear() }} Daysheet.id
-            </a>
-          </div>
+          <a href="https://daysheet.id" target="_blank" rel="noopener noreferrer" class="daysheet-copyright-link">
+            Copyright © {{ new Date().getFullYear() }} Daysheet.id
+          </a>
         </footer>
-      </div>
-      <div class="modal-actions no-print">
-        <button class="secondary-button" @click="showInvoice = false">Tutup</button>
-        <button type="button" class="secondary-button" @click="printInvoice"><Printer :size="16" />Cetak</button>
-        <button v-if="selectedInvoice" type="button" class="primary-button" @click="downloadInvoice(selectedInvoice)"><Download :size="17" />Unduh PDF Faktur</button>
+      </article>
+      <div class="modal-actions no-print" style="margin-top: 14px;">
+        <button class="secondary-button" @click="showInvoice = false">Close</button>
+        <button type="button" class="secondary-button" @click="printInvoice"><Printer :size="16" />Print</button>
+        <button v-if="selectedInvoice" type="button" class="primary-button" @click="downloadInvoice(selectedInvoice)"><Download :size="17" />Download Invoice PDF</button>
       </div>
     </UiModal>
   </div>

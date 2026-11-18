@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import {
-  Briefcase, CalendarDays, Check, Download, MapPin, Pencil, Phone, RotateCcw,
-  Search, SlidersHorizontal, UserCheck, Users, Plus,
+  Briefcase, CalendarDays, Download, MapPin, Pencil, Phone, RotateCcw,
+  Search, SlidersHorizontal, Users, Plus, X,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type EmployeeRecord } from '../stores/crm'
-import { formatDate } from '../utils/format'
-import { downloadJobReportPdf, type JobReportRow } from '../utils/jobReportPdf'
+import { displayBookingStatus, formatDate } from '../utils/format'
+import type { JobReportRow } from '../utils/jobReportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 
@@ -65,8 +65,18 @@ const assignedCount = computed(() =>
 )
 const unassignedCount = computed(() => filteredBookings.value.length - assignedCount.value)
 
-const isEmployeeAssigned = (bookingId: string, employeeId: string) =>
-  (store.jobForBooking(bookingId)?.employeeIds ?? []).includes(employeeId)
+const unassignedEmployeesFor = (bookingId: string) => {
+  const assignedIds = new Set(store.jobForBooking(bookingId)?.employeeIds ?? [])
+  return store.activeEmployees.filter((emp) => !assignedIds.has(emp.id))
+}
+
+const onSelectAssignCrew = (bookingId: string, event: Event) => {
+  const selectEl = event.target as HTMLSelectElement
+  const employeeId = selectEl.value
+  if (!employeeId) return
+  store.toggleBookingEmployee(bookingId, employeeId)
+  selectEl.value = ''
+}
 
 const resetFilters = () => {
   search.value = ''
@@ -94,12 +104,12 @@ const staffForm = reactive({ name: '', role: 'MUA & Hairdo', phone: '' })
 const staffError = ref('')
 const editingStaff = ref<EmployeeRecord | null>(null)
 const roleOptions = [
-  'Owner / Lead MUA',
+  'Owner & Lead MUA',
   'MUA & Hairdo',
   'Hijabdo Stylist',
-  'Asisten MUA',
+  'Assistant MUA',
   'Wardrobe & Inventory',
-  'Runner / Logistik',
+  'Runner / Logistics',
   'Admin / Finance',
 ]
 
@@ -113,7 +123,7 @@ const openManageStaff = () => {
 const submitNewStaff = () => {
   try {
     staffError.value = ''
-    if (!staffForm.name.trim()) throw new Error('Nama karyawan wajib diisi.')
+    if (!staffForm.name.trim()) throw new Error('Employee name is required.')
     if (editingStaff.value) {
       store.updateEmployee(editingStaff.value.id, {
         name: staffForm.name,
@@ -130,7 +140,7 @@ const submitNewStaff = () => {
     }
     Object.assign(staffForm, { name: '', role: 'MUA & Hairdo', phone: '' })
   } catch (err) {
-    staffError.value = err instanceof Error ? err.message : 'Gagal menyimpan karyawan.'
+    staffError.value = err instanceof Error ? err.message : 'Failed to save employee.'
   }
 }
 
@@ -139,7 +149,8 @@ const startEditStaff = (emp: EmployeeRecord) => {
   Object.assign(staffForm, { name: emp.name, role: emp.role, phone: emp.phone ?? '' })
 }
 
-const exportPdf = () => {
+const exportPdf = async () => {
+  const { downloadJobReportPdf } = await import('../utils/jobReportPdf')
   const rows: JobReportRow[] = filteredBookings.value.map((booking) => {
     const customer = store.customerFor(booking.customerId)
     const assigned = store.assignedEmployeesForBooking(booking.id)
@@ -151,7 +162,7 @@ const exportPdf = () => {
       customerName: customer?.name ?? 'Customer',
       stylingType: booking.stylingType,
       location: booking.location,
-      servicesSummary: bookingServicesText(booking.id) || 'Belum ada item pesanan',
+      servicesSummary: bookingServicesText(booking.id) || 'No service items yet',
       assignedNames: assigned.map((e) => e.name),
       notes: job?.notes || booking.notes,
       status: booking.status,
@@ -161,7 +172,7 @@ const exportPdf = () => {
   const empName = employeeFilter.value && employeeFilter.value !== '__unassigned__'
     ? store.employees.find((e) => e.id === employeeFilter.value)?.name
     : employeeFilter.value === '__unassigned__'
-      ? 'Belum Ditugaskan'
+      ? 'Unassigned'
       : undefined
 
   downloadJobReportPdf({
@@ -170,6 +181,7 @@ const exportPdf = () => {
     filterEmployeeName: empName,
     rows,
     employees: store.activeEmployees,
+    businessProfile: store.businessProfile,
   })
 }
 </script>
@@ -178,50 +190,50 @@ const exportPdf = () => {
   <div class="page-stack">
     <section class="page-heading">
       <div>
-        <span class="eyebrow">Ruang Kerja</span>
-        <h2>Penugasan Tim Karyawan</h2>
-        <p>Klik nama karyawan untuk menetapkan pemegang tugas pada setiap Nomor PO dan unduh laporan tugas PDF per rentang tanggal acara.</p>
+        <span class="eyebrow">Workspace</span>
+        <h2>Team Job Assignments</h2>
+        <p>Select crew members from the dropdown per PO and download PDF duty schedules for any event date range.</p>
       </div>
       <div class="heading-actions">
         <button type="button" class="secondary-button" @click="openManageStaff">
-          <Users :size="16" />Kelola Karyawan ({{ store.activeEmployees.length }})
+          <Users :size="16" />Manage Crew ({{ store.activeEmployees.length }})
         </button>
         <button type="button" class="primary-button" @click="exportPdf">
-          <Download :size="17" />Unduh Laporan Tugas PDF
+          <Download :size="17" />Download Job Report PDF
         </button>
       </div>
     </section>
 
     <section class="summary-strip">
-      <div><span>Total PO (Filter)</span><strong>{{ filteredBookings.length }} PO</strong></div>
-      <div><span>Sudah Ditugaskan</span><strong>{{ assignedCount }} PO</strong></div>
-      <div><span>Belum Ada Tim</span><strong>{{ unassignedCount }} PO</strong></div>
-      <div><span>Karyawan Aktif</span><strong>{{ store.activeEmployees.length }} Orang</strong></div>
+      <div><span>Filtered POs</span><strong>{{ filteredBookings.length }} POs</strong></div>
+      <div><span>Assigned</span><strong>{{ assignedCount }} POs</strong></div>
+      <div><span>Unassigned</span><strong>{{ unassignedCount }} POs</strong></div>
+      <div><span>Active Staff</span><strong>{{ store.activeEmployees.length }} Staff</strong></div>
     </section>
 
     <section class="panel table-panel">
       <div class="job-filter-bar">
         <label class="table-search">
           <Search :size="17" />
-          <input v-model="search" type="search" placeholder="Cari PO, customer, lokasi, atau nama karyawan…" />
+          <input v-model="search" type="search" placeholder="Search PO, customer, venue, or employee…" />
         </label>
 
         <div class="job-date-filters">
           <label class="job-filter-field">
-            <span>Dari Tanggal</span>
-            <input v-model="fromDate" type="date" aria-label="Dari tanggal acara" />
+            <span>From Date</span>
+            <input v-model="fromDate" type="date" aria-label="From event date" />
           </label>
           <label class="job-filter-field">
-            <span>Sampai Tanggal</span>
-            <input v-model="toDate" type="date" aria-label="Sampai tanggal acara" />
+            <span>To Date</span>
+            <input v-model="toDate" type="date" aria-label="To event date" />
           </label>
           <label class="job-filter-field">
-            <span>Filter Karyawan</span>
+            <span>Filter Staff</span>
             <div class="filter-row">
               <SlidersHorizontal :size="15" />
-              <select v-model="employeeFilter" aria-label="Filter karyawan">
-                <option value="">Semua Karyawan</option>
-                <option value="__unassigned__">Belum Ditugaskan</option>
+              <select v-model="employeeFilter" aria-label="Filter employee">
+                <option value="">All Employees</option>
+                <option value="__unassigned__">Unassigned Only</option>
                 <option v-for="emp in store.activeEmployees" :key="emp.id" :value="emp.id">
                   {{ emp.name }} ({{ emp.role }})
                 </option>
@@ -232,7 +244,7 @@ const exportPdf = () => {
             v-if="search || fromDate || toDate || employeeFilter"
             type="button"
             class="soft-button"
-            title="Reset filter"
+            title="Reset filters"
             @click="resetFilters"
           >
             <RotateCcw :size="14" />Reset
@@ -244,11 +256,12 @@ const exportPdf = () => {
         <table class="data-table jobs-table">
           <thead>
             <tr>
-              <th>PO &amp; Tanggal Acara</th>
-              <th>Customer &amp; Lokasi</th>
-              <th>Pesanan Layanan</th>
-              <th>Pemegang Job (Klik untuk Pilih)</th>
-              <th>Aksi</th>
+              <th>PO &amp; Event Date</th>
+              <th>Customer &amp; Venue</th>
+              <th>Ordered Services</th>
+              <th>Assigned Crew</th>
+              <th>Crew Notes</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -260,7 +273,7 @@ const exportPdf = () => {
                     <CalendarDays :size="13" />
                     {{ formatDate(booking.eventDate) }}<template v-if="booking.eventTime"> · {{ booking.eventTime }}</template>
                   </span>
-                  <StatusBadge :label="booking.status" />
+                  <StatusBadge :label="displayBookingStatus(booking.status)" />
                 </div>
               </td>
               <td>
@@ -268,41 +281,68 @@ const exportPdf = () => {
                   <strong>{{ store.customerFor(booking.customerId)?.name }}</strong>
                   <span class="subtle-line"><Phone :size="12" />{{ store.customerFor(booking.customerId)?.phone }}</span>
                   <span class="subtle-line"><MapPin :size="12" />{{ booking.location }}</span>
-                  <span v-if="booking.stylingType" class="job-styling-chip">Penataan: {{ booking.stylingType }}</span>
+                  <span v-if="booking.stylingType" class="job-styling-chip">Styling: {{ booking.stylingType }}</span>
                 </div>
               </td>
               <td>
                 <div class="job-services-cell">
                   <p v-if="bookingServicesText(booking.id)">{{ bookingServicesText(booking.id) }}</p>
-                  <span v-else class="subtle-line">Belum ada rincian pesanan di menu Pesanan.</span>
-                  <small v-if="store.jobForBooking(booking.id)?.notes" class="job-note-preview">
-                    Catatan job: {{ store.jobForBooking(booking.id)?.notes }}
-                  </small>
+                  <span v-else class="subtle-line">No order items yet under Orders.</span>
                 </div>
               </td>
               <td>
-                <div v-if="store.activeEmployees.length" class="job-assignee-grid">
-                  <button
-                    v-for="emp in store.activeEmployees"
-                    :key="emp.id"
-                    type="button"
-                    class="employee-toggle-chip"
-                    :class="{ 'is-assigned': isEmployeeAssigned(booking.id, emp.id) }"
-                    :title="`${emp.name} · ${emp.role}`"
-                    @click="store.toggleBookingEmployee(booking.id, emp.id)"
+                <div v-if="store.activeEmployees.length" class="job-crew-column">
+                  <select
+                    class="job-crew-select"
+                    value=""
+                    :disabled="!unassignedEmployeesFor(booking.id).length"
+                    aria-label="Assign crew member"
+                    @change="onSelectAssignCrew(booking.id, $event)"
                   >
-                    <Check v-if="isEmployeeAssigned(booking.id, emp.id)" :size="13" :stroke-width="2.4" />
-                    <UserCheck v-else :size="13" :stroke-width="1.75" />
-                    <span>{{ emp.name }}</span>
-                  </button>
+                    <option value="">
+                      {{ unassignedEmployeesFor(booking.id).length ? '+ Select crew member…' : 'All active staff assigned' }}
+                    </option>
+                    <option v-for="emp in unassignedEmployeesFor(booking.id)" :key="emp.id" :value="emp.id">
+                      {{ emp.name }} — {{ emp.role }}
+                    </option>
+                  </select>
+
+                  <div v-if="store.assignedEmployeesForBooking(booking.id).length" class="job-assigned-pills">
+                    <span
+                      v-for="emp in store.assignedEmployeesForBooking(booking.id)"
+                      :key="emp.id"
+                      class="job-assigned-pill"
+                      :title="`${emp.name} · ${emp.role}`"
+                    >
+                      <span>{{ emp.name }}</span>
+                      <button
+                        type="button"
+                        class="job-assigned-remove"
+                        :aria-label="`Remove ${emp.name}`"
+                        title="Remove from PO"
+                        @click="store.toggleBookingEmployee(booking.id, emp.id)"
+                      >
+                        <X :size="12" />
+                      </button>
+                    </span>
+                  </div>
+                  <span v-else class="subtle-line">No crew assigned yet</span>
                 </div>
-                <span v-else class="subtle-line">Klik tombol "Kelola Karyawan" di atas untuk menambahkan daftar karyawan.</span>
+                <span v-else class="subtle-line">Click "Manage Crew" above to add employees.</span>
+              </td>
+              <td>
+                <div class="job-notes-column">
+                  <small v-if="store.jobForBooking(booking.id)?.notes" class="job-note-preview">
+                    {{ store.jobForBooking(booking.id)?.notes }}
+                  </small>
+                  <span v-else class="subtle-line">—</span>
+                </div>
               </td>
               <td>
                 <button
                   type="button"
                   class="icon-button"
-                  title="Edit catatan job untuk PO ini"
+                  title="Edit job notes for this PO"
                   @click="openNoteModal(booking)"
                 >
                   <Pencil :size="16" />
@@ -310,11 +350,11 @@ const exportPdf = () => {
               </td>
             </tr>
             <tr v-if="!filteredBookings.length">
-              <td colspan="5">
+              <td colspan="6">
                 <div class="empty-state">
                   <Briefcase :size="28" />
-                  <strong>Tidak ada pesanan/job pada filter ini</strong>
-                  <span>Sesuaikan rentang tanggal atau reset filter untuk menampilkan seluruh PO masuk.</span>
+                  <strong>No jobs match this filter</strong>
+                  <span>Adjust the date range or reset filters to view all active POs.</span>
                 </div>
               </td>
             </tr>
@@ -322,71 +362,71 @@ const exportPdf = () => {
         </table>
       </div>
       <footer class="table-footer">
-        <span>Menampilkan {{ filteredBookings.length }} PO aktif · Klik nama karyawan untuk langsung menugaskan atau melepas job</span>
+        <span>Showing {{ filteredBookings.length }} active POs · Use the Assigned Crew dropdown per column to add or remove staff</span>
       </footer>
     </section>
 
     <UiModal
       :open="showNoteModal"
-      :title="noteBooking ? `Catatan Job — ${noteBooking.poNumber}` : 'Catatan Job'"
-      description="Tambahkan instruksi call time, pembagian tugas, atau catatan lapangan untuk tim."
+      :title="noteBooking ? `Job Notes — ${noteBooking.poNumber}` : 'Job Notes'"
+      description="Add call time instructions, role splits, or field notes for the crew."
       @close="showNoteModal = false"
     >
       <form class="form-grid" @submit.prevent="saveJobNotes">
         <label class="span-2">
-          <span>Catatan / Instruksi Tim</span>
-          <textarea v-model="noteDraft" rows="3" placeholder="Contoh: Standby lokasi 04.30 WIB, bawa perlengkapan hijabdo cadangan" />
+          <span>Crew Notes / Instructions</span>
+          <textarea v-model="noteDraft" rows="3" placeholder="e.g. Standby at venue by 04:30 AM, bring backup hijabdo pins" />
         </label>
         <div class="modal-actions span-2">
-          <button type="button" class="secondary-button" @click="showNoteModal = false">Batal</button>
-          <button type="submit" class="primary-button">Simpan Catatan</button>
+          <button type="button" class="secondary-button" @click="showNoteModal = false">Cancel</button>
+          <button type="submit" class="primary-button">Save Notes</button>
         </div>
       </form>
     </UiModal>
 
     <UiModal
       :open="showStaffModal"
-      title="Kelola Daftar Karyawan"
-      description="Tambah, ubah, atau nonaktifkan karyawan; nama yang aktif otomatis tampil untuk ditugaskan di PO."
+      title="Manage Crew Roster"
+      description="Add, update, or toggle staff members; active employees appear in PO assignment chips."
       wide
       @close="showStaffModal = false"
     >
       <form class="form-grid" @submit.prevent="submitNewStaff">
-        <label><span>Nama Karyawan *</span><input v-model="staffForm.name" placeholder="Contoh: Sinta Dewi" /></label>
-        <label><span>Peran / Tugas *</span>
+        <label><span>Employee Name *</span><input v-model="staffForm.name" placeholder="e.g. Sinta Dewi" /></label>
+        <label><span>Role / Position *</span>
           <select v-model="staffForm.role">
             <option v-for="role in roleOptions" :key="role" :value="role">{{ role }}</option>
           </select>
         </label>
-        <label class="span-2"><span>No. Telepon / WA (opsional)</span><input v-model="staffForm.phone" placeholder="08xxxxxxxxxx" /></label>
+        <label class="span-2"><span>Phone / WhatsApp (optional)</span><input v-model="staffForm.phone" placeholder="08xxxxxxxxxx" /></label>
         <p v-if="staffError" class="form-error span-2">{{ staffError }}</p>
         <div class="modal-actions span-2">
           <button v-if="editingStaff" type="button" class="secondary-button" @click="editingStaff = null; Object.assign(staffForm, { name: '', role: 'MUA & Hairdo', phone: '' })">
-            Batal Edit
+            Cancel Edit
           </button>
           <button type="submit" class="primary-button">
-            <Plus :size="15" />{{ editingStaff ? 'Simpan Perubahan Karyawan' : 'Tambah Karyawan' }}
+            <Plus :size="15" />{{ editingStaff ? 'Save Employee' : 'Add Employee' }}
           </button>
         </div>
       </form>
 
       <div class="staff-manage-list">
-        <h4>Daftar Karyawan Terdaftar ({{ store.employees.length }})</h4>
+        <h4>Registered Crew ({{ store.employees.length }})</h4>
         <div class="data-table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>Nama</th><th>Peran</th><th>Status</th><th>Aksi</th></tr>
+              <tr><th>Name</th><th>Role</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
               <tr v-for="emp in store.employees" :key="emp.id">
                 <td><strong>{{ emp.name }}</strong><span v-if="emp.phone" class="subtle-line">{{ emp.phone }}</span></td>
                 <td>{{ emp.role }}</td>
-                <td><StatusBadge :label="emp.active ? 'Aktif' : 'Nonaktif'" /></td>
+                <td><StatusBadge :label="emp.active ? 'Active' : 'Inactive'" /></td>
                 <td>
                   <div class="row-actions">
-                    <button type="button" class="icon-button" title="Edit karyawan" @click="startEditStaff(emp)"><Pencil :size="15" /></button>
+                    <button type="button" class="icon-button" title="Edit employee" @click="startEditStaff(emp)"><Pencil :size="15" /></button>
                     <button type="button" class="soft-button" @click="store.toggleEmployeeStatus(emp.id)">
-                      {{ emp.active ? 'Nonaktifkan' : 'Aktifkan' }}
+                      {{ emp.active ? 'Deactivate' : 'Activate' }}
                     </button>
                   </div>
                 </td>

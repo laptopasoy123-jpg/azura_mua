@@ -10,6 +10,7 @@ import type {
   CatalogItem,
   CatalogType,
   Customer,
+  DropdownOptionGroup,
   EmployeeRecord,
   Expense,
   InventoryItem,
@@ -102,11 +103,12 @@ const toDbAttireCategory = (c: AttireCategory): string => (c === 'Bride' ? 'brid
 const fromDbAttireCategory = (c: unknown): AttireCategory => (String(c ?? '').toLowerCase() === 'groom' ? 'Groom' : 'Bride')
 
 const toDbAttireStatus = (s: AttireStatus): string =>
-  ({ Tersedia: 'available', Terpakai: 'booked', Laundry: 'laundry' })[s] ?? 'available'
+  ({ Tersedia: 'available', Booked: 'booked', Terpakai: 'booked', Laundry: 'laundry' })[s] ?? 'available'
 
 const fromDbAttireStatus = (s: unknown): AttireStatus => {
   const v = String(s ?? '').toLowerCase()
-  if (v === 'booked' || v === 'terpakai') return 'Terpakai'
+  if (v === 'terpakai') return 'Terpakai'
+  if (v === 'booked') return 'Booked'
   if (v === 'laundry') return 'Laundry'
   return 'Tersedia'
 }
@@ -122,7 +124,9 @@ const safePayloadWrite = async (
     const { error } = await sb.from(table).upsert(payload, { onConflict })
     if (!error) return { ok: true }
     const msg = `${error.message ?? ''} ${error.details ?? ''}`
-    const match = msg.match(/column ["']?([a-zA-Z0-9_]+)["']?/i) || msg.match(/Could not find the '([a-zA-Z0-9_]+)' column/i)
+    const match =
+      msg.match(/Could not find the '([a-zA-Z0-9_]+)' column/i)
+      || msg.match(/column\s+["']?([a-zA-Z0-9_]+)["']?\s+(?:of|does not exist)/i)
     if (match?.[1] && match[1] in payload) {
       delete payload[match[1]]
       continue
@@ -157,6 +161,9 @@ export interface RemoteHydrationResult {
   paymentMethods?: string[]
   poExpenseCategories?: string[]
   generalExpenseCategories?: string[]
+  stylingTypes?: string[]
+  inventoryCategories?: string[]
+  units?: string[]
   employees?: EmployeeRecord[]
   customers?: Customer[]
   bookings?: Booking[]
@@ -280,12 +287,20 @@ export const pullAllFromSupabase = async (): Promise<RemoteHydrationResult | nul
     }
 
     if (ddRows.length) {
-      const pm = ddRows.filter((r) => r.option_group === 'paymentMethods' && r.is_active !== false).map((r) => String(r.label))
-      const po = ddRows.filter((r) => r.option_group === 'poExpenseCategories' && r.is_active !== false).map((r) => String(r.label))
-      const gen = ddRows.filter((r) => r.option_group === 'generalExpenseCategories' && r.is_active !== false).map((r) => String(r.label))
+      const pick = (grp: string) =>
+        ddRows.filter((r) => r.option_group === grp && r.is_active !== false).map((r) => String(r.label))
+      const pm = pick('paymentMethods')
+      const po = pick('poExpenseCategories')
+      const gen = pick('generalExpenseCategories')
+      const sty = pick('stylingTypes')
+      const invCat = pick('inventoryCategories')
+      const uList = pick('units')
       if (pm.length) out.paymentMethods = pm
       if (po.length) out.poExpenseCategories = po
       if (gen.length) out.generalExpenseCategories = gen
+      if (sty.length) out.stylingTypes = sty
+      if (invCat.length) out.inventoryCategories = invCat
+      if (uList.length) out.units = uList
     }
 
     out.employees = empRows.map((e) => ({
@@ -458,6 +473,8 @@ export const pullAllFromSupabase = async (): Promise<RemoteHydrationResult | nul
       expenseScope: e.expense_scope === 'Di Luar PO' || !e.booking_id ? 'Di Luar PO' : 'Berdasarkan PO',
       proofImageUrl: e.proof_url ? String(e.proof_url) : undefined,
       method: String(e.payment_method),
+      source: e.source === 'Bayar Cancel' ? 'Bayar Cancel' : 'Manual',
+      refundId: e.refund_id ? String(e.refund_id) : undefined,
     }))
 
     const stockInMap = new Map((stockInRes.data ?? []).map((r) => [String(r.id), r]))
@@ -528,6 +545,7 @@ export const pullAllFromSupabase = async (): Promise<RemoteHydrationResult | nul
         stockAdjustment: adjTotals.get(id) ?? 0,
         minimumStock: Number(it.minimum_stock ?? 0),
         location: String(it.storage_location ?? ''),
+        imageUrl: it.image_url ? String(it.image_url) : undefined,
         active: Boolean(it.is_active ?? true),
       }
     })
@@ -801,6 +819,8 @@ export const syncExpense = (e: Expense) => runBg(async (sb) => {
     amount: Math.round(e.amount),
     payment_method: e.method,
     proof_url: e.proofImageUrl || null,
+    source: e.source ?? 'Manual',
+    refund_id: e.refundId ? toDbUuid(e.refundId) : null,
     voided_at: null,
   })
 })
@@ -819,6 +839,7 @@ export const syncInventoryItem = (item: InventoryItem) => runBg(async (sb) => {
     initial_quantity: item.initialStock,
     minimum_stock: item.minimumStock,
     storage_location: item.location || null,
+    image_url: item.imageUrl || null,
     is_active: item.active,
   })
 })
@@ -1057,7 +1078,7 @@ export const syncBusinessProfile = (profile: BusinessProfile) => runBg(async (sb
 })
 
 export const syncDropdownGroup = (
-  group: 'paymentMethods' | 'poExpenseCategories' | 'generalExpenseCategories',
+  group: DropdownOptionGroup,
   labels: string[],
 ) => runBg(async (sb) => {
   await sb.from('pengaturan_dropdown').delete().eq('option_group', group)

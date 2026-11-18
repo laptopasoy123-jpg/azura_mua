@@ -292,7 +292,9 @@ describe('Wedding Portal — Acara, Domas/Manggolo & Softlens', () => {
       updatedAt: '',
     })
 
-    expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Terpakai')
+    // Before event date (2026-11-20 -> 2026-11-22): status is Booked; on event day (2026-11-22): Terpakai
+    expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Booked')
+    expect(store.effectiveAttireStatus(attire1, '2026-11-22')).toBe('Terpakai')
     const schedule = store.attireSchedule('attire-1', { referenceDate: '2026-11-20' })
     expect(schedule).toHaveLength(1)
     expect(schedule[0]!.eventDate).toBe('2026-11-22')
@@ -313,7 +315,7 @@ describe('Wedding Portal — Acara, Domas/Manggolo & Softlens', () => {
     const alertsHMinus1 = store.getLaundryUrgentAlerts('2026-11-21')
     expect(alertsHMinus1).toHaveLength(1)
     expect(alertsHMinus1[0]!.daysLeft).toBe(1)
-    expect(alertsHMinus1[0]!.message).toContain('Segera siapkan baju Kebaya Sekar Arum')
+    expect(alertsHMinus1[0]!.message).toContain('Prepare attire Kebaya Sekar Arum immediately')
 
     // Conflict check on same date for a different booking
     expect(store.attireConflictsOnDate('attire-1', '2026-11-22', 'b-2')).toHaveLength(1)
@@ -355,7 +357,8 @@ describe('Wedding Portal — Acara, Domas/Manggolo & Softlens', () => {
     })
 
     const attire1 = store.weddingAttire.find((a) => a.id === 'attire-1')!
-    expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Terpakai')
+    expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Booked')
+    expect(store.effectiveAttireStatus(attire1, '2026-11-22')).toBe('Terpakai')
     expect(store.bookingTotal('b-1')).toBe(3200000)
     expect(store.bookingPaid('b-1')).toBe(1500000)
 
@@ -529,9 +532,9 @@ describe('Laporan Checklist PDF', () => {
     setActivePinia(createPinia())
   })
 
-  it('generates a multi-section PDF from checked report keys', () => {
+  it('generates a multi-section PDF from checked report keys', async () => {
     const store = useCrmStore()
-    const doc = buildSelectedReportsPdfDoc({
+    const doc = await buildSelectedReportsPdfDoc({
       selectedKeys: ['customers', 'bookings', 'orders', 'payments', 'stock-opname', 'inventory'],
       data: {
         customers: store.customers,
@@ -542,6 +545,7 @@ describe('Laporan Checklist PDF', () => {
         inventory: store.inventory,
         movements: store.movements,
         stockOpnames: store.stockOpnames,
+        businessProfile: store.businessProfile,
         sortedOrderGroups: store.sortedOrderGroups,
         groupTotal: store.groupTotal,
         invoiceTotal: store.invoiceTotal,
@@ -559,8 +563,9 @@ describe('Laporan Checklist PDF', () => {
     expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(1)
   })
 
-  it('enforces manual refund limit and manages employee job assignments', () => {
+  it('enforces manual refund limit, logs auto cancel expense without double counting, and manages employees & inventory photos', () => {
     const store = useCrmStore()
+    const baseExpensesBefore = store.totalExpenses
     // b-1 has paid 1.500.000
     expect(() =>
       store.cancelBooking('b-1', {
@@ -568,7 +573,21 @@ describe('Laporan Checklist PDF', () => {
         amount: 2000000,
         method: 'Transfer',
       }),
-    ).toThrow(/melebihi/i)
+    ).toThrow(/exceeds/i)
+
+    // Cancel b-2 (paid 2.850.000) with partial refund 1.000.000 -> auto logs Expense with source 'Bayar Cancel'
+    store.cancelBooking('b-2', {
+      refundDate: '2026-11-18',
+      amount: 1000000,
+      method: 'Transfer',
+      notes: 'Cancelled partial refund',
+    })
+    const cancelExp = store.expenses.find((e) => e.bookingId === 'b-2' && e.source === 'Bayar Cancel')
+    expect(cancelExp).toBeTruthy()
+    expect(cancelExp?.amount).toBe(1000000)
+    // totalCashOut includes the auto expense once without double counting the linked refund
+    expect(store.totalExpenses).toBe(baseExpensesBefore + 1000000)
+    expect(store.totalCashOut).toBe(baseExpensesBefore + 1000000)
 
     // Assign and unassign employee on b-1
     store.toggleBookingEmployee('b-1', 'emp-4')
@@ -766,13 +785,19 @@ describe('Pengaturan Dropdown & Laporan Jadwal Busana PDF', () => {
     store.removeDropdownOption('paymentMethods', 'EDC BCA')
     expect(store.paymentMethods).not.toContain('EDC BCA')
 
-    store.addDropdownOption('poExpenseCategories', 'Bunga Segar')
-    expect(store.poExpenseCategories).toContain('Bunga Segar')
-    store.addDropdownOption('generalExpenseCategories', 'Listrik & Air')
-    expect(store.generalExpenseCategories).toContain('Listrik & Air')
+    store.addDropdownOption('poExpenseCategories', 'Fresh Flowers')
+    expect(store.poExpenseCategories).toContain('Fresh Flowers')
+    store.addDropdownOption('generalExpenseCategories', 'Utilities')
+    expect(store.generalExpenseCategories).toContain('Utilities')
+    store.addDropdownOption('stylingTypes', 'Paes Solo')
+    expect(store.stylingTypes).toContain('Paes Solo')
+    store.addDropdownOption('inventoryCategories', 'Brushes')
+    expect(store.inventoryCategories).toContain('Brushes')
+    store.addDropdownOption('units', 'box')
+    expect(store.units).toContain('box')
   })
 
-  it('builds a valid PDF document for wedding attire schedules filtered by date range', () => {
+  it('builds a valid PDF document for wedding attire schedules filtered by date range', async () => {
     const store = useCrmStore()
     store.saveWeddingForm({
       id: 'wf-report-1',
@@ -795,7 +820,7 @@ describe('Pengaturan Dropdown & Laporan Jadwal Busana PDF', () => {
       updatedAt: '',
     })
 
-    const doc = buildWeddingAttireReportPdfDoc({
+    const doc = await buildWeddingAttireReportPdfDoc({
       fromDate: '2026-11-01',
       toDate: '2026-11-30',
       bookings: store.bookings,

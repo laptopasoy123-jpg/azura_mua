@@ -1,7 +1,8 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { Booking, BusinessProfile, Customer, Invoice, InvoiceItem, OrderGroup, Payment } from '../stores/crm'
-import { formatCurrency, formatDate, formatTerbilang } from './format'
+import { formatAmountWords, formatCurrency, formatDate } from './format'
+import { drawEditorialBanner, drawEditorialFooter, PDF_PALETTE } from './pdfTheme'
 
 export interface ReceiptShareItem {
   name: string
@@ -10,6 +11,14 @@ export interface ReceiptShareItem {
   quantity: number
   unit?: string
   unitPrice: number
+}
+
+export interface ReceiptInstallmentEntry {
+  receiptNumber: string
+  paidAt: string
+  method: string
+  amount: number
+  isCurrent?: boolean
 }
 
 export interface ReceiptSharePayload {
@@ -29,6 +38,7 @@ export interface ReceiptSharePayload {
   totalPaid: number
   balance: number
   items: ReceiptShareItem[]
+  installmentHistory?: ReceiptInstallmentEntry[]
   businessName?: string
   businessTagline?: string
   businessPhone?: string
@@ -76,6 +86,7 @@ export const toReceiptSharePayload = (params: {
   customer?: Customer
   invoice?: Invoice
   sortedGroups?: OrderGroup[]
+  allPayments?: Payment[]
   sortItemsIntiFirst?: (items: InvoiceItem[]) => InvoiceItem[]
   totalBilling: number
   totalPaid: number
@@ -88,6 +99,7 @@ export const toReceiptSharePayload = (params: {
     customer,
     invoice,
     sortedGroups,
+    allPayments,
     sortItemsIntiFirst,
     totalBilling,
     totalPaid,
@@ -99,7 +111,7 @@ export const toReceiptSharePayload = (params: {
   const items: ReceiptShareItem[] = []
   groups.forEach((group, gIdx) => {
     const ordered = sortItemsIntiFirst ? sortItemsIntiFirst(group.items) : group.items
-    const groupTitle = group.kind === 'Awal' ? 'Pesanan Awal' : `Tambahan ${gIdx}`
+    const groupTitle = group.kind === 'Awal' ? 'Initial Order' : `Add-on #${gIdx}`
     for (const item of ordered) {
       items.push({
         name: item.name,
@@ -111,6 +123,17 @@ export const toReceiptSharePayload = (params: {
       })
     }
   })
+
+  const installmentHistory: ReceiptInstallmentEntry[] = (allPayments ?? [payment])
+    .slice()
+    .sort((a, b) => a.paidAt.localeCompare(b.paidAt))
+    .map((p) => ({
+      receiptNumber: p.receiptNumber,
+      paidAt: p.paidAt,
+      method: p.method,
+      amount: p.amount,
+      isCurrent: p.id === payment.id || p.receiptNumber === payment.receiptNumber,
+    }))
 
   return {
     receiptNumber: payment.receiptNumber,
@@ -129,6 +152,7 @@ export const toReceiptSharePayload = (params: {
     totalPaid,
     balance,
     items,
+    installmentHistory,
     businessName: businessProfile?.name,
     businessTagline: businessProfile?.tagline,
     businessPhone: businessProfile?.phone,
@@ -147,118 +171,207 @@ export const buildPaymentReceiptPdfFromPayload = (payload: ReceiptSharePayload) 
   const contentWidth = pageWidth - marginX * 2
 
   const brandName = (payload.businessName || 'AZURA').toUpperCase()
-  const brandTagline = (payload.businessTagline || 'MAKEUP ARTIST').toUpperCase()
   const brandEmail = payload.businessEmail || 'hello@azuramakeup.id'
   const brandPhone = payload.businessPhone || '0812 9000 2026'
-  const brandAddress = payload.businessAddress || 'Jakarta Selatan'
-  const footerNote = payload.invoiceNote || `Terima kasih telah mempercayakan momen spesial Anda kepada ${brandName} Makeup Studio.`
+  const brandAddress = payload.businessAddress || 'South Jakarta, Indonesia'
+  const footerNote = payload.invoiceNote || `Thank you for trusting ${brandName} Studio with your special celebration.`
 
-  // Crisp Charcoal Espresso top header card
-  doc.setFillColor(33, 29, 26)
-  doc.roundedRect(marginX, 14, contentWidth, 27, 3, 3, 'F')
+  let cursorY = drawEditorialBanner(doc, {
+    marginX,
+    docTitle: 'PAYMENT RECEIPT',
+    docSubtitle: payload.poNumber ? `OFFICIAL INSTALLMENT RECEIPT · ${payload.poNumber}` : 'OFFICIAL PAYMENT RECEIPT',
+    rightMetaTop: payload.receiptNumber,
+    rightMetaBottom: `Paid on ${formatDate(payload.paidAt)}`,
+    businessProfile: {
+      name: payload.businessName,
+      tagline: payload.businessTagline,
+      email: payload.businessEmail,
+      phone: payload.businessPhone,
+      address: payload.businessAddress,
+      logoUrl: payload.logoUrl,
+    },
+  })
 
-  doc.setFillColor(196, 167, 125)
-  doc.rect(marginX + 6, 14, contentWidth - 12, 0.9, 'F')
-
-  let textStartX = marginX + 23
-  if (payload.logoUrl && payload.logoUrl.startsWith('data:image/')) {
-    try {
-      const fmt = payload.logoUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG'
-      doc.setFillColor(250, 248, 244)
-      doc.roundedRect(marginX + 6, 19.5, 15, 15, 2.2, 2.2, 'F')
-      doc.addImage(payload.logoUrl, fmt, marginX + 6.8, 20.3, 13.4, 13.4)
-      textStartX = marginX + 25
-    } catch {
-      doc.setFillColor(246, 239, 227)
-      doc.roundedRect(marginX + 6, 19.5, 14, 14, 2.2, 2.2, 'F')
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(14)
-      doc.setTextColor(33, 29, 26)
-      doc.text(brandName.slice(0, 1), marginX + 13, 28.5, { align: 'center' })
-    }
-  } else {
-    doc.setFillColor(246, 239, 227)
-    doc.roundedRect(marginX + 6, 19.5, 14, 14, 2.2, 2.2, 'F')
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(14)
-    doc.setTextColor(33, 29, 26)
-    doc.text(brandName.slice(0, 1), marginX + 13, 28.5, { align: 'center' })
-  }
+  // Prominent HERO PAYMENT BOX: Emphasize exact Date Paid & This Receipt's Payment Amount
+  const heroH = 24
+  doc.setFillColor(...PDF_PALETTE.linen)
+  doc.setDrawColor(...PDF_PALETTE.gold)
+  doc.setLineWidth(0.55)
+  doc.roundedRect(marginX, cursorY, contentWidth, heroH, 2.5, 2.5, 'FD')
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(13.5)
-  doc.setTextColor(250, 248, 244)
-  doc.text(`${brandName} ${brandTagline}`, textStartX, 25.2)
+  doc.setFontSize(7.4)
+  doc.setTextColor(...PDF_PALETTE.goldDark)
+  doc.text('THIS TRANSACTION PAYMENT RECEIVED', marginX + 5.5, cursorY + 6.2)
 
-  doc.setFont('helvetica', 'normal')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(17.5)
+  doc.setTextColor(...PDF_PALETTE.ink)
+  doc.text(formatCurrency(payload.amount), marginX + 5.5, cursorY + 14.5)
+
+  doc.setFont('helvetica', 'italic')
   doc.setFontSize(8.2)
-  doc.setTextColor(214, 200, 180)
-  doc.text(`${brandAddress}  ·  ${brandEmail}  ·  ${brandPhone}`, textStartX, 31.8)
+  doc.setTextColor(...PDF_PALETTE.muted)
+  const wordsLine = doc.splitTextToSize(`${formatAmountWords(payload.amount)} · Method: ${payload.method}`, contentWidth * 0.6)[0] ?? ''
+  doc.text(wordsLine, marginX + 5.5, cursorY + 20.5)
+
+  // Right divider inside hero for exact Payment Date
+  const dateBoxX = marginX + contentWidth - 56
+  doc.setDrawColor(...PDF_PALETTE.gold)
+  doc.setLineWidth(0.3)
+  doc.line(dateBoxX, cursorY + 4, dateBoxX, cursorY + heroH - 4)
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(11)
-  doc.setTextColor(246, 239, 227)
-  doc.text('KWITANSI PEMBAYARAN', pageWidth - marginX - 6, 24.5, { align: 'right' })
+  doc.setFontSize(7.4)
+  doc.setTextColor(...PDF_PALETTE.goldDark)
+  doc.text('PAYMENT DATE', dateBoxX + 5, cursorY + 6.2)
 
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9.2)
-  doc.setTextColor(225, 205, 173)
-  doc.text(`${payload.receiptNumber}  ·  ${formatDate(payload.paidAt)}`, pageWidth - marginX - 6, 31.5, { align: 'right' })
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11.5)
+  doc.setTextColor(...PDF_PALETTE.ink)
+  doc.text(formatDate(payload.paidAt, { day: '2-digit', month: 'long', year: 'numeric' }), dateBoxX + 5, cursorY + 13.5)
+
+  const statusPillLabel = payload.balance <= 0 ? 'PAID IN FULL' : 'PARTIAL INSTALLMENT'
+  const statusPillBg = payload.balance <= 0 ? PDF_PALETTE.successBg : PDF_PALETTE.warningBg
+  const statusPillFg = payload.balance <= 0 ? PDF_PALETTE.successFg : PDF_PALETTE.warningFg
+  doc.setFillColor(...statusPillBg)
+  doc.roundedRect(dateBoxX + 5, cursorY + 16, 36, 5.4, 2.5, 2.5, 'F')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7)
+  doc.setTextColor(...statusPillFg)
+  doc.text(statusPillLabel, dateBoxX + 23, cursorY + 19.7, { align: 'center' })
+
+  cursorY += heroH + 5
 
   // Two clean info cards side by side
-  const cardTop = 46
   const colGap = 5
   const infoW = (contentWidth - colGap) / 2
-  const cardH = 30
+  const cardH = 29
 
-  doc.setFillColor(250, 248, 244)
-  doc.setDrawColor(226, 218, 206)
-  doc.roundedRect(marginX, cardTop, infoW, cardH, 2.2, 2.2, 'FD')
-  doc.roundedRect(marginX + infoW + colGap, cardTop, infoW, cardH, 2.2, 2.2, 'FD')
-
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(7.6)
-  doc.setTextColor(132, 118, 102)
-  doc.text('DITERIMA DARI', marginX + 5, cardTop + 6.5)
-  doc.text('RINCIAN PEMESANAN', marginX + infoW + colGap + 5, cardTop + 6.5)
+  doc.setFillColor(...PDF_PALETTE.ivory)
+  doc.setDrawColor(...PDF_PALETTE.goldDark)
+  doc.setLineWidth(0.4)
+  doc.roundedRect(marginX, cursorY, infoW, cardH, 2.2, 2.2, 'FD')
+  doc.roundedRect(marginX + infoW + colGap, cursorY, infoW, cardH, 2.2, 2.2, 'FD')
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(11)
-  doc.setTextColor(33, 29, 26)
-  doc.text(payload.customerName || '-', marginX + 5, cardTop + 13)
+  doc.setFontSize(7.5)
+  doc.setTextColor(...PDF_PALETTE.goldDark)
+  doc.text('RECEIVED FROM', marginX + 5, cursorY + 6.2)
+  doc.text('BOOKING REFERENCE', marginX + infoW + colGap + 5, cursorY + 6.2)
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(10.8)
+  doc.setTextColor(...PDF_PALETTE.ink)
+  doc.text(payload.customerName || '-', marginX + 5, cursorY + 12.6)
 
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8.5)
+  doc.setFontSize(8.4)
   doc.setTextColor(78, 70, 62)
-  doc.text(`Telepon / WA: ${payload.customerPhone || '-'}`, marginX + 5, cardTop + 19)
-  doc.text(`Ref. Faktur: ${payload.invoiceNumber || '-'}`, marginX + 5, cardTop + 24.5)
+  doc.text(`Phone / WhatsApp: ${payload.customerPhone || '-'}`, marginX + 5, cursorY + 18.4)
+  doc.text(`Invoice Ref: ${payload.invoiceNumber || '-'}`, marginX + 5, cursorY + 23.8)
 
   const rightX = marginX + infoW + colGap + 5
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10.5)
-  doc.setTextColor(33, 29, 26)
-  doc.text(payload.poNumber || '-', rightX, cardTop + 13)
+  doc.setTextColor(...PDF_PALETTE.ink)
+  doc.text(payload.poNumber || '-', rightX, cursorY + 12.6)
 
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8.5)
+  doc.setFontSize(8.4)
   doc.setTextColor(78, 70, 62)
-  const acaraStr = `Acara: ${payload.eventDate ? formatDate(payload.eventDate) : '-'}${payload.eventLocation ? ` · ${payload.eventLocation}` : ''}`
-  doc.text(doc.splitTextToSize(acaraStr, infoW - 10)[0] ?? acaraStr, rightX, cardTop + 19)
-  doc.text(`Pesanan Awal: ${payload.firstOrderDate ? formatDate(payload.firstOrderDate) : '-'}`, rightX, cardTop + 24.5)
+  const eventStr = `Event: ${payload.eventDate ? formatDate(payload.eventDate) : '-'}${payload.eventLocation ? ` · ${payload.eventLocation}` : ''}`
+  doc.text(doc.splitTextToSize(eventStr, infoW - 10)[0] ?? eventStr, rightX, cursorY + 18.4)
+  doc.text(`Notes: ${payload.notes?.trim() || '-'}`, rightX, cursorY + 23.8)
 
-  let cursorY = cardTop + cardH + 7
+  cursorY += cardH + 6
 
-  // Rincian Pesanan berdasarkan PO
+  // Payment Installment History Table (Shows EVERY payment date & amount on this PO!)
+  const historyList = payload.installmentHistory?.length
+    ? payload.installmentHistory
+    : [{
+        receiptNumber: payload.receiptNumber,
+        paidAt: payload.paidAt,
+        method: payload.method,
+        amount: payload.amount,
+        isCurrent: true,
+      }]
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9.2)
+  doc.setTextColor(...PDF_PALETTE.ink)
+  doc.text(`Payment Installment History (${payload.poNumber})`, marginX, cursorY)
+  cursorY += 2.5
+
+  autoTable(doc, {
+    startY: cursorY,
+    margin: { left: marginX, right: marginX, bottom: 24 },
+    tableWidth: contentWidth,
+    head: [['RECEIPT NO.', 'PAYMENT DATE', 'METHOD', 'REFERENCE', 'AMOUNT PAID']],
+    body: historyList.map((entry) => [
+      entry.receiptNumber,
+      formatDate(entry.paidAt),
+      entry.method === 'Cash' || entry.method === 'Tunai' ? 'Cash' : entry.method,
+      entry.isCurrent ? 'Current Receipt' : 'Previous Installment',
+      formatCurrency(entry.amount),
+    ]),
+    theme: 'grid',
+    rowPageBreak: 'avoid',
+    styles: {
+      font: 'helvetica',
+      fontSize: 8.2,
+      cellPadding: { top: 3, bottom: 3, left: 2.8, right: 2.8 },
+      textColor: [38, 33, 29],
+      lineColor: [212, 202, 188],
+      lineWidth: 0.3,
+      valign: 'middle',
+    },
+    alternateRowStyles: {
+      fillColor: [252, 250, 246],
+    },
+    headStyles: {
+      fillColor: PDF_PALETTE.espresso,
+      textColor: PDF_PALETTE.cream,
+      fontStyle: 'bold',
+      fontSize: 7.8,
+      lineColor: [90, 78, 66],
+      lineWidth: 0.3,
+    },
+    columnStyles: {
+      0: { cellWidth: 34, fontStyle: 'bold' },
+      1: { cellWidth: 30 },
+      2: { cellWidth: 28 },
+      3: { cellWidth: contentWidth - 126 },
+      4: { cellWidth: 34, halign: 'right', fontStyle: 'bold' },
+    },
+    didParseCell: (hookData) => {
+      if (hookData.section !== 'body') return
+      const entry = historyList[hookData.row.index]
+      if (entry?.isCurrent) {
+        hookData.cell.styles.fillColor = [251, 246, 234]
+        hookData.cell.styles.fontStyle = 'bold'
+      }
+    },
+  })
+
+  cursorY = ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? cursorY + 18) + 6
+
+  // Service Breakdown Table
   if (payload.items.length > 0) {
+    if (cursorY + 34 > pageHeight - 24) {
+      doc.addPage()
+      cursorY = 18
+    }
+
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9.5)
-    doc.setTextColor(33, 29, 26)
-    doc.text(`Rincian Pesanan (${payload.poNumber})`, marginX, cursorY)
-    cursorY += 3
+    doc.setFontSize(9.2)
+    doc.setTextColor(...PDF_PALETTE.ink)
+    doc.text(`Order Breakdown (${payload.poNumber})`, marginX, cursorY)
+    cursorY += 2.5
 
     const orderRows = payload.items.map((item) => {
       const qtyUnit = item.unit ? `${item.quantity} ${item.unit}` : String(item.quantity)
-      const kindLabel = item.serviceType === 'Inti' ? 'Layanan Inti' : 'Tambahan'
+      const kindLabel = item.serviceType === 'Inti' ? 'Core Service' : 'Add-on'
       return [
         `${item.name} (${kindLabel})`,
         item.groupLabel,
@@ -272,142 +385,82 @@ export const buildPaymentReceiptPdfFromPayload = (payload: ReceiptSharePayload) 
       startY: cursorY,
       margin: { left: marginX, right: marginX, bottom: 26 },
       tableWidth: contentWidth,
-      head: [['Layanan', 'Kelompok & Tanggal', 'Jumlah', 'Harga Satuan', 'Subtotal']],
+      head: [['SERVICE ITEM', 'ORDER GROUP', 'QTY', 'UNIT PRICE', 'SUBTOTAL']],
       body: orderRows,
       theme: 'grid',
       rowPageBreak: 'avoid',
       styles: {
         font: 'helvetica',
-        fontSize: 8.3,
-        cellPadding: 2.8,
+        fontSize: 8.1,
+        cellPadding: { top: 3, bottom: 3, left: 2.8, right: 2.8 },
         textColor: [38, 33, 29],
-        lineColor: [226, 219, 208],
+        lineColor: [212, 202, 188],
+        lineWidth: 0.3,
         overflow: 'linebreak',
         valign: 'middle',
       },
-      headStyles: {
-        fillColor: [38, 32, 28],
-        textColor: [246, 239, 227],
-        fontStyle: 'bold',
-        fontSize: 8,
-      },
       alternateRowStyles: {
-        fillColor: [251, 249, 245],
+        fillColor: [252, 250, 246],
+      },
+      headStyles: {
+        fillColor: PDF_PALETTE.espresso,
+        textColor: PDF_PALETTE.cream,
+        fontStyle: 'bold',
+        fontSize: 7.8,
+        lineColor: [90, 78, 66],
+        lineWidth: 0.3,
       },
       columnStyles: {
-        0: { cellWidth: 50, fontStyle: 'bold' },
-        1: { cellWidth: 44 },
-        2: { cellWidth: 22, halign: 'center' },
-        3: { cellWidth: 30, halign: 'right' },
-        4: { cellWidth: 32, halign: 'right', fontStyle: 'bold' },
+        0: { cellWidth: contentWidth - 114, fontStyle: 'bold' },
+        1: { cellWidth: 42 },
+        2: { cellWidth: 20, halign: 'center' },
+        3: { cellWidth: 26, halign: 'right' },
+        4: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
       },
     })
 
-    cursorY = ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? cursorY + 25) + 8
+    cursorY = ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? cursorY + 25) + 7
   }
 
-  if (cursorY + 52 > pageHeight - 24) {
+  if (cursorY + 38 > pageHeight - 22) {
     doc.addPage()
     cursorY = 18
   }
 
-  // Bottom 2-col: Left = Totals summary card | Right = Charcoal Espresso Received Box
-  const leftW = contentWidth * 0.49
-  const rightCardW = contentWidth * 0.46
-  const rightCardX = marginX + contentWidth - rightCardW
+  // Bottom Cumulative Balance Summary
+  doc.setFillColor(...PDF_PALETTE.espresso)
+  doc.setDrawColor(...PDF_PALETTE.goldDark)
+  doc.setLineWidth(0.45)
+  doc.roundedRect(marginX, cursorY, contentWidth, 26, 2.5, 2.5, 'FD')
+  doc.setFillColor(...PDF_PALETTE.gold)
+  doc.rect(marginX + 5, cursorY, contentWidth - 10, 0.8, 'F')
 
-  autoTable(doc, {
-    startY: cursorY,
-    margin: { left: marginX, right: pageWidth - (marginX + leftW), bottom: 26 },
-    tableWidth: leftW,
-    body: [
-      ['Total Tagihan PO', formatCurrency(payload.totalBilling)],
-      ['Akumulasi Dibayar', formatCurrency(payload.totalPaid)],
-      ['Sisa Pembayaran', formatCurrency(Math.max(0, payload.balance))],
-    ],
-    theme: 'grid',
-    styles: {
-      font: 'helvetica',
-      fontSize: 8.6,
-      cellPadding: 2.8,
-      textColor: [48, 40, 34],
-      lineColor: [226, 218, 206],
-    },
-    columnStyles: {
-      0: { cellWidth: leftW * 0.56 },
-      1: { cellWidth: leftW * 0.44, halign: 'right', fontStyle: 'bold' },
-    },
-    didParseCell: (data) => {
-      if (data.row.index === 2) {
-        data.cell.styles.fillColor = [243, 236, 224]
-        data.cell.styles.fontStyle = 'bold'
-        data.cell.styles.textColor = [30, 26, 23]
-      }
-    },
+  const colW = contentWidth / 3
+  const cols = [
+    { label: 'TOTAL PO BILLING', val: formatCurrency(payload.totalBilling) },
+    { label: 'CUMULATIVE PAID TO DATE', val: formatCurrency(payload.totalPaid) },
+    { label: 'REMAINING BALANCE DUE', val: formatCurrency(Math.max(0, payload.balance)), gold: true },
+  ]
+  cols.forEach((col, i) => {
+    const cx = marginX + i * colW + 6
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(7.2)
+    doc.setTextColor(col.gold ? 225 : 196, col.gold ? 196 : 184, col.gold ? 148 : 170)
+    doc.text(col.label, cx, cursorY + 8.5)
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    doc.setTextColor(col.gold ? 246 : 250, col.gold ? 230 : 248, col.gold ? 194 : 244)
+    doc.text(col.val, cx, cursorY + 17.5)
   })
 
-  const afterLeftTableY = ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? cursorY + 24) + 4
-  const statusLabel = payload.balance <= 0 ? 'LUNAS' : 'DIBAYAR SEBAGIAN'
-  const statusFill: [number, number, number] = payload.balance <= 0 ? [225, 243, 232] : [253, 240, 212]
-  const statusColor: [number, number, number] = payload.balance <= 0 ? [34, 102, 68] : [156, 98, 22]
-  doc.setFillColor(...statusFill)
-  doc.roundedRect(marginX, afterLeftTableY, 38, 6.8, 3.2, 3.2, 'F')
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(7.6)
-  doc.setTextColor(...statusColor)
-  doc.text(statusLabel, marginX + 19, afterLeftTableY + 4.6, { align: 'center' })
-
-  // Right Espresso dark box
-  const darkBoxH = 38
-  doc.setFillColor(33, 29, 26)
-  doc.roundedRect(rightCardX, cursorY, rightCardW, darkBoxH, 2.5, 2.5, 'F')
-
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(7.5)
-  doc.setTextColor(214, 198, 173)
-  doc.text('NOMINAL DITERIMA', rightCardX + 6, cursorY + 7.5)
-
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(16)
-  doc.setTextColor(250, 248, 244)
-  doc.text(formatCurrency(payload.amount), rightCardX + 6, cursorY + 15)
-
-  doc.setFont('helvetica', 'italic')
-  doc.setFontSize(8.2)
-  doc.setTextColor(225, 212, 194)
-  const terbilangLines = doc.splitTextToSize(formatTerbilang(payload.amount), rightCardW - 12)
-  doc.text(terbilangLines[0] ?? '', rightCardX + 6, cursorY + 21)
-
-  doc.setDrawColor(78, 67, 57)
-  doc.setLineWidth(0.25)
-  doc.line(rightCardX + 6, cursorY + 25.5, rightCardX + rightCardW - 6, cursorY + 25.5)
-
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8.8)
-  doc.setTextColor(246, 239, 227)
-  const methodLabel = `Metode: ${payload.method}${payload.notes?.trim() ? ` · ${payload.notes.trim()}` : ''}`
-  doc.text(doc.splitTextToSize(methodLabel, rightCardW - 12)[0] ?? methodLabel, rightCardX + 6, cursorY + 32)
-
-  // Footer with Hak Cipta Daysheet
-  const totalPages = doc.getNumberOfPages()
-  for (let p = 1; p <= totalPages; p += 1) {
-    doc.setPage(p)
-    const fy = pageHeight - 19
-    doc.setDrawColor(220, 211, 198)
-    doc.setLineWidth(0.35)
-    doc.line(marginX, fy, pageWidth - marginX, fy)
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(88, 78, 68)
-    doc.text(footerNote, marginX, fy + 5)
-
-    doc.setFontSize(7.6)
-    doc.setTextColor(122, 112, 102)
-    doc.text(`${brandEmail} · ${brandPhone} · ${brandAddress}`, marginX, fy + 10)
-    doc.setFont('helvetica', 'bold')
-    doc.text(`Hak Cipta © ${new Date().getFullYear()} Daysheet.id`, pageWidth - marginX, fy + 10, { align: 'right' })
-  }
+  drawEditorialFooter(doc, {
+    marginX,
+    note: footerNote,
+    contactLine: `${brandEmail} · ${brandPhone} · ${brandAddress}`,
+    showPageNumbers: doc.getNumberOfPages() > 1,
+    framed: true,
+  })
 
   return doc
 }
@@ -418,6 +471,7 @@ export const buildPaymentReceiptPdfDoc = (params: {
   customer?: Customer
   invoice?: Invoice
   sortedGroups?: OrderGroup[]
+  allPayments?: Payment[]
   sortItemsIntiFirst?: (items: InvoiceItem[]) => InvoiceItem[]
   totalBilling: number
   totalPaid: number
@@ -431,6 +485,7 @@ export const downloadPaymentReceiptPdf = (params: {
   customer?: Customer
   invoice?: Invoice
   sortedGroups?: OrderGroup[]
+  allPayments?: Payment[]
   sortItemsIntiFirst?: (items: InvoiceItem[]) => InvoiceItem[]
   totalBilling: number
   totalPaid: number
@@ -438,7 +493,7 @@ export const downloadPaymentReceiptPdf = (params: {
   businessProfile?: BusinessProfile
 }) => {
   const doc = buildPaymentReceiptPdfDoc(params)
-  doc.save(`Kwitansi-${params.payment.receiptNumber}.pdf`)
+  doc.save(`Receipt-${params.payment.receiptNumber}.pdf`)
 }
 
 export const resolveReceiptShareUrl = async (params: {
@@ -447,6 +502,7 @@ export const resolveReceiptShareUrl = async (params: {
   customer?: Customer
   invoice?: Invoice
   sortedGroups?: OrderGroup[]
+  allPayments?: Payment[]
   sortItemsIntiFirst?: (items: InvoiceItem[]) => InvoiceItem[]
   totalBilling: number
   totalPaid: number
@@ -459,7 +515,7 @@ export const resolveReceiptShareUrl = async (params: {
 
   try {
     const blob = doc.output('blob')
-    const file = new File([blob], `Kwitansi-${payload.receiptNumber}.pdf`, { type: 'application/pdf' })
+    const file = new File([blob], `Receipt-${payload.receiptNumber}.pdf`, { type: 'application/pdf' })
     const body = new FormData()
     body.append('file', file)
     body.append('purpose', 'payment-proof')
