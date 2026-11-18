@@ -2780,6 +2780,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   margin-top: 4px;
 }
 .editorial-sheet-doc {
+  flex-shrink: 0;
   text-align: right;
 }
 .editorial-sheet-doc small {
@@ -3115,9 +3116,416 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   transform: translateY(12px) scale(.97);
 }
 
+/* Bell Upcoming Customer Alert Badge & Modal Cards */
+.notification-button {
+  position: relative;
+}
+.notification-count-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #b6463a;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  display: inline-grid;
+  place-items: center;
+  border: 2px solid #ffffff;
+  line-height: 1;
+}
+.upcoming-alert-list {
+  display: grid;
+  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.upcoming-alert-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 13px;
+  border: 1px solid #e7dfd2;
+  background: #faf8f4;
+}
+.upcoming-alert-card.is-today {
+  border-color: #d6857b;
+  background: #fff4f2;
+}
+.upcoming-alert-card.is-soon {
+  border-color: #dbb16a;
+  background: #fff9eb;
+}
+.upcoming-h-pill {
+  flex: 0 0 auto;
+  min-width: 60px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: #211d1a;
+  color: #f6efe3;
+  font-size: 11px;
+  font-weight: 800;
+  display: inline-grid;
+  place-items: center;
+}
+.upcoming-h-pill.is-today {
+  background: #b6463a;
+  color: #ffffff;
+}
+.upcoming-h-pill.is-soon {
+  background: #b77718;
+  color: #ffffff;
+}
+.upcoming-h-pill.is-upcoming {
+  background: #3a6454;
+  color: #ffffff;
+}
+.upcoming-alert-main {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+.upcoming-alert-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.upcoming-alert-top strong {
+  font-size: 13px;
+  color: #1e1a17;
+}
+.upcoming-alert-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11px;
+  color: #6b5f53;
+}
+.upcoming-alert-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Eye Preview & Stationery Table Width Containment */
+.editorial-sheet,
+.editorial-sheet-banner,
+.editorial-sheet-brand,
+.editorial-sheet-brand > div,
+.editorial-sheet-body,
+.editorial-sheet-footer,
+.editorial-hero-payment,
+.editorial-meta-two,
+.editorial-meta-box,
+.editorial-totals,
+.editorial-summary-card {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+.editorial-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.editorial-summary-card--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.editorial-summary-card > .editorial-summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+.editorial-table th,
+.editorial-table td {
+  vertical-align: middle;
+}
+.editorial-table th.is-num,
+.editorial-table td.is-num {
+  white-space: nowrap;
+}
+.doc-history-list li {
+  flex-wrap: wrap;
+}
+.editorial-sheet-footer-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* AttireSelect dropdown readability inside scrollable Fitting modal */
+.fitting-modal-body .attire-picker-menu {
+  z-index: 60;
+  max-height: 220px;
+}
+
+@media (max-width: 1024px) {
+  .report-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .report-toolbar-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .report-filter-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .report-filter-row .soft-button {
+    grid-column: 1 / -1;
+  }
+  .report-select-controls {
+    width: 100%;
+  }
+  .report-select-controls > button {
+    flex: 1;
+  }
+  .report-download-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .report-download-bar .primary-button {
+    width: 100%;
+  }
+  .job-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .job-filter-bar .table-search {
+    max-width: none;
+  }
+  .job-date-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+  }
+  .job-date-filters .job-filter-field:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+  .job-date-filters .job-filter-field .filter-row select {
+    width: 100%;
+  }
+}
+
 @media (max-width: 960px) {
   .dropdown-settings-grid { grid-template-columns: 1fr; }
 }
+
+@media (max-width: 680px) {
+  body {
+    font-size: 14px;
+  }
+  .eyebrow {
+    font-size: 10.5px;
+  }
+  .page-heading h2 {
+    font-size: 25px;
+  }
+  .page-heading p {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .primary-button,
+  .secondary-button,
+  .outline-button,
+  .danger-button,
+  .soft-button {
+    font-size: 13px;
+    min-height: 41px;
+  }
+  .summary-strip span,
+  .kpi-card > p,
+  .inventory-stats small {
+    font-size: 10.5px;
+  }
+  .summary-strip strong,
+  .kpi-card > strong,
+  .inventory-stats strong {
+    font-size: 18px;
+  }
+  .data-table th {
+    font-size: 10px;
+    padding: 10px 12px;
+  }
+  .data-table td,
+  .data-table td > strong,
+  .subtle-line,
+  .customer-cell span {
+    font-size: 12.5px;
+  }
+  .table-search input,
+  .filter-row select,
+  .form-grid input,
+  .form-grid select,
+  .form-grid textarea,
+  .job-filter-field input[type="date"],
+  .report-filter-row input[type="date"] {
+    font-size: 13px;
+  }
+  .form-grid label > span,
+  .job-filter-field > span,
+  .report-filter-row label > span {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .status-badge,
+  .item-pill,
+  .job-crew-count,
+  .job-unassigned-pill {
+    font-size: 10.5px;
+  }
+  .job-crew-names {
+    font-size: 12.5px;
+  }
+  .segmented-tabs button {
+    font-size: 12px;
+    padding: 9px 13px;
+  }
+  .attire-card-body h4 {
+    font-size: 14px;
+  }
+  .attire-card-body p,
+  .attire-card-body select {
+    font-size: 12.5px;
+  }
+  .report-grid {
+    grid-template-columns: 1fr;
+  }
+  .report-card {
+    padding: 15px 16px;
+    min-height: 104px;
+  }
+  .report-card strong {
+    font-size: 14px;
+  }
+  .report-card p {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .report-card > small {
+    font-size: 40px;
+    bottom: -8px;
+    right: 10px;
+  }
+  .report-download-bar strong {
+    font-size: 14px;
+  }
+  .report-download-bar span {
+    font-size: 12px;
+  }
+  .modal-backdrop {
+    padding: 6px;
+  }
+  .modal-card {
+    width: 100%;
+    max-width: calc(100vw - 12px);
+    max-height: calc(100vh - 12px);
+    border-radius: 16px;
+  }
+  .modal-header {
+    padding: 15px 14px;
+  }
+  .modal-header h2 {
+    font-size: 18px;
+  }
+  .modal-header p {
+    font-size: 12px;
+  }
+  .modal-body {
+    padding: 12px;
+    overflow-x: hidden;
+  }
+  .editorial-sheet {
+    width: 100%;
+    padding: 4px;
+    border-radius: 12px;
+  }
+  .editorial-sheet > .editorial-sheet-banner {
+    padding: 14px 12px;
+    gap: 10px;
+  }
+  .editorial-sheet-brand {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .editorial-sheet-brand strong {
+    font-size: 13.5px;
+  }
+  .editorial-sheet-brand span {
+    font-size: 10.5px;
+    line-height: 1.4;
+  }
+  .editorial-sheet-doc {
+    text-align: left;
+    width: 100%;
+    padding-top: 8px;
+    border-top: 1px solid rgba(196, 167, 125, .3);
+  }
+  .editorial-sheet-doc strong {
+    font-size: 15px;
+  }
+  .editorial-sheet-body {
+    padding: 12px;
+    gap: 12px;
+  }
+  .editorial-hero-payment {
+    padding: 12px;
+    gap: 10px;
+  }
+  .editorial-hero-payment strong {
+    font-size: 18px;
+  }
+  .editorial-hero-payment span {
+    font-size: 11px;
+  }
+  .editorial-meta-box {
+    padding: 10px 11px;
+  }
+  .editorial-meta-box strong {
+    font-size: 13px;
+  }
+  .editorial-meta-box span {
+    font-size: 11.5px;
+  }
+  .editorial-table th,
+  .editorial-table td {
+    padding: 7px 6px;
+    font-size: 10.5px;
+  }
+  .editorial-summary-card--three {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .editorial-sheet-footer {
+    padding: 12px;
+    flex-direction: column;
+    align-items: flex-start;
+    font-size: 11px;
+  }
+  .upcoming-alert-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}
+
 @media (max-width: 620px) {
   .workspace-footer { justify-content: center; }
   .dropdown-add-employee { grid-template-columns: 1fr; }

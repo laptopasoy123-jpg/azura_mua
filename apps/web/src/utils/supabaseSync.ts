@@ -745,8 +745,15 @@ export const syncInvoiceOrderGroup = (invoice: Invoice, group: OrderGroup) => ru
   }
 
   const invNumber = group.kind === 'Awal' ? invoice.invoiceNumber : `${invoice.invoiceNumber}-${group.id.slice(0, 4)}`
+  const { data: existingInv } = await sb
+    .from('faktur_tagihan')
+    .select('id')
+    .or(`order_id.eq.${groupUuid},invoice_number.eq.${invNumber}`)
+    .maybeSingle()
+  const canonicalInvId = existingInv?.id ? String(existingInv.id) : invRowUuid
+
   await safePayloadWrite(sb, 'faktur_tagihan', {
-    id: invRowUuid,
+    id: canonicalInvId,
     invoice_number: invNumber,
     booking_id: bookingUuid,
     order_id: groupUuid,
@@ -754,11 +761,11 @@ export const syncInvoiceOrderGroup = (invoice: Invoice, group: OrderGroup) => ru
     due_date: invoice.dueDate || null,
   })
 
-  await sb.from('faktur_tagihan_detail').delete().eq('invoice_id', invRowUuid)
+  await sb.from('faktur_tagihan_detail').delete().eq('invoice_id', canonicalInvId)
   for (const item of group.items) {
     await safePayloadWrite(sb, 'faktur_tagihan_detail', {
       id: toDbUuid(`ii-${item.id}`),
-      invoice_id: invRowUuid,
+      invoice_id: canonicalInvId,
       source_order_item_id: toDbUuid(item.id),
       order_group_id: groupUuid,
       order_date: group.orderDate,
@@ -775,7 +782,7 @@ export const syncDeleteOrderGroup = (invoiceId: string, groupId: string) => runB
   const groupUuid = toDbUuid(groupId)
   const invRowUuid = toDbUuid(`${invoiceId}-${groupId}`)
   const nowIso = new Date().toISOString()
-  await sb.from('faktur_tagihan').update({ cancelled_at: nowIso }).eq('id', invRowUuid)
+  await sb.from('faktur_tagihan').update({ cancelled_at: nowIso }).or(`id.eq.${invRowUuid},order_id.eq.${groupUuid}`)
   await sb.from('pesanan').update({ cancelled_at: nowIso }).eq('id', groupUuid)
 })
 

@@ -215,9 +215,9 @@ const exportPdf = async () => {
     </section>
 
     <section class="summary-strip">
-      <div><span>Filtered POs</span><strong>{{ filteredBookings.length }} POs</strong></div>
-      <div><span>Assigned</span><strong>{{ assignedCount }} POs</strong></div>
-      <div><span>Unassigned</span><strong>{{ unassignedCount }} POs</strong></div>
+      <div><span>Filtered PO</span><strong>{{ filteredBookings.length }} PO</strong></div>
+      <div><span>Assigned</span><strong>{{ assignedCount }} PO</strong></div>
+      <div><span>Unassigned</span><strong>{{ unassignedCount }} PO</strong></div>
       <div><span>Active Staff</span><strong>{{ store.activeEmployees.length }} Staff</strong></div>
     </section>
 
@@ -330,7 +330,7 @@ const exportPdf = async () => {
         </table>
       </div>
       <footer class="table-footer">
-        <span>Showing {{ filteredBookings.length }} active POs · Click any row or Select Crew to view full details and assign staff</span>
+        <span>Showing {{ filteredBookings.length }} active PO · Click any row or Select Crew to view full details and assign staff</span>
       </footer>
     </section>
 

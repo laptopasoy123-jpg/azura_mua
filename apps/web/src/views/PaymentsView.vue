@@ -76,7 +76,7 @@ const openEdit = (payment: Payment) => {
     bookingId: payment.bookingId,
     amount: payment.amount,
     method: payment.method,
-    paidAt: payment.paidAt,
+    paidAt: (payment.paidAt ?? '').slice(0, 10),
     notes: payment.notes ?? '',
   })
   showForm.value = true

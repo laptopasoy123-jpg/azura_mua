@@ -283,18 +283,49 @@ const attireSelectionAlert = (attireId: string, targetBooking: Booking | undefin
 }
 
 const buildNormalizedForm = (bookingId: string): WeddingFittingForm => {
+  const base = blankForm(bookingId)
   const existing = store.weddingForms.find((item) => item.bookingId === bookingId)
-  const next = existing ? JSON.parse(JSON.stringify(existing)) as WeddingFittingForm : blankForm(bookingId)
-  if (!next.events?.length) next.events = [createBlankEvent(1)]
-  next.events = next.events.map((ev, index) => ({
+  const raw = existing ? JSON.parse(JSON.stringify(existing)) as Partial<WeddingFittingForm> : {}
+
+  const mergedMeasurements: Record<string, Record<string, string>> = {}
+  for (const group of measurementGroups) {
+    mergedMeasurements[group.key] = {
+      ...(base.measurements[group.key] ?? {}),
+      ...((raw.measurements && raw.measurements[group.key]) || {}),
+    }
+  }
+
+  const rawEvents = Array.isArray(raw.events) && raw.events.length ? raw.events : [createBlankEvent(1)]
+  const mergedEvents: WeddingEventDetail[] = rawEvents.map((ev, index) => ({
     ...createBlankEvent((index + 1) as 1 | 2 | 3),
     ...ev,
     number: (index + 1) as 1 | 2 | 3,
-    timeNote: ev.timeNote ?? '',
+    timeNote: ev?.timeNote ?? '',
+    bride: {
+      look: ev?.bride?.look ?? '',
+      accessories: ev?.bride?.accessories ?? '',
+      shoes: ev?.bride?.shoes ?? '',
+      attireId: ev?.bride?.attireId ?? '',
+    },
+    groom: {
+      look: ev?.groom?.look ?? '',
+      accessories: ev?.groom?.accessories ?? '',
+      shoes: ev?.groom?.shoes ?? '',
+      attireId: ev?.groom?.attireId ?? '',
+    },
   }))
-  if (next.manggoloBlangkon === undefined) next.manggoloBlangkon = null
-  if (next.manggoloSlop === undefined) next.manggoloSlop = null
-  return next
+
+  return {
+    id: raw.id || base.id,
+    bookingId: raw.bookingId || bookingId,
+    measurements: mergedMeasurements,
+    events: mergedEvents,
+    uniforms: { ...base.uniforms, ...(raw.uniforms ?? {}) },
+    manggoloBlangkon: raw.manggoloBlangkon === undefined ? null : raw.manggoloBlangkon,
+    manggoloSlop: raw.manggoloSlop === undefined ? null : raw.manggoloSlop,
+    vendors: { ...base.vendors, ...(raw.vendors ?? {}) },
+    updatedAt: raw.updatedAt ?? '',
+  }
 }
 
 const loadBookingIntoForm = (bookingId: string) => {
@@ -535,25 +566,38 @@ const selectedDateBookings = computed(() => {
 const validateFittingTarget = (
   target: WeddingFittingForm,
   targetBooking: Booking | undefined,
-  opts: { scrollOnMeasurementError?: boolean } = {},
+  opts: { scrollOnMeasurementError?: boolean; isEditModal?: boolean } = {},
 ): string | null => {
   if (!target.bookingId) return 'Please select a PO Number before saving the fitting form.'
-  for (const ev of target.events) {
-    for (const [roleLabel, id] of [['Bride', ev.bride.attireId], ['Groom', ev.groom.attireId]] as const) {
+  const existingForm = opts.isEditModal
+    ? store.weddingForms.find((f) => f.bookingId === target.bookingId)
+    : undefined
+
+  for (let i = 0; i < target.events.length; i += 1) {
+    const ev = target.events[i]!
+    const prevEv = existingForm?.events?.[i]
+    for (const [roleKey, roleLabel, id] of [['bride', 'Bride', ev.bride.attireId], ['groom', 'Groom', ev.groom.attireId]] as const) {
       if (!id) continue
       const item = selectedAttire(id)
-      if (item && isAttireLockedForBooking(item, targetBooking)) {
+      const prevId = roleKey === 'bride' ? prevEv?.bride?.attireId : prevEv?.groom?.attireId
+      const unchangedInEdit = opts.isEditModal && prevId === id
+      if (item && !unchangedInEdit && isAttireLockedForBooking(item, targetBooking)) {
         return `${roleLabel} attire "${item.name}" in Session ${ev.number} is currently ${displayAttireStatus(effectiveStatus(item))} and locked for this schedule.`
+      }
+      if (item && unchangedInEdit && targetBooking?.eventDate && store.attireConflictsOnDate(item.id, targetBooking.eventDate, targetBooking.id).length > 0) {
+        return `${roleLabel} attire "${item.name}" in Session ${ev.number} has a schedule conflict on ${formatDate(targetBooking.eventDate)}.`
       }
     }
   }
-  for (const group of measurementGroups) {
-    for (const required of group.required ?? []) {
-      if (!target.measurements[group.key]?.[required]?.trim()) {
-        if (opts.scrollOnMeasurementError) {
-          document.getElementById('size-chart')?.scrollIntoView({ behavior: 'smooth' })
+  if (!opts.isEditModal) {
+    for (const group of measurementGroups) {
+      for (const required of group.required ?? []) {
+        if (!target.measurements[group.key]?.[required]?.trim()) {
+          if (opts.scrollOnMeasurementError) {
+            document.getElementById('size-chart')?.scrollIntoView({ behavior: 'smooth' })
+          }
+          return `${required} in ${group.label} section is required.`
         }
-        return `${required} in ${group.label} section is required.`
       }
     }
   }
@@ -590,7 +634,7 @@ const saveForm = () => {
 
 const saveEditModalForm = () => {
   modalFormError.value = ''
-  const err = validateFittingTarget(editModalForm, modalEditingBooking.value)
+  const err = validateFittingTarget(editModalForm, modalEditingBooking.value, { isEditModal: true })
   if (err) {
     modalFormError.value = err
     return
@@ -1113,7 +1157,12 @@ const fittingList = computed(() =>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in fittingList" :key="row.form.id">
+            <tr
+              v-for="row in fittingList"
+              :key="row.form.id"
+              class="order-row-selectable"
+              @click="editSavedFitting(row.form.bookingId)"
+            >
               <td><strong class="mono-code">{{ row.booking?.poNumber ?? '-' }}</strong></td>
               <td>
                 <strong>{{ row.customer?.name ?? '-' }}</strong>
@@ -1133,7 +1182,7 @@ const fittingList = computed(() =>
               </td>
               <td>{{ row.form.updatedAt ? formatDate(row.form.updatedAt.slice(0, 10)) : '-' }}</td>
               <td>
-                <div class="row-actions">
+                <div class="row-actions" @click.stop>
                   <button type="button" class="icon-button" title="Edit fitting form" @click="editSavedFitting(row.form.bookingId)">
                     <Pencil :size="15" />
                   </button>

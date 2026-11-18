@@ -2,12 +2,14 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { useCrmStore } from '../stores/crm'
+import { displayBookingStatus, formatDate } from '../utils/format'
 import UiModal from './UiModal.vue'
+import StatusBadge from './StatusBadge.vue'
 import {
   LayoutDashboard, UsersRound, ShoppingBag, Layers, FileText, CreditCard,
   BookOpen, CircleDollarSign, Boxes, BarChart3, Building2, SlidersHorizontal,
   Bell, Search, Menu, X, ChevronLeft, ChevronRight,
-  Shirt, Briefcase, Calendar, Clock, CheckCircle2, AlertTriangle, Trash2, Info,
+  Shirt, Briefcase, Calendar, Clock, CheckCircle2, AlertTriangle, Trash2, Info, MapPin, Phone,
 } from '@lucide/vue'
 
 const route = useRoute()
@@ -92,6 +94,29 @@ const currentNavItem = computed(() =>
 )
 const pageTitle = computed(() => String(route.meta.title ?? 'Dashboard'))
 const closeMobile = () => { mobileOpen.value = false }
+
+const localTodayIso = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Up to 10 nearest upcoming non-cancelled bookings from database with exact H-countdown
+const upcomingCustomerAlerts = computed(() => {
+  const today = localTodayIso()
+  const todayMs = new Date(`${today}T00:00:00`).getTime()
+  return [...store.bookings]
+    .filter((b) => b.status !== 'Dibatalkan' && Boolean(b.eventDate) && b.eventDate >= today)
+    .sort((a, b) => a.eventDate.localeCompare(b.eventDate) || (a.eventTime ?? '').localeCompare(b.eventTime ?? ''))
+    .slice(0, 10)
+    .map((booking) => {
+      const customer = store.customerFor(booking.customerId)
+      const eventMs = new Date(`${booking.eventDate}T00:00:00`).getTime()
+      const daysLeft = Math.max(0, Math.round((eventMs - todayMs) / 86_400_000))
+      const hLabel = daysLeft === 0 ? 'Hari-H' : `H-${daysLeft}`
+      const urgency = daysLeft === 0 ? 'today' : daysLeft <= 3 ? 'soon' : daysLeft <= 7 ? 'upcoming' : 'normal'
+      return { booking, customer, daysLeft, hLabel, urgency }
+    })
+})
 </script>
 
 <template>
@@ -190,7 +215,10 @@ const closeMobile = () => { mobileOpen.value = false }
             <input type="search" placeholder="Search PO, customer, invoice…" />
             <kbd>⌘ K</kbd>
           </label>
-          <button class="icon-button notification-button" aria-label="Notifications" @click="showNotifications = true"><Bell :size="19" /><i /></button>
+          <button class="icon-button notification-button" aria-label="Upcoming Event Alerts" @click="showNotifications = true">
+            <Bell :size="19" />
+            <span v-if="upcomingCustomerAlerts.length" class="notification-count-badge">{{ upcomingCustomerAlerts.length }}</span>
+          </button>
           <div class="profile-chip">
             <div class="profile-avatar">AR</div>
             <div><strong>Aura Rahma</strong><span>Owner</span></div>
@@ -212,17 +240,48 @@ const closeMobile = () => { mobileOpen.value = false }
       </main>
     </div>
 
-    <UiModal :open="showNotifications" title="Notifications" description="Attire schedule reminders and recent studio activity." @close="showNotifications = false">
-      <div v-if="store.laundryUrgentAlerts.length" class="notification-urgent-box">
+    <UiModal
+      :open="showNotifications"
+      title="Upcoming Customer Event Alerts"
+      :description="`Showing the nearest ${upcomingCustomerAlerts.length} upcoming active bookings (excluding cancelled and past dates).`"
+      wide
+      @close="showNotifications = false"
+    >
+      <div v-if="upcomingCustomerAlerts.length" class="upcoming-alert-list">
+        <article
+          v-for="item in upcomingCustomerAlerts"
+          :key="item.booking.id"
+          class="upcoming-alert-card"
+          :class="`is-${item.urgency}`"
+        >
+          <span class="upcoming-h-pill" :class="`is-${item.urgency}`">{{ item.hLabel }}</span>
+          <div class="upcoming-alert-main">
+            <div class="upcoming-alert-top">
+              <strong>{{ item.customer?.name ?? 'Customer' }}</strong>
+              <span class="mono-code">{{ item.booking.poNumber }}</span>
+              <StatusBadge :label="displayBookingStatus(item.booking.status)" />
+            </div>
+            <div class="upcoming-alert-meta">
+              <span><Calendar :size="13" />{{ formatDate(item.booking.eventDate) }}<template v-if="item.booking.eventTime"> · {{ item.booking.eventTime }}</template></span>
+              <span><MapPin :size="13" />{{ item.booking.location || '-' }}</span>
+              <span v-if="item.customer?.phone"><Phone :size="13" />{{ item.customer.phone }}</span>
+            </div>
+          </div>
+        </article>
+      </div>
+      <div v-else class="empty-state" style="min-height: 120px;">
+        <Calendar :size="26" />
+        <strong>No upcoming bookings</strong>
+        <span>All active events have passed or no future POs are scheduled yet.</span>
+      </div>
+
+      <div v-if="store.laundryUrgentAlerts.length" class="notification-urgent-box" style="margin-top: 14px;">
         <article v-for="alert in store.laundryUrgentAlerts" :key="`${alert.attireId}-${alert.bookingId}`" class="notification-urgent-item">
-          <strong>Prepare Attire Immediately ({{ alert.daysLeft === 0 ? 'Event Today' : 'H-1 Tomorrow' }})</strong>
+          <strong>Wardrobe Prep Reminder ({{ alert.daysLeft === 0 ? 'Event Today' : 'H-1 Tomorrow' }})</strong>
           <span>{{ alert.message }}</span>
         </article>
       </div>
-      <div class="notification-list">
-        <article v-for="activity in store.activities.slice(0, 6)" :key="activity.id"><i :class="`activity-${activity.tone}`" /><div><strong>{{ activity.title }}</strong><span>{{ activity.detail }}</span></div><time>{{ new Date(activity.at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) }}</time></article>
-      </div>
-      <div class="modal-actions"><button class="primary-button" @click="showNotifications = false">Close</button></div>
+      <div class="modal-actions" style="margin-top: 14px;"><button class="primary-button" @click="showNotifications = false">Close</button></div>
     </UiModal>
 
     <Transition name="toast-slide" mode="out-in">

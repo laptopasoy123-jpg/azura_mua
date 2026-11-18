@@ -93,7 +93,7 @@ const historyList = computed(() =>
       </section>
 
       <!-- Installment History Timeline -->
-      <section>
+      <section class="editorial-table-wrap">
         <p class="eyebrow" style="margin-bottom: 6px;">Payment Installment History ({{ payload.poNumber }})</p>
         <table class="editorial-table">
           <thead>
@@ -118,7 +118,7 @@ const historyList = computed(() =>
       </section>
 
       <!-- Order Breakdown Table -->
-      <section v-if="payload.items.length">
+      <section v-if="payload.items.length" class="editorial-table-wrap">
         <p class="eyebrow" style="margin-bottom: 6px;">Order Breakdown ({{ payload.poNumber }})</p>
         <table class="editorial-table">
           <thead>
@@ -146,16 +146,16 @@ const historyList = computed(() =>
       </section>
 
       <!-- Cumulative Totals Espresso Bar (mirrors receiptPdf.ts bottom bar) -->
-      <section class="editorial-summary-card" style="grid-template-columns: repeat(3, 1fr);">
-        <div style="flex-direction: column; gap: 3px;">
+      <section class="editorial-summary-card editorial-summary-card--three">
+        <div class="editorial-summary-stat">
           <small style="color: #c4b8aa; font-size: 8.5px; font-weight: 700;">TOTAL PO BILLING</small>
           <strong style="font-size: 14px; color: #faf8f4;">{{ formatCurrency(payload.totalBilling) }}</strong>
         </div>
-        <div style="flex-direction: column; gap: 3px;">
+        <div class="editorial-summary-stat">
           <small style="color: #c4b8aa; font-size: 8.5px; font-weight: 700;">CUMULATIVE PAID TO DATE</small>
           <strong style="font-size: 14px; color: #faf8f4;">{{ formatCurrency(payload.totalPaid) }}</strong>
         </div>
-        <div style="flex-direction: column; gap: 3px;">
+        <div class="editorial-summary-stat">
           <small style="color: #e1c494; font-size: 8.5px; font-weight: 700;">REMAINING BALANCE DUE</small>
           <strong style="font-size: 15px; color: #f6e6c2;">{{ formatCurrency(Math.max(0, payload.balance)) }}</strong>
         </div>
@@ -167,7 +167,7 @@ const historyList = computed(() =>
         <strong style="display: block; color: #4d4237; margin-bottom: 2px;">{{ payload.invoiceNote || `Thank you for trusting ${brandName} Studio with your special celebration.` }}</strong>
         <span>{{ payload.businessEmail || 'hello@azuramakeup.id' }} · {{ payload.businessPhone || '0812 9000 2026' }}</span>
       </div>
-      <div style="display: flex; align-items: center; gap: 12px;">
+      <div class="editorial-sheet-footer-actions">
         <button v-if="showDownload" type="button" class="primary-button" @click="emit('download')">
           <Download :size="16" />Download Receipt PDF
         </button>

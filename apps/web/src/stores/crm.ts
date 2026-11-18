@@ -415,8 +415,44 @@ const normalizeWeddingForms = (forms: WeddingFittingForm[]): WeddingFittingForm[
         },
       ]
 
+    const measurementKeys = ['bride', 'groom', 'ibu', 'ayah', 'kembarMayangCe', 'kembarMayangCo', 'terimaTamu']
+    const normalizedMeasurements: Record<string, Record<string, string>> = {}
+    for (const key of measurementKeys) {
+      normalizedMeasurements[key] = { ...((form.measurements && form.measurements[key]) || {}) }
+    }
+    if (form.measurements) {
+      for (const [key, val] of Object.entries(form.measurements)) {
+        if (!(key in normalizedMeasurements)) {
+          normalizedMeasurements[key] = { ...(val || {}) }
+        }
+      }
+    }
+
     return {
       ...form,
+      measurements: normalizedMeasurements,
+      uniforms: {
+        domas: '',
+        manggolo: '',
+        ibuBesan: '',
+        bapakBesan: '',
+        terimaTamu: '',
+        softlens: '',
+        melati: '',
+        henna: '',
+        tambahan: '',
+        ...(form.uniforms ?? {}),
+      },
+      vendors: {
+        deco: '',
+        doc: '',
+        wcc: '',
+        mc: '',
+        tenda: '',
+        seserahan: '',
+        wo: '',
+        ...(form.vendors ?? {}),
+      },
       events: visibleEvents,
       manggoloBlangkon: typeof form.manggoloBlangkon === 'number' ? form.manggoloBlangkon : null,
       manggoloSlop: typeof form.manggoloSlop === 'number' ? form.manggoloSlop : null,

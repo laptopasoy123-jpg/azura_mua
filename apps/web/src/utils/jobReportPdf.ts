@@ -47,7 +47,7 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
       ? `STAFF FILTER · ${input.filterEmployeeName.toUpperCase()}`
       : 'EVENT CREW ROSTER & SCHEDULE',
     rightMetaTop: formatPeriodLabel(input.fromDate, input.toDate),
-    rightMetaBottom: `${input.rows.length} POs · Printed ${formatDate(new Date().toISOString().slice(0, 10))}`,
+    rightMetaBottom: `${input.rows.length} PO · Printed ${formatDate(new Date().toISOString().slice(0, 10))}`,
     businessProfile: input.businessProfile,
   })
 
@@ -55,9 +55,9 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
   const unassignedCount = input.rows.length - assignedCount
 
   y = drawEditorialKpiStrip(doc, y, margin, contentWidth, [
-    { label: 'Total Scheduled Jobs', value: `${input.rows.length} POs`, accent: 'espresso' },
-    { label: 'Staff Assigned', value: `${assignedCount} POs`, accent: 'success' },
-    { label: 'Pending Assignment', value: `${unassignedCount} POs`, accent: 'warning' },
+    { label: 'Total Scheduled Jobs', value: `${input.rows.length} PO`, accent: 'espresso' },
+    { label: 'Staff Assigned', value: `${assignedCount} PO`, accent: 'success' },
+    { label: 'Pending Assignment', value: `${unassignedCount} PO`, accent: 'warning' },
     { label: 'Active Crew Pool', value: `${input.employees.filter((e) => e.active).length} Staff`, accent: 'info' },
   ])
 

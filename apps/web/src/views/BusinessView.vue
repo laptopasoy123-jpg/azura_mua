@@ -492,7 +492,7 @@ const openEditExpense = (row: Expense) => {
   expenseError.value = ''
   expenseUploadError.value = ''
   Object.assign(expense, {
-    date: row.date,
+    date: (row.date ?? '').slice(0, 10),
     expenseScope: row.bookingId ? 'Berdasarkan PO' : 'Di Luar PO',
     bookingId: row.bookingId ?? '',
     method: row.method,
@@ -1322,6 +1322,12 @@ watch(() => route.query.catalog, (catalog) => {
                   <div class="order-line-service">
                     <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
                       <option value="">Select service</option>
+                      <option
+                        v-if="line.catalogItemId && !store.catalog.some((c) => c.id === line.catalogItemId)"
+                        :value="line.catalogItemId"
+                      >
+                        {{ line.serviceName || 'Saved service' }} (Archived)
+                      </option>
                       <template v-if="line.filterType === 'Inti' || line.filterType === 'Additional'">
                         <option v-for="item in catalogOptionsForLine(line)" :key="item.id" :value="item.id">
                           {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
@@ -1582,7 +1588,7 @@ watch(() => route.query.catalog, (catalog) => {
             </div>
           </section>
 
-          <section>
+          <section class="editorial-table-wrap">
             <table class="editorial-table">
               <thead>
                 <tr>
