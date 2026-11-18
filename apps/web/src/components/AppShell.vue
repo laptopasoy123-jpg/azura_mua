@@ -225,7 +225,7 @@ const closeMobile = () => { mobileOpen.value = false }
       <div class="modal-actions"><button class="primary-button" @click="showNotifications = false">Close</button></div>
     </UiModal>
 
-    <Transition name="toast-slide">
+    <Transition name="toast-slide" mode="out-in">
       <div
         v-if="store.actionToast"
         :key="store.actionToast.id"

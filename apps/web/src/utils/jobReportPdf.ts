@@ -9,6 +9,7 @@ export interface JobReportRow {
   eventDate: string
   eventTime?: string
   customerName: string
+  customerPhone?: string
   stylingType?: string
   location: string
   servicesSummary: string
@@ -36,7 +37,7 @@ const formatPeriodLabel = (fromDate: string, toDate: string) => {
 export const downloadJobReportPdf = (input: JobReportInput) => {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' })
   const pageWidth = doc.internal.pageSize.getWidth()
-  const margin = 12
+  const margin = 14
   const contentWidth = pageWidth - margin * 2
 
   let y = drawEditorialBanner(doc, {
@@ -65,43 +66,49 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
         String(idx + 1),
         `${formatDate(row.eventDate)}${row.eventTime ? `\nAt ${row.eventTime}` : ''}`,
         `${row.poNumber}\n(${displayBookingStatus(row.status)})`,
-        `${row.customerName}${row.stylingType ? `\nStyling: ${row.stylingType}` : ''}`,
+        `${row.customerName}${row.customerPhone ? `\n${row.customerPhone}` : ''}${row.stylingType ? `\nStyling: ${row.stylingType}` : ''}`,
         row.location || '-',
         row.servicesSummary || '-',
-        row.assignedNames.length ? row.assignedNames.join(', ') : 'Unassigned',
+        row.assignedNames.length ? row.assignedNames.join('\n') : 'Unassigned',
         row.notes || '-',
       ])
     : [['-', '-', '-', 'No job assignments found in the selected date range.', '-', '-', '-', '-']]
 
   autoTable(doc, {
     startY: y,
-    margin: { left: margin, right: margin, bottom: 16 },
-    head: [['No.', 'Event Date', 'PO No.', 'Customer & Styling', 'Event Venue', 'Ordered Services', 'Assigned Staff', 'Notes']],
+    margin: { left: margin, right: margin, bottom: 18 },
+    tableWidth: contentWidth,
+    head: [['NO.', 'EVENT SCHEDULE', 'PO NO.', 'CUSTOMER & STYLING', 'EVENT VENUE', 'ORDERED SERVICES', 'ASSIGNED CREW', 'CREW NOTES']],
     body: tableBody,
     theme: 'grid',
+    rowPageBreak: 'avoid',
     styles: {
-      fontSize: 8.2,
+      fontSize: 8.1,
       cellPadding: 2.6,
       textColor: PDF_PALETTE.ink,
-      lineColor: PDF_PALETTE.border,
+      lineColor: [212, 202, 188],
+      lineWidth: 0.3,
       valign: 'top',
     },
     headStyles: {
-      fillColor: PDF_PALETTE.espressoSoft,
+      fillColor: PDF_PALETTE.espresso,
       textColor: PDF_PALETTE.cream,
       fontStyle: 'bold',
+      fontSize: 7.7,
+      lineColor: [90, 78, 66],
+      lineWidth: 0.3,
     },
     alternateRowStyles: {
-      fillColor: [251, 249, 245],
+      fillColor: [252, 250, 246],
     },
     columnStyles: {
       0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 32 },
+      1: { cellWidth: 31 },
       2: { cellWidth: 27, fontStyle: 'bold' },
-      3: { cellWidth: 38 },
-      4: { cellWidth: 44 },
-      5: { cellWidth: 52 },
-      6: { cellWidth: 42, fontStyle: 'bold' },
+      3: { cellWidth: 42 },
+      4: { cellWidth: 42 },
+      5: { cellWidth: 49 },
+      6: { cellWidth: 40, fontStyle: 'bold' },
       7: { cellWidth: 28 },
     },
     didParseCell: (hookData) => {
@@ -136,19 +143,35 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
       const lastY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? 110
       autoTable(doc, {
         startY: lastY + 8,
-        margin: { left: margin, right: margin, bottom: 16 },
-        head: [[input.filterEmployeeName ? 'Selected Staff Summary' : 'Staff Workload Summary (Filtered Period)', 'Role', 'Total POs Assigned']],
+        margin: { left: margin, right: margin, bottom: 18 },
+        tableWidth: contentWidth,
+        head: [[input.filterEmployeeName ? 'SELECTED STAFF SUMMARY' : 'STAFF WORKLOAD SUMMARY (FILTERED PERIOD)', 'ROLE', 'TOTAL POs ASSIGNED']],
         body: summaryRows,
-        theme: 'plain',
+        theme: 'grid',
+        rowPageBreak: 'avoid',
         styles: {
-          fontSize: 8.2,
+          fontSize: 8.1,
           cellPadding: 2.6,
           textColor: PDF_PALETTE.ink,
-          lineColor: PDF_PALETTE.border,
-          lineWidth: { top: 0, right: 0, bottom: 0.25, left: 0 },
+          lineColor: [212, 202, 188],
+          lineWidth: 0.3,
         },
-        headStyles: { fillColor: PDF_PALETTE.espresso, textColor: PDF_PALETTE.cream, fontStyle: 'bold', lineWidth: 0 },
-        columnStyles: { 0: { cellWidth: 82, fontStyle: 'bold' }, 1: { cellWidth: 82 }, 2: { cellWidth: 45, halign: 'right' } },
+        alternateRowStyles: {
+          fillColor: [252, 250, 246],
+        },
+        headStyles: {
+          fillColor: PDF_PALETTE.espresso,
+          textColor: PDF_PALETTE.cream,
+          fontStyle: 'bold',
+          fontSize: 7.7,
+          lineColor: [90, 78, 66],
+          lineWidth: 0.3,
+        },
+        columnStyles: {
+          0: { cellWidth: 100, fontStyle: 'bold' },
+          1: { cellWidth: contentWidth - 150 },
+          2: { cellWidth: 50, halign: 'right', fontStyle: 'bold' },
+        },
       })
     }
   }
@@ -156,6 +179,7 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
   drawEditorialFooter(doc, {
     marginX: margin,
     showPageNumbers: true,
+    framed: true,
   })
 
   const suffix = input.filterEmployeeName ? `-${input.filterEmployeeName.replace(/\s+/g, '-')}` : ''

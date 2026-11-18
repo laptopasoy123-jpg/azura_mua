@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import {
-  Briefcase, CalendarDays, Download, MapPin, Pencil, Phone, RotateCcw,
-  Search, SlidersHorizontal, Users, Plus, X,
+  Briefcase, CalendarDays, Check, Download, MapPin, Pencil, Phone, RotateCcw,
+  Search, SlidersHorizontal, Users, Plus, ChevronRight,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type EmployeeRecord } from '../stores/crm'
 import { displayBookingStatus, formatDate } from '../utils/format'
@@ -17,10 +17,25 @@ const fromDate = ref('')
 const toDate = ref('')
 const employeeFilter = ref('')
 
-// Job notes edit modal
-const showNoteModal = ref(false)
-const noteBooking = ref<Booking | null>(null)
+// Complete Job Details & Crew Selection Modal
+const showDetailModal = ref(false)
+const detailBookingId = ref('')
 const noteDraft = ref('')
+
+const detailBooking = computed(() =>
+  detailBookingId.value ? store.bookingFor(detailBookingId.value) ?? null : null,
+)
+const detailCustomer = computed(() =>
+  detailBooking.value ? store.customerFor(detailBooking.value.customerId) : undefined,
+)
+const detailServices = computed(() => {
+  if (!detailBooking.value) return []
+  const invoice = store.bookingInvoice(detailBooking.value.id)
+  if (!invoice) return []
+  return store.sortInvoiceItemsIntiFirst(
+    invoice.groups?.length ? invoice.groups.flatMap((g) => g.items) : invoice.items,
+  )
+})
 
 const activeBookings = computed(() =>
   [...store.bookings]
@@ -65,17 +80,24 @@ const assignedCount = computed(() =>
 )
 const unassignedCount = computed(() => filteredBookings.value.length - assignedCount.value)
 
-const unassignedEmployeesFor = (bookingId: string) => {
-  const assignedIds = new Set(store.jobForBooking(bookingId)?.employeeIds ?? [])
-  return store.activeEmployees.filter((emp) => !assignedIds.has(emp.id))
+const isEmployeeAssigned = (bookingId: string, employeeId: string) =>
+  (store.jobForBooking(bookingId)?.employeeIds ?? []).includes(employeeId)
+
+const openDetailModal = (booking: Booking) => {
+  detailBookingId.value = booking.id
+  noteDraft.value = store.jobForBooking(booking.id)?.notes ?? ''
+  showDetailModal.value = true
 }
 
-const onSelectAssignCrew = (bookingId: string, event: Event) => {
-  const selectEl = event.target as HTMLSelectElement
-  const employeeId = selectEl.value
-  if (!employeeId) return
-  store.toggleBookingEmployee(bookingId, employeeId)
-  selectEl.value = ''
+const saveJobNotesAndClose = () => {
+  if (detailBooking.value) {
+    const existingNotes = store.jobForBooking(detailBooking.value.id)?.notes ?? ''
+    if (noteDraft.value.trim() !== existingNotes.trim()) {
+      store.setBookingJobNotes(detailBooking.value.id, noteDraft.value)
+    }
+  }
+  showDetailModal.value = false
+  detailBookingId.value = ''
 }
 
 const resetFilters = () => {
@@ -83,19 +105,6 @@ const resetFilters = () => {
   fromDate.value = ''
   toDate.value = ''
   employeeFilter.value = ''
-}
-
-const openNoteModal = (booking: Booking) => {
-  noteBooking.value = booking
-  noteDraft.value = store.jobForBooking(booking.id)?.notes ?? ''
-  showNoteModal.value = true
-}
-
-const saveJobNotes = () => {
-  if (!noteBooking.value) return
-  store.setBookingJobNotes(noteBooking.value.id, noteDraft.value)
-  showNoteModal.value = false
-  noteBooking.value = null
 }
 
 // Inline employee manager modal
@@ -160,6 +169,7 @@ const exportPdf = async () => {
       eventDate: booking.eventDate,
       eventTime: booking.eventTime,
       customerName: customer?.name ?? 'Customer',
+      customerPhone: customer?.phone,
       stylingType: booking.stylingType,
       location: booking.location,
       servicesSummary: bookingServicesText(booking.id) || 'No service items yet',
@@ -192,7 +202,7 @@ const exportPdf = async () => {
       <div>
         <span class="eyebrow">Workspace</span>
         <h2>Team Job Assignments</h2>
-        <p>Select crew members from the dropdown per PO and download PDF duty schedules for any event date range.</p>
+        <p>Click Select Crew on any PO to inspect full job details, assign staff, or export matching PDF duty schedules.</p>
       </div>
       <div class="heading-actions">
         <button type="button" class="secondary-button" @click="openManageStaff">
@@ -256,101 +266,59 @@ const exportPdf = async () => {
         <table class="data-table jobs-table">
           <thead>
             <tr>
-              <th>PO &amp; Event Date</th>
+              <th>PO Number</th>
+              <th>Event Date</th>
               <th>Customer &amp; Venue</th>
-              <th>Ordered Services</th>
               <th>Assigned Crew</th>
-              <th>Crew Notes</th>
-              <th>Actions</th>
+              <th>Details &amp; Crew</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="booking in filteredBookings" :key="booking.id">
+            <tr
+              v-for="booking in filteredBookings"
+              :key="booking.id"
+              class="jobs-table-row"
+              @click="openDetailModal(booking)"
+            >
               <td>
                 <div class="job-po-cell">
                   <strong class="mono-code">{{ booking.poNumber }}</strong>
-                  <span class="job-date-line">
-                    <CalendarDays :size="13" />
-                    {{ formatDate(booking.eventDate) }}<template v-if="booking.eventTime"> · {{ booking.eventTime }}</template>
-                  </span>
                   <StatusBadge :label="displayBookingStatus(booking.status)" />
                 </div>
               </td>
               <td>
+                <span class="job-date-line">
+                  <CalendarDays :size="14" />
+                  {{ formatDate(booking.eventDate) }}<template v-if="booking.eventTime"> · {{ booking.eventTime }}</template>
+                </span>
+              </td>
+              <td>
                 <div class="job-customer-cell">
                   <strong>{{ store.customerFor(booking.customerId)?.name }}</strong>
-                  <span class="subtle-line"><Phone :size="12" />{{ store.customerFor(booking.customerId)?.phone }}</span>
                   <span class="subtle-line"><MapPin :size="12" />{{ booking.location }}</span>
-                  <span v-if="booking.stylingType" class="job-styling-chip">Styling: {{ booking.stylingType }}</span>
                 </div>
               </td>
               <td>
-                <div class="job-services-cell">
-                  <p v-if="bookingServicesText(booking.id)">{{ bookingServicesText(booking.id) }}</p>
-                  <span v-else class="subtle-line">No order items yet under Orders.</span>
+                <div v-if="store.assignedEmployeesForBooking(booking.id).length" class="job-crew-summary">
+                  <span class="job-crew-count">{{ store.assignedEmployeesForBooking(booking.id).length }} Crew</span>
+                  <span class="job-crew-names">
+                    {{ store.assignedEmployeesForBooking(booking.id).map((e) => e.name).join(', ') }}
+                  </span>
                 </div>
+                <span v-else class="job-unassigned-pill">Unassigned</span>
               </td>
-              <td>
-                <div v-if="store.activeEmployees.length" class="job-crew-column">
-                  <select
-                    class="job-crew-select"
-                    value=""
-                    :disabled="!unassignedEmployeesFor(booking.id).length"
-                    aria-label="Assign crew member"
-                    @change="onSelectAssignCrew(booking.id, $event)"
-                  >
-                    <option value="">
-                      {{ unassignedEmployeesFor(booking.id).length ? '+ Select crew member…' : 'All active staff assigned' }}
-                    </option>
-                    <option v-for="emp in unassignedEmployeesFor(booking.id)" :key="emp.id" :value="emp.id">
-                      {{ emp.name }} — {{ emp.role }}
-                    </option>
-                  </select>
-
-                  <div v-if="store.assignedEmployeesForBooking(booking.id).length" class="job-assigned-pills">
-                    <span
-                      v-for="emp in store.assignedEmployeesForBooking(booking.id)"
-                      :key="emp.id"
-                      class="job-assigned-pill"
-                      :title="`${emp.name} · ${emp.role}`"
-                    >
-                      <span>{{ emp.name }}</span>
-                      <button
-                        type="button"
-                        class="job-assigned-remove"
-                        :aria-label="`Remove ${emp.name}`"
-                        title="Remove from PO"
-                        @click="store.toggleBookingEmployee(booking.id, emp.id)"
-                      >
-                        <X :size="12" />
-                      </button>
-                    </span>
-                  </div>
-                  <span v-else class="subtle-line">No crew assigned yet</span>
-                </div>
-                <span v-else class="subtle-line">Click "Manage Crew" above to add employees.</span>
-              </td>
-              <td>
-                <div class="job-notes-column">
-                  <small v-if="store.jobForBooking(booking.id)?.notes" class="job-note-preview">
-                    {{ store.jobForBooking(booking.id)?.notes }}
-                  </small>
-                  <span v-else class="subtle-line">—</span>
-                </div>
-              </td>
-              <td>
+              <td @click.stop>
                 <button
                   type="button"
-                  class="icon-button"
-                  title="Edit job notes for this PO"
-                  @click="openNoteModal(booking)"
+                  class="soft-button job-detail-trigger"
+                  @click="openDetailModal(booking)"
                 >
-                  <Pencil :size="16" />
+                  <Users :size="14" />Select Crew<ChevronRight :size="14" />
                 </button>
               </td>
             </tr>
             <tr v-if="!filteredBookings.length">
-              <td colspan="6">
+              <td colspan="5">
                 <div class="empty-state">
                   <Briefcase :size="28" />
                   <strong>No jobs match this filter</strong>
@@ -362,26 +330,91 @@ const exportPdf = async () => {
         </table>
       </div>
       <footer class="table-footer">
-        <span>Showing {{ filteredBookings.length }} active POs · Use the Assigned Crew dropdown per column to add or remove staff</span>
+        <span>Showing {{ filteredBookings.length }} active POs · Click any row or Select Crew to view full details and assign staff</span>
       </footer>
     </section>
 
     <UiModal
-      :open="showNoteModal"
-      :title="noteBooking ? `Job Notes — ${noteBooking.poNumber}` : 'Job Notes'"
-      description="Add call time instructions, role splits, or field notes for the crew."
-      @close="showNoteModal = false"
+      :open="showDetailModal"
+      :title="detailBooking ? `Job Details & Crew Selection — ${detailBooking.poNumber}` : 'Job Details'"
+      description="Complete booking details, ordered services, crew roster assignment, and field notes."
+      wide
+      @close="showDetailModal = false"
     >
-      <form class="form-grid" @submit.prevent="saveJobNotes">
-        <label class="span-2">
-          <span>Crew Notes / Instructions</span>
-          <textarea v-model="noteDraft" rows="3" placeholder="e.g. Standby at venue by 04:30 AM, bring backup hijabdo pins" />
-        </label>
-        <div class="modal-actions span-2">
-          <button type="button" class="secondary-button" @click="showNoteModal = false">Cancel</button>
-          <button type="submit" class="primary-button">Save Notes</button>
+      <template v-if="detailBooking">
+        <div class="detail-grid">
+          <div>
+            <span>PO Number &amp; Status</span>
+            <strong class="mono-code">{{ detailBooking.poNumber }}</strong>
+            <StatusBadge :label="displayBookingStatus(detailBooking.status)" />
+          </div>
+          <div>
+            <span>Event Schedule</span>
+            <strong>{{ formatDate(detailBooking.eventDate) }}</strong>
+            <small>{{ detailBooking.eventTime ? `Time: ${detailBooking.eventTime}` : 'Time not specified' }}</small>
+          </div>
+          <div>
+            <span>Customer</span>
+            <strong>{{ detailCustomer?.name ?? '-' }}</strong>
+            <small>{{ detailCustomer?.phone ?? '-' }}</small>
+          </div>
+          <div>
+            <span>Venue &amp; Styling</span>
+            <strong>{{ detailBooking.location }}</strong>
+            <small>{{ detailBooking.stylingType ? `Styling: ${detailBooking.stylingType}` : 'No styling type specified' }}</small>
+          </div>
         </div>
-      </form>
+
+        <div class="job-modal-section">
+          <div class="job-modal-section-head">
+            <strong>Ordered Services</strong>
+            <span>{{ detailServices.length }} item(s)</span>
+          </div>
+          <div v-if="detailServices.length" class="job-modal-services">
+            <span v-for="(item, idx) in detailServices" :key="`${item.name}-${idx}`" class="item-pill">
+              {{ item.name }} ({{ item.quantity }} {{ item.unit || 'qty' }})
+            </span>
+          </div>
+          <p v-else class="subtle-line">No order items recorded under Orders yet.</p>
+        </div>
+
+        <div class="job-modal-section">
+          <div class="job-modal-section-head">
+            <strong>Select Crew Members ({{ store.assignedEmployeesForBooking(detailBooking.id).length }} selected)</strong>
+            <button type="button" class="text-link" @click="openManageStaff">+ Manage Crew Roster</button>
+          </div>
+          <div v-if="store.activeEmployees.length" class="job-crew-picker-grid">
+            <button
+              v-for="emp in store.activeEmployees"
+              :key="emp.id"
+              type="button"
+              class="job-crew-option-card"
+              :class="{ 'is-selected': isEmployeeAssigned(detailBooking.id, emp.id) }"
+              @click="store.toggleBookingEmployee(detailBooking.id, emp.id)"
+            >
+              <span class="job-crew-check" aria-hidden="true">
+                <Check v-if="isEmployeeAssigned(detailBooking.id, emp.id)" :size="14" :stroke-width="2.5" />
+              </span>
+              <div class="job-crew-option-info">
+                <strong>{{ emp.name }}</strong>
+                <small>{{ emp.role }}<template v-if="emp.phone"> · <Phone :size="10" /> {{ emp.phone }}</template></small>
+              </div>
+            </button>
+          </div>
+          <p v-else class="subtle-line">No active employees yet. Click Manage Crew Roster above to add staff.</p>
+        </div>
+
+        <form class="form-grid" @submit.prevent="saveJobNotesAndClose">
+          <label class="span-2">
+            <span>Crew Notes / Call-Time Instructions</span>
+            <textarea v-model="noteDraft" rows="3" placeholder="e.g. Standby at venue by 04:30 AM, bring backup hijabdo pins" />
+          </label>
+          <div class="modal-actions span-2">
+            <button type="button" class="secondary-button" @click="showDetailModal = false">Close</button>
+            <button type="submit" class="primary-button">Save Notes &amp; Done</button>
+          </div>
+        </form>
+      </template>
     </UiModal>
 
     <UiModal

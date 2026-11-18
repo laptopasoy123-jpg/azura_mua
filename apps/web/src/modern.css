@@ -1321,74 +1321,143 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: #1e1a17;
   font-size: 10px;
 }
-.jobs-table th,
+.jobs-table th {
+  vertical-align: middle;
+  white-space: nowrap;
+}
 .jobs-table td {
-  vertical-align: top;
-  border-right: 1px solid #ede6da;
+  vertical-align: middle;
 }
-.jobs-table th:last-child,
-.jobs-table td:last-child {
-  border-right: 0;
-}
-.job-crew-column {
-  display: grid;
-  gap: 8px;
-  min-width: 210px;
-  max-width: 260px;
-}
-.job-crew-select {
-  width: 100%;
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid #d8cebf;
-  border-radius: 10px;
-  background: #faf8f4;
-  color: #211d1a;
-  font-size: 11px;
-  font-weight: 600;
-  outline: 0;
+.jobs-table-row {
   cursor: pointer;
 }
-.job-crew-select:focus {
-  border-color: #9e8264;
-  box-shadow: 0 0 0 3px rgba(154, 123, 86, .12);
-}
-.job-assigned-pills {
+.job-crew-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  align-items: center;
+  gap: 7px;
 }
-.job-assigned-pill {
+.job-crew-count {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 7px 4px 9px;
+  padding: 3px 9px;
   border-radius: 999px;
-  border: 1px solid #2c2621;
   background: #211d1a;
   color: #f8f1e6;
+  font-size: 9.5px;
+  font-weight: 700;
+}
+.job-crew-names {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2b2520;
+}
+.job-unassigned-pill {
+  display: inline-flex;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f5efe6;
+  color: #8c6d45;
+  font-size: 9.5px;
+  font-weight: 700;
+}
+.job-detail-trigger {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 10.5px;
+  font-weight: 700;
+  gap: 6px;
+}
+.job-modal-section {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid #ebe4da;
+  background: #faf8f4;
+}
+.job-modal-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.job-modal-section-head strong {
+  font-size: 11.5px;
+  color: #1e1a17;
+}
+.job-modal-section-head span {
   font-size: 10px;
+  color: #7c7064;
   font-weight: 600;
 }
-.job-assigned-remove {
-  width: 16px;
-  height: 16px;
-  border: 0;
-  border-radius: 50%;
+.job-modal-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.job-crew-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.job-crew-option-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #dfd6c8;
+  background: #ffffff;
+  color: #211d1a;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease;
+}
+.job-crew-option-card:hover {
+  border-color: #9e8264;
+  background: #fdfbf8;
+}
+.job-crew-option-card.is-selected {
+  border-color: #211d1a;
+  background: #211d1a;
+  color: #faf8f4;
+}
+.job-crew-check {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  border: 1.5px solid #cbbba6;
+  background: #faf8f4;
+  color: #211d1a;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, .14);
-  color: #f8f1e6;
-  cursor: pointer;
-  padding: 0;
 }
-.job-assigned-remove:hover {
-  background: rgba(225, 135, 119, .85);
-  color: #ffffff;
+.job-crew-option-card.is-selected .job-crew-check {
+  border-color: #c4a77d;
+  background: #c4a77d;
+  color: #211d1a;
 }
-.job-notes-column {
-  min-width: 120px;
-  max-width: 190px;
+.job-crew-option-info {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.job-crew-option-info strong {
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.job-crew-option-info small {
+  font-size: 9.5px;
+  color: #7c7064;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.job-crew-option-card.is-selected .job-crew-option-info small {
+  color: #d7ccbe;
 }
 .job-po-cell, .job-customer-cell, .job-services-cell {
   display: flex;
@@ -3052,6 +3121,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (max-width: 620px) {
   .workspace-footer { justify-content: center; }
   .dropdown-add-employee { grid-template-columns: 1fr; }
+  .job-crew-picker-grid { grid-template-columns: 1fr; }
   .attire-report-bar { margin-inline: 13px; }
   .editorial-sheet-banner, .editorial-meta-two, .editorial-totals, .editorial-hero-payment {
     grid-template-columns: 1fr;
