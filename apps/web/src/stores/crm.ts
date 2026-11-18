@@ -1,6 +1,35 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { uid } from '../utils/format'
+import {
+  getSupabaseClient,
+  pullAllFromSupabase,
+  pushSnapshotToSupabase,
+  supabaseSyncState,
+  syncBooking,
+  syncBusinessProfile,
+  syncCancelBookingCascade,
+  syncCatalogItem,
+  syncDeleteExpense,
+  syncDeleteInventoryItem,
+  syncDeleteOrderGroup,
+  syncDeletePayment,
+  syncDeleteStockMovement,
+  syncDeleteStockOpname,
+  syncDeleteWeddingForm,
+  syncDropdownGroup,
+  syncEmployee,
+  syncExpense,
+  syncInventoryItem,
+  syncInvoiceOrderGroup,
+  syncJobAssignment,
+  syncPayment,
+  syncRefund,
+  syncStockMovement,
+  syncStockOpname,
+  syncWeddingAttire,
+  syncWeddingForm,
+} from '../utils/supabaseSync'
 
 export type BookingStatus = 'Draft' | 'Terkonfirmasi' | 'Selesai' | 'Dibatalkan'
 export type StylingType = 'Hijabdo' | 'Hairdo'
@@ -540,21 +569,51 @@ const calendarDaysDiff = (fromIso: string, toIso: string) => {
 }
 
 export const useCrmStore = defineStore('crm', () => {
-  const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
-  const defaults = seed()
-  const parsed = saved ? JSON.parse(saved) as Partial<ReturnType<typeof seed>> : {}
-  const mergedCatalog = parsed.catalog ?? defaults.catalog
-  const initial: ReturnType<typeof seed> = {
-    ...defaults,
-    ...parsed,
-    catalog: mergedCatalog,
-    invoices: normalizeInvoices(parsed.invoices ?? defaults.invoices, mergedCatalog),
-    inventory: normalizeInventory(parsed.inventory ?? defaults.inventory),
-    weddingAttire: normalizeWeddingAttire(parsed.weddingAttire ?? defaults.weddingAttire),
-    weddingForms: normalizeWeddingForms(parsed.weddingForms ?? defaults.weddingForms),
-    stockOpnames: parsed.stockOpnames ?? defaults.stockOpnames,
-    refunds: parsed.refunds ?? defaults.refunds,
+  const isSupabaseMode = Boolean(getSupabaseClient())
+  if (isSupabaseMode && typeof localStorage !== 'undefined') {
+    localStorage.removeItem(STORAGE_KEY)
   }
+
+  const defaults = seed()
+  const saved = !isSupabaseMode && typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
+  const parsed = saved ? JSON.parse(saved) as Partial<ReturnType<typeof seed>> : {}
+
+  const emptyInitial: ReturnType<typeof seed> = {
+    customers: [],
+    bookings: [],
+    catalog: [],
+    invoices: [],
+    payments: [],
+    refunds: [],
+    inventory: [],
+    movements: [],
+    stockOpnames: [],
+    expenses: [],
+    activities: [],
+    weddingAttire: [],
+    weddingForms: [],
+    employees: [],
+    jobAssignments: [],
+    businessProfile: defaults.businessProfile,
+    paymentMethods: defaults.paymentMethods,
+    poExpenseCategories: defaults.poExpenseCategories,
+    generalExpenseCategories: defaults.generalExpenseCategories,
+  }
+
+  const mergedCatalog = parsed.catalog ?? defaults.catalog
+  const initial: ReturnType<typeof seed> = isSupabaseMode
+    ? emptyInitial
+    : {
+        ...defaults,
+        ...parsed,
+        catalog: mergedCatalog,
+        invoices: normalizeInvoices(parsed.invoices ?? defaults.invoices, mergedCatalog),
+        inventory: normalizeInventory(parsed.inventory ?? defaults.inventory),
+        weddingAttire: normalizeWeddingAttire(parsed.weddingAttire ?? defaults.weddingAttire),
+        weddingForms: normalizeWeddingForms(parsed.weddingForms ?? defaults.weddingForms),
+        stockOpnames: parsed.stockOpnames ?? defaults.stockOpnames,
+        refunds: parsed.refunds ?? defaults.refunds,
+      }
 
   const customers = ref(initial.customers)
   const bookings = ref(initial.bookings)
@@ -569,8 +628,8 @@ export const useCrmStore = defineStore('crm', () => {
   const activities = ref(initial.activities)
   const weddingAttire = ref(initial.weddingAttire)
   const weddingForms = ref(initial.weddingForms)
-  const employees = ref(initial.employees ?? defaults.employees)
-  const jobAssignments = ref(initial.jobAssignments ?? defaults.jobAssignments)
+  const employees = ref(initial.employees ?? (isSupabaseMode ? [] : defaults.employees))
+  const jobAssignments = ref(initial.jobAssignments ?? [])
   const businessProfile = ref<BusinessProfile>({ ...defaults.businessProfile, ...(initial.businessProfile ?? {}) })
   const paymentMethods = ref<string[]>(initial.paymentMethods?.length ? initial.paymentMethods : defaults.paymentMethods)
   const poExpenseCategories = ref<string[]>(initial.poExpenseCategories?.length ? initial.poExpenseCategories : defaults.poExpenseCategories)
@@ -751,6 +810,7 @@ export const useCrmStore = defineStore('crm', () => {
     customers.value.unshift(customer)
     bookings.value.unshift(booking)
     addActivity('Booking baru dibuat', `${booking.poNumber} untuk ${customer.name}`, 'blue')
+    syncBooking(booking, customer)
     return booking
   }
 
@@ -770,6 +830,7 @@ export const useCrmStore = defineStore('crm', () => {
       status: input.status,
     })
     addActivity('Booking diperbarui', `${booking.poNumber} untuk ${customer.name}`, 'blue')
+    syncBooking(booking, customer)
     return booking
   }
 
@@ -821,6 +882,7 @@ export const useCrmStore = defineStore('crm', () => {
       `${refund.refundNumber} (${booking.poNumber}) sebesar Rp. ${new Intl.NumberFormat('id-ID').format(refund.amount)}`,
       'rose',
     )
+    syncRefund(refund)
     return refund
   }
 
@@ -859,6 +921,7 @@ export const useCrmStore = defineStore('crm', () => {
     // Remove or release fitting form attire bookings (attireSchedule already ignores Dibatalkan,
     // and we also keep/preserve or clear attire? Keeping Dibatalkan skipped makes attire immediately Tersedia)
     addActivity('Booking dibatalkan', `${booking.poNumber} · ${customer?.name ?? 'Customer'}`, 'rose')
+    syncCancelBookingCascade(booking)
 
     if (refundInput && refundInput.amount > 0) {
       addBookingRefund({
@@ -880,6 +943,11 @@ export const useCrmStore = defineStore('crm', () => {
     payments.value.unshift(payment)
     const booking = bookingFor(input.bookingId)
     addActivity('Pembayaran diterima', `${booking?.poNumber ?? 'PO'} sebesar Rp. ${new Intl.NumberFormat('id-ID').format(input.amount)}`, 'green')
+    syncPayment(payment, {
+      totalBilling: bookingTotal(input.bookingId),
+      totalPaid: bookingPaid(input.bookingId),
+      balance: bookingBalance(input.bookingId),
+    })
     return payment
   }
 
@@ -901,6 +969,11 @@ export const useCrmStore = defineStore('crm', () => {
       notes: input.notes?.trim() || undefined,
     })
     addActivity('Pembayaran diperbarui', `${payment.receiptNumber} · Rp. ${new Intl.NumberFormat('id-ID').format(payment.amount)}`, 'blue')
+    syncPayment(payment, {
+      totalBilling: bookingTotal(payment.bookingId),
+      totalPaid: bookingPaid(payment.bookingId),
+      balance: bookingBalance(payment.bookingId),
+    })
     return payment
   }
 
@@ -910,6 +983,7 @@ export const useCrmStore = defineStore('crm', () => {
     const [removed] = payments.value.splice(idx, 1)
     if (removed) {
       addActivity('Pembayaran dihapus', `${removed.receiptNumber} sebesar Rp. ${new Intl.NumberFormat('id-ID').format(removed.amount)}`, 'rose')
+      syncDeletePayment(removed.id)
     }
     return removed
   }
@@ -918,6 +992,7 @@ export const useCrmStore = defineStore('crm', () => {
     const item: CatalogItem = { ...input, id: uid(), code: `CAT-${String(catalog.value.length + 1).padStart(4, '0')}` }
     catalog.value.unshift(item)
     addActivity('Layanan ditambahkan', `${item.name} masuk ke katalog ${item.type}`, 'blue')
+    syncCatalogItem(item)
   }
 
   const updateCatalogItem = (id: string, input: Omit<CatalogItem, 'id' | 'code'>) => {
@@ -925,6 +1000,7 @@ export const useCrmStore = defineStore('crm', () => {
     if (!item) throw new Error('Layanan tidak ditemukan.')
     Object.assign(item, input)
     addActivity('Layanan diperbarui', `${item.name} pada katalog ${item.type}`, 'blue')
+    syncCatalogItem(item)
     return item
   }
 
@@ -994,6 +1070,7 @@ export const useCrmStore = defineStore('crm', () => {
     }
     invoices.value.unshift(invoice)
     addActivity('Pesanan awal dibuat', `${invoice.invoiceNumber} untuk ${booking.poNumber}`, 'blue')
+    syncInvoiceOrderGroup(invoice, initialGroup)
     return invoice
   }
 
@@ -1022,6 +1099,7 @@ export const useCrmStore = defineStore('crm', () => {
     invoice.items = invoice.groups.flatMap((g) => g.items)
 
     addActivity('Pesanan tambahan dicatat', `${booking.poNumber} · ${snappedItems.length} item pada ${input.orderDate}`, 'amber')
+    syncInvoiceOrderGroup(invoice, newGroup)
     return invoice
   }
 
@@ -1090,6 +1168,7 @@ export const useCrmStore = defineStore('crm', () => {
     invoice.items = invoice.groups.flatMap((g) => g.items)
 
     addActivity('Pesanan diperbarui', `${booking.poNumber} · kelompok ${existingGroup.kind}`, 'blue')
+    syncInvoiceOrderGroup(invoice, updatedGroup)
     return invoice
   }
 
@@ -1108,12 +1187,15 @@ export const useCrmStore = defineStore('crm', () => {
     invoice.groups = sortGroupsChronologically(invoice.groups)
     invoice.items = invoice.groups.flatMap((g) => g.items)
     addActivity('Kelompok pesanan dihapus', `${booking.poNumber} · ${target.kind}`, 'rose')
+    syncDeleteOrderGroup(invoice.id, target.id)
     return invoice
   }
 
   const addExpense = (input: Omit<Expense, 'id'>) => {
-    expenses.value.unshift({ id: uid(), ...input })
+    const rec: Expense = { id: uid(), ...input }
+    expenses.value.unshift(rec)
     addActivity('Pengeluaran dicatat', input.description, 'rose')
+    syncExpense(rec)
   }
 
   const addBatchExpenses = (input: {
@@ -1152,6 +1234,7 @@ export const useCrmStore = defineStore('crm', () => {
       }
       expenses.value.unshift(record)
       created.unshift(record)
+      syncExpense(record)
     }
 
     const totalSum = created.reduce((s, r) => s + r.amount, 0)
@@ -1172,6 +1255,7 @@ export const useCrmStore = defineStore('crm', () => {
       proofImageUrl: input.proofImageUrl || undefined,
     })
     addActivity('Pengeluaran diperbarui', existing.description, 'blue')
+    syncExpense(existing)
     return existing
   }
 
@@ -1181,6 +1265,7 @@ export const useCrmStore = defineStore('crm', () => {
     const [removed] = expenses.value.splice(idx, 1)
     if (removed) {
       addActivity('Pengeluaran dihapus', removed.description, 'rose')
+      syncDeleteExpense(removed.id)
     }
     return removed
   }
@@ -1232,7 +1317,7 @@ export const useCrmStore = defineStore('crm', () => {
       const item = inventory.value.find((entry) => entry.id === row.itemId)!
       if (input.type === 'Masuk') item.stockIn += row.quantity
       else item.stockOut += row.quantity
-      movements.value.unshift({
+      const mov: StockMovement = {
         id: uid(),
         batchId,
         itemId: row.itemId,
@@ -1242,7 +1327,9 @@ export const useCrmStore = defineStore('crm', () => {
         pic: input.pic.trim(),
         notes: input.notes?.trim() || undefined,
         proofImageUrl: input.proofImageUrl || undefined,
-      })
+      }
+      movements.value.unshift(mov)
+      syncStockMovement(mov)
     }
 
     addActivity(
@@ -1284,11 +1371,12 @@ export const useCrmStore = defineStore('crm', () => {
     })
 
     const recordId = uid()
+    const opAdjMovements: StockMovement[] = []
     for (const line of opnameItems) {
       if (line.diff !== 0) {
         const item = inventory.value.find((entry) => entry.id === line.itemId)!
         item.stockAdjustment = (item.stockAdjustment ?? 0) + line.diff
-        movements.value.unshift({
+        const adjMov: StockMovement = {
           id: uid(),
           opnameId: recordId,
           itemId: item.id,
@@ -1297,7 +1385,9 @@ export const useCrmStore = defineStore('crm', () => {
           date: input.date,
           pic: input.pic.trim(),
           notes: `Stok Opname${line.notes ? ` · ${line.notes}` : ''}`,
-        })
+        }
+        movements.value.unshift(adjMov)
+        opAdjMovements.push(adjMov)
       }
     }
 
@@ -1311,6 +1401,7 @@ export const useCrmStore = defineStore('crm', () => {
       createdAt: new Date().toISOString(),
     }
     stockOpnames.value.unshift(record)
+    syncStockOpname(record, opAdjMovements)
 
     const diffCount = opnameItems.filter((i) => i.diff !== 0).length
     addActivity(
@@ -1364,6 +1455,7 @@ export const useCrmStore = defineStore('crm', () => {
     })
 
     addActivity(`Riwayat barang ${input.type.toLowerCase()} diperbarui`, `${newItem.name} (${input.quantity} ${newItem.unit})`, 'blue')
+    syncStockMovement(mov)
     return mov
   }
 
@@ -1379,6 +1471,7 @@ export const useCrmStore = defineStore('crm', () => {
         else item.stockAdjustment = (item.stockAdjustment ?? 0) - removed.quantity
       }
       addActivity('Riwayat barang dihapus', `${item?.name ?? 'Barang'} · ${removed.type}`, 'rose')
+      syncDeleteStockMovement(removed.id)
     }
     return removed
   }
@@ -1422,11 +1515,12 @@ export const useCrmStore = defineStore('crm', () => {
       }
     })
 
+    const nextOpAdjMovements: StockMovement[] = []
     for (const line of nextItems) {
       if (line.diff !== 0) {
         const item = inventory.value.find((entry) => entry.id === line.itemId)!
         item.stockAdjustment = (item.stockAdjustment ?? 0) + line.diff
-        movements.value.unshift({
+        const adjMov: StockMovement = {
           id: uid(),
           opnameId: record.id,
           itemId: item.id,
@@ -1435,7 +1529,9 @@ export const useCrmStore = defineStore('crm', () => {
           date: input.date,
           pic: input.pic.trim(),
           notes: `Stok Opname${line.notes ? ` · ${line.notes}` : ''}`,
-        })
+        }
+        movements.value.unshift(adjMov)
+        nextOpAdjMovements.push(adjMov)
       }
     }
 
@@ -1447,6 +1543,7 @@ export const useCrmStore = defineStore('crm', () => {
     })
 
     addActivity('Stok opname diperbarui', `${record.opnameNumber} · ${nextItems.length} barang`, 'blue')
+    syncStockOpname(record, nextOpAdjMovements)
     return record
   }
 
@@ -1463,6 +1560,7 @@ export const useCrmStore = defineStore('crm', () => {
       }
       movements.value = movements.value.filter((m) => m.opnameId !== removed.id)
       addActivity('Stok opname dihapus', removed.opnameNumber, 'rose')
+      syncDeleteStockOpname(removed.id)
     }
     return removed
   }
@@ -1479,6 +1577,7 @@ export const useCrmStore = defineStore('crm', () => {
     }
     inventory.value.unshift(item)
     addActivity('Barang baru ditambahkan', `${item.name} masuk ke katalog inventory`, 'blue')
+    syncInventoryItem(item)
     return item
   }
 
@@ -1501,6 +1600,7 @@ export const useCrmStore = defineStore('crm', () => {
       minimumStock: Math.max(0, Number(input.minimumStock) || 0),
     })
     addActivity('Barang diperbarui', `${item.name} diperbarui di katalog inventory`, 'blue')
+    syncInventoryItem(item)
     return item
   }
 
@@ -1510,6 +1610,7 @@ export const useCrmStore = defineStore('crm', () => {
     const [removed] = inventory.value.splice(idx, 1)
     if (removed) {
       addActivity('Barang dihapus', `${removed.name} dihapus dari katalog inventory`, 'rose')
+      syncDeleteInventoryItem(removed.id)
     }
     return removed
   }
@@ -1522,6 +1623,7 @@ export const useCrmStore = defineStore('crm', () => {
     }
     weddingAttire.value.unshift(item)
     addActivity('Busana ditambahkan', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
+    syncWeddingAttire(item)
     return item
   }
 
@@ -1530,6 +1632,7 @@ export const useCrmStore = defineStore('crm', () => {
     if (!item) throw new Error('Busana tidak ditemukan.')
     Object.assign(item, input)
     addActivity('Busana diperbarui', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
+    syncWeddingAttire(item)
     return item
   }
 
@@ -1537,6 +1640,7 @@ export const useCrmStore = defineStore('crm', () => {
     const item = weddingAttire.value.find((entry) => entry.id === id)
     if (!item) throw new Error('Busana tidak ditemukan.')
     item.status = status
+    syncWeddingAttire(item)
   }
 
   const saveWeddingForm = (input: WeddingFittingForm) => {
@@ -1547,12 +1651,14 @@ export const useCrmStore = defineStore('crm', () => {
     else weddingForms.value.unshift(form)
     const booking = bookingFor(input.bookingId)
     addActivity('Form fitting disimpan', `${booking?.poNumber} · ${customerFor(booking?.customerId ?? '')?.name}`, 'green')
+    syncWeddingForm(form)
     return form
   }
 
   const deleteWeddingForm = (bookingId: string) => {
     const index = weddingForms.value.findIndex((form) => form.bookingId === bookingId)
     if (index >= 0) weddingForms.value.splice(index, 1)
+    syncDeleteWeddingForm(bookingId)
   }
 
   const activeEmployees = computed(() => employees.value.filter((emp) => emp.active))
@@ -1571,6 +1677,7 @@ export const useCrmStore = defineStore('crm', () => {
     }
     employees.value.push(emp)
     addActivity('Karyawan ditambahkan', `${emp.name} (${emp.role})`, 'blue')
+    syncEmployee(emp)
     return emp
   }
 
@@ -1582,6 +1689,7 @@ export const useCrmStore = defineStore('crm', () => {
     if (input.email !== undefined) emp.email = input.email?.trim() || undefined
     if (input.phone !== undefined) emp.phone = input.phone?.trim() || undefined
     if (typeof input.active === 'boolean') emp.active = input.active
+    syncEmployee(emp)
     return emp
   }
 
@@ -1589,6 +1697,7 @@ export const useCrmStore = defineStore('crm', () => {
     const emp = employees.value.find((e) => e.id === id)
     if (!emp) throw new Error('Karyawan tidak ditemukan.')
     emp.active = !emp.active
+    syncEmployee(emp)
     return emp
   }
 
@@ -1615,6 +1724,7 @@ export const useCrmStore = defineStore('crm', () => {
     if (idx >= 0) job.employeeIds.splice(idx, 1)
     else job.employeeIds.push(employeeId)
     job.updatedAt = new Date().toISOString()
+    syncJobAssignment(job)
     return job
   }
 
@@ -1628,12 +1738,14 @@ export const useCrmStore = defineStore('crm', () => {
     }
     job.notes = notes.trim() || undefined
     job.updatedAt = new Date().toISOString()
+    syncJobAssignment(job)
     return job
   }
 
   const updateBusinessProfile = (patch: Partial<BusinessProfile>) => {
     Object.assign(businessProfile.value, patch)
     addActivity('Profil bisnis diperbarui', businessProfile.value.name || 'Azura Makeup Artist', 'blue')
+    syncBusinessProfile(businessProfile.value)
     return businessProfile.value
   }
 
@@ -1652,6 +1764,7 @@ export const useCrmStore = defineStore('crm', () => {
     }
     target.value.push(label)
     addActivity('Pengaturan dropdown diperbarui', `Menambahkan opsi "${label}"`, 'blue')
+    syncDropdownGroup(group, target.value)
     return label
   }
 
@@ -1669,6 +1782,7 @@ export const useCrmStore = defineStore('crm', () => {
     }
     target.value.splice(index, 1, nextLabel)
     addActivity('Pengaturan dropdown diperbarui', `${oldLabel} → ${nextLabel}`, 'blue')
+    syncDropdownGroup(group, target.value)
     return nextLabel
   }
 
@@ -1679,6 +1793,67 @@ export const useCrmStore = defineStore('crm', () => {
     }
     target.value = target.value.filter((item) => item !== label)
     addActivity('Opsi dropdown dihapus', label, 'amber')
+    syncDropdownGroup(group, target.value)
+  }
+
+  const hydrateFromSupabase = async () => {
+    const remote = await pullAllFromSupabase()
+    if (!remote) return false
+
+    if (remote.businessProfile) {
+      Object.assign(businessProfile.value, remote.businessProfile)
+    }
+    if (remote.paymentMethods?.length) paymentMethods.value = remote.paymentMethods
+    if (remote.poExpenseCategories?.length) poExpenseCategories.value = remote.poExpenseCategories
+    if (remote.generalExpenseCategories?.length) generalExpenseCategories.value = remote.generalExpenseCategories
+    if (remote.employees) employees.value = remote.employees
+
+    if (remote.customers) customers.value = remote.customers
+    if (remote.bookings) bookings.value = remote.bookings
+    if (remote.refunds) refunds.value = remote.refunds
+    if (remote.jobAssignments) jobAssignments.value = remote.jobAssignments
+    if (remote.catalog) catalog.value = remote.catalog
+    if (remote.invoices) invoices.value = normalizeInvoices(remote.invoices, catalog.value)
+    if (remote.payments) payments.value = remote.payments
+    if (remote.expenses) expenses.value = remote.expenses
+    if (remote.inventory) inventory.value = normalizeInventory(remote.inventory)
+    if (remote.movements) movements.value = remote.movements
+    if (remote.stockOpnames) stockOpnames.value = remote.stockOpnames
+    if (remote.weddingAttire) weddingAttire.value = normalizeWeddingAttire(remote.weddingAttire)
+    if (remote.weddingForms) weddingForms.value = normalizeWeddingForms(remote.weddingForms)
+
+    return remote.hasRemoteData
+  }
+
+  const syncLocalDataToDatabase = async () => {
+    await pushSnapshotToSupabase({
+      businessProfile: businessProfile.value,
+      paymentMethods: paymentMethods.value,
+      poExpenseCategories: poExpenseCategories.value,
+      generalExpenseCategories: generalExpenseCategories.value,
+      employees: employees.value,
+      customers: customers.value,
+      bookings: bookings.value,
+      refunds: refunds.value,
+      jobAssignments: jobAssignments.value,
+      catalog: catalog.value,
+      invoices: invoices.value,
+      payments: payments.value,
+      expenses: expenses.value,
+      inventory: inventory.value,
+      movements: movements.value,
+      stockOpnames: stockOpnames.value,
+      weddingAttire: weddingAttire.value,
+      weddingForms: weddingForms.value,
+      bookingTotal,
+      bookingPaid,
+      bookingBalance,
+    })
+    addActivity('Sinkronisasi ke Supabase selesai', 'Seluruh data lokal tersimpan ke database Supabase', 'green')
+  }
+
+  if (typeof window !== 'undefined' && import.meta.env.MODE !== 'test') {
+    void hydrateFromSupabase()
   }
 
   const resetDemo = () => {
@@ -1707,7 +1882,7 @@ export const useCrmStore = defineStore('crm', () => {
   let persistenceTimer: ReturnType<typeof setTimeout> | undefined
 
   const persistSnapshot = () => {
-    if (typeof localStorage === 'undefined') return
+    if (isSupabaseMode || typeof localStorage === 'undefined') return
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       customers: customers.value, bookings: bookings.value, catalog: catalog.value, invoices: invoices.value,
       payments: payments.value, refunds: refunds.value, inventory: inventory.value, movements: movements.value, stockOpnames: stockOpnames.value,
@@ -1719,7 +1894,7 @@ export const useCrmStore = defineStore('crm', () => {
   }
 
   const schedulePersistence = () => {
-    if (typeof window === 'undefined') return
+    if (isSupabaseMode || typeof window === 'undefined') return
     if (persistenceTimer) clearTimeout(persistenceTimer)
     persistenceTimer = setTimeout(() => {
       persistenceTimer = undefined
@@ -1728,11 +1903,13 @@ export const useCrmStore = defineStore('crm', () => {
     }, 180)
   }
 
-  watch([customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms, employees, jobAssignments, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories], () => {
-    schedulePersistence()
-  }, { deep: true })
+  if (!isSupabaseMode) {
+    watch([customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms, employees, jobAssignments, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories], () => {
+      schedulePersistence()
+    }, { deep: true })
+  }
 
-  if (typeof window !== 'undefined') {
+  if (!isSupabaseMode && typeof window !== 'undefined') {
     window.addEventListener('pagehide', persistSnapshot)
   }
 
@@ -1748,5 +1925,6 @@ export const useCrmStore = defineStore('crm', () => {
     addWeddingAttire, updateWeddingAttire, updateWeddingAttireStatus, saveWeddingForm, deleteWeddingForm,
     addEmployee, updateEmployee, toggleEmployeeStatus, jobForBooking, assignedEmployeesForBooking, toggleBookingEmployee, setBookingJobNotes,
     updateBusinessProfile, addDropdownOption, updateDropdownOption, removeDropdownOption, resetDemo,
+    dbSyncState: supabaseSyncState, refreshFromDatabase: hydrateFromSupabase, syncLocalDataToDatabase,
   }
 })

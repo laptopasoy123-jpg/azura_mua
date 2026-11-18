@@ -39,6 +39,7 @@ export const filePurposeSchema = z.enum([
   'avatar',
   'business-asset',
   'wedding-attire',
+  'business-logo',
 ])
 
 export type CreateBookingInput = z.infer<typeof createBookingSchema>

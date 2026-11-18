@@ -179,6 +179,16 @@ const closeMobile = () => { mobileOpen.value = false }
             <input type="search" placeholder="Cari PO, customer, invoice…" />
             <kbd>⌘ K</kbd>
           </label>
+          <button
+            type="button"
+            class="topbar-db-pill"
+            :class="store.dbSyncState.connected ? 'is-online' : 'is-local'"
+            :title="store.dbSyncState.lastError || (store.dbSyncState.connected ? 'Terhubung ke Supabase — klik untuk tarik data ulang' : 'Mode lokal — klik untuk tarik data Supabase')"
+            @click="store.refreshFromDatabase()"
+          >
+            <i class="db-dot" />
+            <span>{{ store.dbSyncState.syncing ? 'Sync…' : (store.dbSyncState.connected ? 'DB Live' : 'DB Lokal') }}</span>
+          </button>
           <button class="icon-button notification-button" aria-label="Notifikasi" @click="showNotifications = true"><Bell :size="19" /><i /></button>
           <div class="profile-chip">
             <div class="profile-avatar">AR</div>
@@ -188,10 +198,10 @@ const closeMobile = () => { mobileOpen.value = false }
       </header>
 
       <main class="page-area">
-        <RouterView v-slot="{ Component }">
-          <Transition name="page-fade" mode="out-in">
-            <component :is="Component" :key="route.fullPath" />
-          </Transition>
+        <RouterView v-slot="{ Component, route: currentRoute }">
+          <div :key="currentRoute.fullPath" class="page-enter-anim">
+            <component :is="Component" v-if="Component" />
+          </div>
         </RouterView>
         <footer class="workspace-footer">
           <a href="https://daysheet.id" target="_blank" rel="noopener noreferrer" class="daysheet-copyright-link">

@@ -14,6 +14,8 @@ import {
   Receipt,
   Check,
   X,
+  Database,
+  RefreshCw,
 } from '@lucide/vue'
 import { useCrmStore, type DropdownOptionGroup, type EmployeeRecord } from '../stores/crm'
 import { uploadImageWithFallback } from '../utils/uploadImage'
@@ -185,6 +187,28 @@ const handleRemoveOption = (group: DropdownOptionGroup, label: string) => {
     dropdownFeedback.value = err instanceof Error ? err.message : 'Gagal menghapus opsi.'
   }
 }
+
+const syncFeedback = ref('')
+
+const handlePullFromDb = async () => {
+  syncFeedback.value = ''
+  const pulled = await store.refreshFromDatabase()
+  syncFeedback.value = store.dbSyncState.lastError
+    ? `Gagal: ${store.dbSyncState.lastError}`
+    : (pulled
+        ? 'Seluruh data terbaru berhasil ditarik langsung dari Supabase.'
+        : 'Terhubung ke Supabase. Saat ini seluruh tabel di database masih kosong (0 baris).')
+}
+
+const handlePushToDb = async () => {
+  syncFeedback.value = ''
+  try {
+    await store.syncLocalDataToDatabase()
+    syncFeedback.value = 'Seluruh data saat ini berhasil disimpan ke database Supabase.'
+  } catch (err) {
+    syncFeedback.value = err instanceof Error ? err.message : 'Gagal mengirim data ke Supabase.'
+  }
+}
 </script>
 
 <template>
@@ -260,6 +284,27 @@ const handleRemoveOption = (group: DropdownOptionGroup, label: string) => {
         <small class="brand-preview-tagline">{{ profileForm.tagline || 'MAKEUP ARTIST' }}</small>
         <p>{{ profileForm.address }}</p>
         <span>{{ profileForm.phone }} · {{ profileForm.email }}</span>
+
+        <div class="db-sync-box">
+          <div class="db-sync-head">
+            <Database :size="15" />
+            <strong>Database Supabase</strong>
+            <span class="db-sync-pill" :class="store.dbSyncState.connected ? 'is-online' : 'is-offline'">
+              {{ store.dbSyncState.syncing ? 'Sinkronisasi…' : (store.dbSyncState.connected ? 'Terhubung' : 'Lokal') }}
+            </span>
+          </div>
+          <small v-if="store.dbSyncState.lastSyncedAt" class="db-sync-time">
+            Sinkron terakhir: {{ new Date(store.dbSyncState.lastSyncedAt).toLocaleTimeString('id-ID') }}
+          </small>
+          <p v-if="syncFeedback || store.dbSyncState.lastError" class="db-sync-msg">
+            {{ syncFeedback || store.dbSyncState.lastError }}
+          </p>
+          <div class="db-sync-actions">
+            <button type="button" class="primary-button" :disabled="store.dbSyncState.syncing" @click="handlePullFromDb">
+              <RefreshCw :size="14" :class="{ spin: store.dbSyncState.syncing }" />Tarik Ulang dari Supabase
+            </button>
+          </div>
+        </div>
       </aside>
     </section>
 

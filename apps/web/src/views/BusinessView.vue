@@ -92,15 +92,9 @@ interface ExpenseLine {
   amount: number
 }
 
-const expenseCategoryOptions = computed(() =>
-  expense.expenseScope === 'Berdasarkan PO'
-    ? store.poExpenseCategories
-    : store.generalExpenseCategories,
-)
-
-const createExpenseLine = (category?: string): ExpenseLine => ({
+const createExpenseLine = (category = store.poExpenseCategories[0] ?? 'Transportasi'): ExpenseLine => ({
   key: crypto.randomUUID(),
-  category: category ?? expenseCategoryOptions.value[0] ?? 'Operasional',
+  category,
   description: '',
   amount: 0,
 })
@@ -120,6 +114,12 @@ const expense = reactive<{
   proofImageUrl: '',
   items: [createExpenseLine()],
 })
+
+const expenseCategoryOptions = computed(() =>
+  expense.expenseScope === 'Berdasarkan PO'
+    ? store.poExpenseCategories
+    : store.generalExpenseCategories,
+)
 const expenseBatchTotal = computed(() =>
   expense.items.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0),
 )

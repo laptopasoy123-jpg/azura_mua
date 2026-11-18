@@ -101,6 +101,7 @@ function purposePrefix(purpose: FilePurpose) {
     avatar: 'avatars',
     'business-asset': 'business',
     'wedding-attire': 'wedding-attire',
+    'business-logo': 'business-logo',
   }[purpose]
 }
 
@@ -163,7 +164,7 @@ app.post('/api/files', async (c) => {
     const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SECRET_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
-    await supabase.from('file_objects').insert({
+    await supabase.from('pengaturan_file').insert({
       id,
       bucket: visibility,
       object_key: key,

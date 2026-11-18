@@ -13,6 +13,7 @@
   "dependencies": {
     "@azura/contracts": "*",
     "@lucide/vue": "^1.73.0",
+    "@supabase/supabase-js": "^2.119.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",
     "pinia": "^3.0.4",
