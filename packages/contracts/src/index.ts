@@ -9,12 +9,15 @@ export const bookingStatusSchema = z.enum([
 
 export const paymentMethodSchema = z.enum(['cash', 'transfer', 'qris', 'other'])
 
+export const stylingTypeSchema = z.enum(['Hijabdo', 'Hairdo'])
+
 export const createBookingSchema = z.object({
   customerName: z.string().trim().min(2).max(120),
   phone: z.string().trim().min(8).max(30),
   eventLocation: z.string().trim().min(2).max(240),
   eventDate: z.iso.date(),
   eventTime: z.string().optional(),
+  stylingType: stylingTypeSchema.optional(),
   address: z.string().trim().max(500).optional(),
   notes: z.string().trim().max(1000).optional(),
 })
@@ -41,6 +44,7 @@ export const filePurposeSchema = z.enum([
 export type CreateBookingInput = z.infer<typeof createBookingSchema>
 export type RecordPaymentInput = z.infer<typeof recordPaymentSchema>
 export type FilePurpose = z.infer<typeof filePurposeSchema>
+export type StylingType = z.infer<typeof stylingTypeSchema>
 
 export type ApiResult<T> =
   | { ok: true; data: T }

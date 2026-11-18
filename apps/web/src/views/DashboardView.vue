@@ -10,9 +10,9 @@ import {
 
 const store = useCrmStore()
 const kpis = computed(() => [
-  { label: 'Booking aktif', value: store.upcomingBookings.length, note: '+2 dari bulan lalu', icon: CalendarCheck, tone: 'sage', trend: 'up' },
-  { label: 'Total tagihan', value: formatCurrency(store.totalBilling), note: '3 invoice diterbitkan', icon: CircleDollarSign, tone: 'blue', trend: 'up' },
-  { label: 'Pembayaran diterima', value: formatCurrency(store.totalPaid), note: 'Basis kas periode ini', icon: WalletCards, tone: 'violet', trend: 'up' },
+  { label: 'Pemesanan aktif', value: store.upcomingBookings.length, note: `${store.bookings.filter((b) => b.status !== 'Dibatalkan').length} pesanan aktif`, icon: CalendarCheck, tone: 'sage', trend: 'up' },
+  { label: 'Total tagihan', value: formatCurrency(store.totalBilling), note: `${store.invoices.length} faktur diterbitkan`, icon: CircleDollarSign, tone: 'blue', trend: 'up' },
+  { label: 'Arus kas bersih', value: formatCurrency(store.netCashflow), note: store.totalRefunds > 0 ? `Masuk ${formatCurrency(store.totalPaid)} · Pengembalian ${formatCurrency(store.totalRefunds)}` : `Masuk ${formatCurrency(store.totalPaid)} · Keluar ${formatCurrency(store.totalCashOut)}`, icon: WalletCards, tone: 'violet', trend: store.netCashflow >= 0 ? 'up' : 'down' },
   { label: 'Total piutang', value: formatCurrency(store.totalReceivable), note: 'Perlu ditindaklanjuti', icon: HandCoins, tone: 'amber', trend: 'down' },
 ])
 
@@ -67,7 +67,7 @@ const bookingPaymentStatus = (id: string) => {
     <section class="dashboard-grid">
       <article class="panel chart-panel">
         <header class="panel-header">
-          <div><span class="eyebrow">Keuangan</span><h3>Arus kas bulanan</h3><p>Pembayaran diterima dibanding pengeluaran</p></div>
+          <div><span class="eyebrow">Keuangan</span><h3>Arus kas bulanan</h3><p>Masuk {{ formatCurrency(store.totalPaid) }} · Pengeluaran {{ formatCurrency(store.totalExpenses) }} · Pengembalian {{ formatCurrency(store.totalRefunds) }}</p></div>
           <span class="soft-button">6 bulan terakhir</span>
         </header>
         <div class="chart-legend"><span><i class="legend-income" />Pembayaran</span><span><i class="legend-expense" />Pengeluaran</span></div>
@@ -80,7 +80,7 @@ const bookingPaymentStatus = (id: string) => {
       </article>
 
       <article class="panel invoice-summary">
-        <header class="panel-header"><div><span class="eyebrow">Invoice</span><h3>Status pembayaran</h3><p>{{ store.invoices.length }} invoice aktif</p></div></header>
+        <header class="panel-header"><div><span class="eyebrow">Faktur</span><h3>Status pembayaran</h3><p>{{ store.invoices.length }} faktur aktif</p></div></header>
         <div class="donut-wrap">
           <div class="donut" :style="{ '--paid': `${invoiceStatus.paid * 120}deg`, '--partial': `${(invoiceStatus.paid + invoiceStatus.partial) * 120}deg` }"><div><strong>{{ store.invoices.length }}</strong><span>Total</span></div></div>
         </div>
@@ -107,7 +107,7 @@ const bookingPaymentStatus = (id: string) => {
       </article>
 
       <article class="panel alert-panel">
-        <header class="panel-header"><div><span class="eyebrow">Inventory</span><h3>Perlu perhatian</h3></div><RouterLink to="/inventory" class="text-link">Buka inventory</RouterLink></header>
+        <header class="panel-header"><div><span class="eyebrow">Inventaris</span><h3>Perlu perhatian</h3></div><RouterLink to="/inventory" class="text-link">Buka inventaris</RouterLink></header>
         <div class="stock-list">
           <div v-for="item in store.lowStock" :key="item.id" class="stock-alert-row">
             <span class="stock-icon"><PackageSearch :size="19" /></span>

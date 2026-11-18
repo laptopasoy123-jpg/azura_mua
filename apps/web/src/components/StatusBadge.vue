@@ -4,8 +4,8 @@ import { computed } from 'vue'
 const props = defineProps<{ label: string }>()
 const tone = computed(() => {
   const value = props.label.toLowerCase()
-  if (['lunas', 'aktif', 'aman', 'selesai', 'terkonfirmasi'].some((item) => value.includes(item))) return 'success'
-  if (['sebagian', 'menipis', 'draft', 'belum ada tagihan'].some((item) => value.includes(item))) return 'warning'
+  if (['lunas', 'aktif', 'aman', 'selesai', 'terkonfirmasi', 'tersedia', 'sesuai'].some((item) => value.includes(item))) return 'success'
+  if (['sebagian', 'menipis', 'draft', 'belum ada tagihan', 'terpakai'].some((item) => value.includes(item))) return 'warning'
   if (['belum dibayar', 'habis', 'dibatalkan', 'nonaktif', 'jatuh tempo'].some((item) => value.includes(item))) return 'danger'
   return 'info'
 })

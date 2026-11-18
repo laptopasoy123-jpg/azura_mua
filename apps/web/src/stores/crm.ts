@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { uid } from '../utils/format'
 
 export type BookingStatus = 'Draft' | 'Terkonfirmasi' | 'Selesai' | 'Dibatalkan'
+export type StylingType = 'Hijabdo' | 'Hairdo'
 export type CatalogType = 'Inti' | 'Additional'
 
 export interface Customer {
@@ -18,9 +19,67 @@ export interface Booking {
   location: string
   eventDate: string
   eventTime?: string
+  stylingType?: StylingType
   notes?: string
   status: BookingStatus
+  cancelledPaidAmount?: number
   createdAt: string
+}
+
+export interface BookingRefund {
+  id: string
+  refundNumber: string
+  bookingId: string
+  poNumber: string
+  customerName: string
+  refundDate: string
+  amount: number
+  method: string
+  proofImageUrl?: string
+  notes?: string
+  createdAt: string
+}
+
+export type DropdownOptionGroup = 'paymentMethods' | 'poExpenseCategories' | 'generalExpenseCategories'
+
+export interface EmployeeRecord {
+  id: string
+  name: string
+  role: string
+  phone?: string
+  email?: string
+  active: boolean
+  lastLogin?: string
+}
+
+export interface JobAssignment {
+  bookingId: string
+  employeeIds: string[]
+  notes?: string
+  updatedAt: string
+}
+
+export interface BusinessProfile {
+  name: string
+  tagline: string
+  phone: string
+  email: string
+  address: string
+  invoiceNote: string
+  logoUrl?: string
+}
+
+export interface LaundryUrgentAlert {
+  attireId: string
+  attireName: string
+  attireCode: string
+  bookingId: string
+  poNumber: string
+  customerName: string
+  eventDate: string
+  eventName: string
+  daysLeft: number
+  message: string
 }
 
 export interface CatalogItem {
@@ -37,10 +96,21 @@ export interface CatalogItem {
 
 export interface InvoiceItem {
   id: string
+  catalogItemId?: string
+  serviceType?: CatalogType
   name: string
   quantity: number
   unitPrice: number
   catalogPrice: number
+  unit?: string
+}
+
+export interface OrderGroup {
+  id: string
+  kind: 'Awal' | 'Tambahan'
+  orderDate: string
+  createdAt: string
+  items: InvoiceItem[]
 }
 
 export interface Invoice {
@@ -50,6 +120,7 @@ export interface Invoice {
   kind: 'Utama' | 'Additional'
   issuedAt: string
   dueDate?: string
+  groups: OrderGroup[]
   items: InvoiceItem[]
 }
 
@@ -58,7 +129,7 @@ export interface Payment {
   receiptNumber: string
   bookingId: string
   paidAt: string
-  method: 'Cash' | 'Transfer' | 'QRIS' | 'Lainnya'
+  method: string
   amount: number
   notes?: string
 }
@@ -72,6 +143,7 @@ export interface InventoryItem {
   initialStock: number
   stockIn: number
   stockOut: number
+  stockAdjustment: number
   minimumStock: number
   location: string
   active: boolean
@@ -79,12 +151,36 @@ export interface InventoryItem {
 
 export interface StockMovement {
   id: string
+  batchId?: string
+  opnameId?: string
   itemId: string
-  type: 'Masuk' | 'Keluar'
+  type: 'Masuk' | 'Keluar' | 'Penyesuaian'
   quantity: number
   date: string
   pic: string
   notes?: string
+  proofImageUrl?: string
+}
+
+export interface StockOpnameItem {
+  itemId: string
+  itemName: string
+  itemCode: string
+  unit: string
+  systemStock: number
+  physicalStock: number
+  diff: number
+  notes?: string
+}
+
+export interface StockOpnameRecord {
+  id: string
+  opnameNumber: string
+  date: string
+  pic: string
+  notes?: string
+  items: StockOpnameItem[]
+  createdAt: string
 }
 
 export interface Expense {
@@ -94,6 +190,8 @@ export interface Expense {
   description: string
   amount: number
   bookingId?: string
+  expenseScope?: 'Berdasarkan PO' | 'Di Luar PO'
+  proofImageUrl?: string
   method: string
 }
 
@@ -106,7 +204,7 @@ export interface Activity {
 }
 
 export type AttireCategory = 'Bride' | 'Groom'
-export type AttireStatus = 'Tersedia' | 'Booked' | 'Laundry'
+export type AttireStatus = 'Tersedia' | 'Terpakai' | 'Laundry'
 
 export interface WeddingAttire {
   id: string
@@ -117,6 +215,18 @@ export interface WeddingAttire {
   status: AttireStatus
   imageUrl?: string
   notes?: string
+}
+
+export interface AttireScheduleEntry {
+  bookingId: string
+  poNumber: string
+  customerName: string
+  eventDate: string
+  eventLocation: string
+  eventNumber: 1 | 2 | 3
+  eventName: string
+  role: 'Bride' | 'Groom'
+  bookingStatus: BookingStatus
 }
 
 export interface WeddingLookDetail {
@@ -130,6 +240,7 @@ export interface WeddingEventDetail {
   number: 1 | 2 | 3
   name: string
   readyTime: string
+  timeNote: string
   bride: WeddingLookDetail
   groom: WeddingLookDetail
 }
@@ -140,11 +251,151 @@ export interface WeddingFittingForm {
   measurements: Record<string, Record<string, string>>
   events: WeddingEventDetail[]
   uniforms: Record<string, string>
+  manggoloBlangkon: number | null
+  manggoloSlop: number | null
   vendors: Record<string, string>
   updatedAt: string
 }
 
 const STORAGE_KEY = 'azura-mua-demo-v1'
+
+const sortGroupsChronologically = (groups: OrderGroup[]): OrderGroup[] =>
+  [...groups].sort((a, b) => {
+    const byDate = a.orderDate.localeCompare(b.orderDate)
+    if (byDate !== 0) return byDate
+    if (a.kind !== b.kind) return a.kind === 'Awal' ? -1 : 1
+    return a.createdAt.localeCompare(b.createdAt)
+  })
+
+const resolveServiceType = (item: InvoiceItem, catalog: CatalogItem[]): CatalogType => {
+  if (item.serviceType === 'Inti' || item.serviceType === 'Additional') return item.serviceType
+  const found = catalog.find((c) => c.id === item.catalogItemId || c.name.toLowerCase() === item.name.toLowerCase())
+  return found?.type ?? 'Additional'
+}
+
+const normalizeInvoices = (rawInvoices: Invoice[], catalog: CatalogItem[]): Invoice[] => {
+  const byBooking = new Map<string, Invoice>()
+  for (const inv of rawInvoices) {
+    const rawGroups: OrderGroup[] = Array.isArray(inv.groups) && inv.groups.length
+      ? inv.groups.map((g) => ({
+          ...g,
+          createdAt: g.createdAt || `${g.orderDate}T00:00:00.000Z`,
+          items: (g.items ?? []).map((it) => ({
+            ...it,
+            serviceType: resolveServiceType(it, catalog),
+          })),
+        }))
+      : [
+          {
+            id: uid(),
+            kind: inv.kind === 'Additional' ? 'Tambahan' : 'Awal',
+            orderDate: inv.issuedAt,
+            createdAt: `${inv.issuedAt}T00:00:00.000Z`,
+            items: (inv.items ?? []).map((it) => ({
+              ...it,
+              serviceType: resolveServiceType(it, catalog),
+            })),
+          },
+        ]
+
+    const existing = byBooking.get(inv.bookingId)
+    if (!existing) {
+      const sorted = sortGroupsChronologically(rawGroups)
+      byBooking.set(inv.bookingId, {
+        ...inv,
+        kind: 'Utama',
+        groups: sorted,
+        items: sorted.flatMap((g) => g.items),
+      })
+    } else {
+      const merged = sortGroupsChronologically([...existing.groups, ...rawGroups])
+      if (inv.kind === 'Utama' && existing.kind !== 'Utama') {
+        existing.invoiceNumber = inv.invoiceNumber
+        existing.issuedAt = inv.issuedAt
+        existing.dueDate = inv.dueDate ?? existing.dueDate
+      }
+      existing.groups = merged
+      existing.items = merged.flatMap((g) => g.items)
+    }
+  }
+  return Array.from(byBooking.values())
+}
+
+const hasEventContent = (event: Partial<WeddingEventDetail>) =>
+  Boolean(
+    event.name?.trim()
+    || event.readyTime?.trim()
+    || event.timeNote?.trim()
+    || event.bride?.attireId
+    || event.bride?.look?.trim()
+    || event.bride?.accessories?.trim()
+    || event.bride?.shoes?.trim()
+    || event.groom?.attireId
+    || event.groom?.look?.trim()
+    || event.groom?.accessories?.trim()
+    || event.groom?.shoes?.trim(),
+  )
+
+const normalizeWeddingForms = (forms: WeddingFittingForm[]): WeddingFittingForm[] =>
+  forms.map((form) => {
+    const normalizedEvents = (form.events ?? []).map((ev, idx) => ({
+      number: (ev.number ?? (idx + 1)) as 1 | 2 | 3,
+      name: ev.name ?? '',
+      readyTime: ev.readyTime ?? '',
+      timeNote: ev.timeNote ?? '',
+      bride: {
+        look: ev.bride?.look ?? '',
+        accessories: ev.bride?.accessories ?? '',
+        shoes: ev.bride?.shoes ?? '',
+        attireId: ev.bride?.attireId ?? '',
+      },
+      groom: {
+        look: ev.groom?.look ?? '',
+        accessories: ev.groom?.accessories ?? '',
+        shoes: ev.groom?.shoes ?? '',
+        attireId: ev.groom?.attireId ?? '',
+      },
+    }))
+
+    let highestNonEmpty = 1
+    for (let i = normalizedEvents.length - 1; i >= 1; i -= 1) {
+      if (hasEventContent(normalizedEvents[i]!)) {
+        highestNonEmpty = i + 1
+        break
+      }
+    }
+    const visibleEvents = normalizedEvents.length
+      ? normalizedEvents.slice(0, highestNonEmpty)
+      : [
+          {
+            number: 1 as const,
+            name: '',
+            readyTime: '',
+            timeNote: '',
+            bride: { look: '', accessories: '', shoes: '', attireId: '' },
+            groom: { look: '', accessories: '', shoes: '', attireId: '' },
+          },
+        ]
+
+    return {
+      ...form,
+      events: visibleEvents,
+      manggoloBlangkon: typeof form.manggoloBlangkon === 'number' ? form.manggoloBlangkon : null,
+      manggoloSlop: typeof form.manggoloSlop === 'number' ? form.manggoloSlop : null,
+    }
+  })
+
+const normalizeWeddingAttire = (items: Array<Omit<WeddingAttire, 'status'> & { status: string }>): WeddingAttire[] =>
+  items.map((item) => ({
+    ...item,
+    status: item.status === 'Booked' ? 'Terpakai' : (item.status === 'Laundry' ? 'Laundry' : (item.status === 'Terpakai' ? 'Terpakai' : 'Tersedia')),
+  }))
+
+const normalizeInventory = (items: Array<Partial<InventoryItem> & Omit<InventoryItem, 'stockAdjustment'>>): InventoryItem[] =>
+  items.map((item) => ({
+    ...item,
+    stockAdjustment: typeof item.stockAdjustment === 'number' ? item.stockAdjustment : 0,
+  }))
 
 const seed = () => {
   const customers: Customer[] = [
@@ -154,10 +405,10 @@ const seed = () => {
     { id: 'c-4', name: 'Salsa Azzahra', phone: '0822 4331 2209' },
   ]
   const bookings: Booking[] = [
-    { id: 'b-1', poNumber: 'PO-2026-0001', customerId: 'c-1', location: 'The Langham Jakarta', eventDate: '2026-11-22', eventTime: '05:30', status: 'Terkonfirmasi', createdAt: '2026-10-03' },
-    { id: 'b-2', poNumber: 'PO-2026-0002', customerId: 'c-2', location: 'InterContinental Bandung', eventDate: '2026-12-06', eventTime: '06:00', status: 'Terkonfirmasi', createdAt: '2026-10-11' },
-    { id: 'b-3', poNumber: 'PO-2026-0003', customerId: 'c-3', location: 'Gedung Smesco Jakarta', eventDate: '2026-11-28', eventTime: '07:00', status: 'Draft', createdAt: '2026-11-01' },
-    { id: 'b-4', poNumber: 'PO-2026-0004', customerId: 'c-4', location: 'Royal Tulip Bogor', eventDate: '2026-12-19', eventTime: '05:00', status: 'Terkonfirmasi', createdAt: '2026-11-08' },
+    { id: 'b-1', poNumber: 'PO-2026-0001', customerId: 'c-1', location: 'The Langham Jakarta', eventDate: '2026-11-22', eventTime: '05:30', stylingType: 'Hijabdo', status: 'Terkonfirmasi', createdAt: '2026-10-03' },
+    { id: 'b-2', poNumber: 'PO-2026-0002', customerId: 'c-2', location: 'InterContinental Bandung', eventDate: '2026-12-06', eventTime: '06:00', stylingType: 'Hairdo', status: 'Terkonfirmasi', createdAt: '2026-10-11' },
+    { id: 'b-3', poNumber: 'PO-2026-0003', customerId: 'c-3', location: 'Gedung Smesco Jakarta', eventDate: '2026-11-28', eventTime: '07:00', stylingType: 'Hijabdo', status: 'Draft', createdAt: '2026-11-01' },
+    { id: 'b-4', poNumber: 'PO-2026-0004', customerId: 'c-4', location: 'Royal Tulip Bogor', eventDate: '2026-12-19', eventTime: '05:00', stylingType: 'Hairdo', status: 'Terkonfirmasi', createdAt: '2026-11-08' },
   ]
   const catalog: CatalogItem[] = [
     { id: 'cat-1', code: 'CAT-0001', name: 'Makeup Wedding', type: 'Inti', description: 'Complete bridal makeup dengan complexion tahan lama.', price: 2500000, unit: 'orang', active: true },
@@ -167,81 +418,200 @@ const seed = () => {
     { id: 'cat-5', code: 'CAT-0005', name: 'Hairdo', type: 'Additional', description: 'Hair styling menyesuaikan konsep acara.', price: 350000, unit: 'orang', active: true },
     { id: 'cat-6', code: 'CAT-0006', name: 'Touch Up', type: 'Additional', description: 'Pendampingan dan touch up selama acara.', price: 600000, unit: 'sesi', active: true },
   ]
-  const invoices: Invoice[] = [
-    { id: 'inv-1', invoiceNumber: 'INV-2026-0001', bookingId: 'b-1', kind: 'Utama', issuedAt: '2026-10-03', dueDate: '2026-11-19', items: [
-      { id: 'ii-1', name: 'Makeup Wedding', quantity: 1, catalogPrice: 2500000, unitPrice: 2300000 },
-      { id: 'ii-2', name: 'Makeup Keluarga', quantity: 2, catalogPrice: 500000, unitPrice: 450000 },
-    ] },
-    { id: 'inv-2', invoiceNumber: 'INV-2026-0002', bookingId: 'b-2', kind: 'Utama', issuedAt: '2026-10-11', dueDate: '2026-12-01', items: [
-      { id: 'ii-3', name: 'Makeup Wedding', quantity: 1, catalogPrice: 2500000, unitPrice: 2500000 },
-      { id: 'ii-4', name: 'Hairdo', quantity: 1, catalogPrice: 350000, unitPrice: 350000 },
-    ] },
-    { id: 'inv-3', invoiceNumber: 'INV-2026-0003', bookingId: 'b-4', kind: 'Utama', issuedAt: '2026-11-08', dueDate: '2026-12-12', items: [
-      { id: 'ii-5', name: 'Makeup Engagement', quantity: 1, catalogPrice: 1500000, unitPrice: 1400000 },
-    ] },
+
+  const inv1Items: InvoiceItem[] = [
+    { id: 'ii-1', catalogItemId: 'cat-1', serviceType: 'Inti', name: 'Makeup Wedding', quantity: 1, catalogPrice: 2500000, unitPrice: 2300000, unit: 'orang' },
+    { id: 'ii-2', catalogItemId: 'cat-4', serviceType: 'Additional', name: 'Makeup Keluarga', quantity: 2, catalogPrice: 500000, unitPrice: 450000, unit: 'orang' },
   ]
+  const inv2Items: InvoiceItem[] = [
+    { id: 'ii-3', catalogItemId: 'cat-1', serviceType: 'Inti', name: 'Makeup Wedding', quantity: 1, catalogPrice: 2500000, unitPrice: 2500000, unit: 'orang' },
+    { id: 'ii-4', catalogItemId: 'cat-5', serviceType: 'Additional', name: 'Hairdo', quantity: 1, catalogPrice: 350000, unitPrice: 350000, unit: 'orang' },
+  ]
+  const inv3Items: InvoiceItem[] = [
+    { id: 'ii-5', catalogItemId: 'cat-2', serviceType: 'Inti', name: 'Makeup Engagement', quantity: 1, catalogPrice: 1500000, unitPrice: 1400000, unit: 'orang' },
+  ]
+
+  const invoices: Invoice[] = [
+    {
+      id: 'inv-1',
+      invoiceNumber: 'INV-2026-0001',
+      bookingId: 'b-1',
+      kind: 'Utama',
+      issuedAt: '2026-10-03',
+      dueDate: '2026-11-19',
+      groups: [{ id: 'og-1', kind: 'Awal', orderDate: '2026-10-03', createdAt: '2026-10-03T09:00:00.000Z', items: inv1Items }],
+      items: inv1Items,
+    },
+    {
+      id: 'inv-2',
+      invoiceNumber: 'INV-2026-0002',
+      bookingId: 'b-2',
+      kind: 'Utama',
+      issuedAt: '2026-10-11',
+      dueDate: '2026-12-01',
+      groups: [{ id: 'og-2', kind: 'Awal', orderDate: '2026-10-11', createdAt: '2026-10-11T09:00:00.000Z', items: inv2Items }],
+      items: inv2Items,
+    },
+    {
+      id: 'inv-3',
+      invoiceNumber: 'INV-2026-0003',
+      bookingId: 'b-4',
+      kind: 'Utama',
+      issuedAt: '2026-11-08',
+      dueDate: '2026-12-12',
+      groups: [{ id: 'og-3', kind: 'Awal', orderDate: '2026-11-08', createdAt: '2026-11-08T09:00:00.000Z', items: inv3Items }],
+      items: inv3Items,
+    },
+  ]
+
   const payments: Payment[] = [
     { id: 'pay-1', receiptNumber: 'KWT-2026-0001', bookingId: 'b-1', paidAt: '2026-10-03', method: 'Transfer', amount: 1500000, notes: 'DP pertama' },
     { id: 'pay-2', receiptNumber: 'KWT-2026-0002', bookingId: 'b-2', paidAt: '2026-10-13', method: 'QRIS', amount: 2850000, notes: 'Pelunasan' },
     { id: 'pay-3', receiptNumber: 'KWT-2026-0003', bookingId: 'b-4', paidAt: '2026-11-08', method: 'Transfer', amount: 500000, notes: 'DP' },
   ]
   const inventory: InventoryItem[] = [
-    { id: 'stock-1', code: 'BRG-0001', name: 'Foundation HD', category: 'Complexion', unit: 'botol', initialStock: 6, stockIn: 8, stockOut: 5, minimumStock: 4, location: 'Drawer A1', active: true },
-    { id: 'stock-2', code: 'BRG-0002', name: 'Setting Spray', category: 'Finishing', unit: 'botol', initialStock: 3, stockIn: 3, stockOut: 4, minimumStock: 3, location: 'Drawer A2', active: true },
-    { id: 'stock-3', code: 'BRG-0003', name: 'False Lashes', category: 'Accessories', unit: 'pasang', initialStock: 12, stockIn: 20, stockOut: 14, minimumStock: 8, location: 'Box B1', active: true },
-    { id: 'stock-4', code: 'BRG-0004', name: 'Cleansing Balm', category: 'Skin Prep', unit: 'jar', initialStock: 2, stockIn: 2, stockOut: 3, minimumStock: 2, location: 'Drawer A3', active: true },
-    { id: 'stock-5', code: 'BRG-0005', name: 'Beauty Sponge', category: 'Tools', unit: 'pcs', initialStock: 10, stockIn: 10, stockOut: 8, minimumStock: 5, location: 'Box B2', active: true },
+    { id: 'stock-1', code: 'BRG-0001', name: 'Foundation HD', category: 'Complexion', unit: 'botol', initialStock: 6, stockIn: 8, stockOut: 5, stockAdjustment: 0, minimumStock: 4, location: 'Drawer A1', active: true },
+    { id: 'stock-2', code: 'BRG-0002', name: 'Setting Spray', category: 'Finishing', unit: 'botol', initialStock: 3, stockIn: 3, stockOut: 4, stockAdjustment: 0, minimumStock: 3, location: 'Drawer A2', active: true },
+    { id: 'stock-3', code: 'BRG-0003', name: 'False Lashes', category: 'Accessories', unit: 'pasang', initialStock: 12, stockIn: 20, stockOut: 14, stockAdjustment: 0, minimumStock: 8, location: 'Box B1', active: true },
+    { id: 'stock-4', code: 'BRG-0004', name: 'Cleansing Balm', category: 'Skin Prep', unit: 'jar', initialStock: 2, stockIn: 2, stockOut: 3, stockAdjustment: 0, minimumStock: 2, location: 'Drawer A3', active: true },
+    { id: 'stock-5', code: 'BRG-0005', name: 'Beauty Sponge', category: 'Tools', unit: 'pcs', initialStock: 10, stockIn: 10, stockOut: 8, stockAdjustment: 0, minimumStock: 5, location: 'Box B2', active: true },
   ]
   const movements: StockMovement[] = [
-    { id: 'mov-1', itemId: 'stock-1', type: 'Keluar', quantity: 2, date: '2026-11-14', pic: 'Nisa', notes: 'Studio session' },
-    { id: 'mov-2', itemId: 'stock-3', type: 'Masuk', quantity: 10, date: '2026-11-13', pic: 'Rani', notes: 'Restock supplier' },
+    { id: 'mov-1', batchId: 'batch-seed-1', itemId: 'stock-1', type: 'Keluar', quantity: 2, date: '2026-11-14', pic: 'Nisa', notes: 'Studio session' },
+    { id: 'mov-2', batchId: 'batch-seed-2', itemId: 'stock-3', type: 'Masuk', quantity: 10, date: '2026-11-13', pic: 'Rani', notes: 'Restock supplier' },
   ]
+  const stockOpnames: StockOpnameRecord[] = []
   const expenses: Expense[] = [
     { id: 'exp-1', date: '2026-11-12', category: 'Transportasi', description: 'Transport venue Nadya', amount: 350000, bookingId: 'b-1', method: 'Transfer' },
     { id: 'exp-2', date: '2026-11-10', category: 'Operasional', description: 'Internet studio', amount: 450000, method: 'Transfer' },
     { id: 'exp-3', date: '2026-11-08', category: 'Honor Tim', description: 'Asisten makeup', amount: 600000, bookingId: 'b-4', method: 'Cash' },
   ]
   const activities: Activity[] = [
-    { id: 'act-1', at: '2026-11-15T14:28:00+07:00', title: 'Pembayaran diterima', detail: 'DP PO-2026-0004 sebesar Rp500.000', tone: 'green' },
+    { id: 'act-1', at: '2026-11-15T14:28:00+07:00', title: 'Pembayaran diterima', detail: 'DP PO-2026-0004 sebesar Rp. 500.000', tone: 'green' },
     { id: 'act-2', at: '2026-11-15T11:12:00+07:00', title: 'Stok diperbarui', detail: 'False Lashes bertambah 10 pasang', tone: 'blue' },
     { id: 'act-3', at: '2026-11-14T16:20:00+07:00', title: 'Booking dikonfirmasi', detail: 'PO-2026-0001 siap untuk acara', tone: 'amber' },
   ]
   const weddingAttire: WeddingAttire[] = [
     { id: 'attire-1', code: 'BTR-0001', name: 'Kebaya Sekar Arum', category: 'Bride', size: 'M', status: 'Tersedia' },
-    { id: 'attire-2', code: 'BTR-0002', name: 'Kebaya Ayu Ratih', category: 'Bride', size: 'L', status: 'Booked' },
+    { id: 'attire-2', code: 'BTR-0002', name: 'Kebaya Ayu Ratih', category: 'Bride', size: 'L', status: 'Tersedia' },
     { id: 'attire-3', code: 'BTR-0003', name: 'Paes Ageng Velvet', category: 'Bride', size: 'S', status: 'Laundry' },
     { id: 'attire-4', code: 'BTR-0004', name: 'Beskap Gading', category: 'Groom', size: 'L', status: 'Tersedia' },
     { id: 'attire-5', code: 'BTR-0005', name: 'Beskap Surjan Navy', category: 'Groom', size: 'XL', status: 'Tersedia' },
     { id: 'attire-6', code: 'BTR-0006', name: 'Beskap Klasik Hitam', category: 'Groom', size: 'M', status: 'Laundry' },
   ]
   const weddingForms: WeddingFittingForm[] = []
-  return { customers, bookings, catalog, invoices, payments, inventory, movements, expenses, activities, weddingAttire, weddingForms }
+  const refunds: BookingRefund[] = []
+  const employees: EmployeeRecord[] = [
+    { id: 'emp-1', name: 'Aura Rahma', role: 'Owner / Lead MUA', email: 'aura@azuramakeup.id', phone: '0812 9000 2026', active: true, lastLogin: 'Hari ini, 14:22' },
+    { id: 'emp-2', name: 'Nisa Amalia', role: 'Finance', email: 'nisa@azuramakeup.id', phone: '0812 8811 2201', active: true, lastLogin: 'Kemarin, 18:04' },
+    { id: 'emp-3', name: 'Rani Putri', role: 'Wardrobe & Inventory', email: 'rani@azuramakeup.id', phone: '0813 7711 9022', active: true, lastLogin: '13 Nov 2026' },
+    { id: 'emp-4', name: 'Sinta Dewi', role: 'MUA & Hairdo', email: 'sinta@azuramakeup.id', phone: '0857 2241 8810', active: true, lastLogin: '15 Nov 2026' },
+    { id: 'emp-5', name: 'Dina Kartika', role: 'Hijabdo Stylist', email: 'dina@azuramakeup.id', phone: '0821 6640 3190', active: true, lastLogin: '14 Nov 2026' },
+  ]
+  const jobAssignments: JobAssignment[] = [
+    { bookingId: 'b-1', employeeIds: ['emp-1', 'emp-5'], notes: 'Resepsi pagi di The Langham', updatedAt: '2026-11-12T09:00:00.000Z' },
+    { bookingId: 'b-2', employeeIds: ['emp-1', 'emp-4'], notes: 'Full day wedding Bandung', updatedAt: '2026-11-13T10:00:00.000Z' },
+    { bookingId: 'b-4', employeeIds: ['emp-4'], notes: 'Standby 04.30 WIB', updatedAt: '2026-11-14T11:00:00.000Z' },
+  ]
+  const businessProfile: BusinessProfile = {
+    name: 'AZURA',
+    tagline: 'MAKEUP ARTIST',
+    phone: '0812 9000 2026',
+    email: 'hello@azuramakeup.id',
+    address: 'Jakarta Selatan, DKI Jakarta',
+    invoiceNote: 'Terima kasih telah mempercayakan momen spesial Anda kepada Azura Makeup Studio.',
+    logoUrl: '',
+  }
+  const paymentMethods = ['Tunai', 'Transfer', 'QRIS', 'Lainnya']
+  const poExpenseCategories = ['Transportasi', 'Honor Tim', 'Akomodasi', 'Perlengkapan', 'Operasional']
+  const generalExpenseCategories = ['Operasional', 'Perlengkapan', 'Akomodasi', 'Transportasi', 'Honor Tim']
+  return { customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms, employees, jobAssignments, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories }
+}
+
+const localTodayIso = () => {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+const calendarDaysDiff = (fromIso: string, toIso: string) => {
+  const a = new Date(`${fromIso}T00:00:00`).getTime()
+  const b = new Date(`${toIso}T00:00:00`).getTime()
+  return Math.round((b - a) / 86_400_000)
 }
 
 export const useCrmStore = defineStore('crm', () => {
-  const saved = localStorage.getItem(STORAGE_KEY)
+  const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null
   const defaults = seed()
-  const initial: ReturnType<typeof seed> = saved ? { ...defaults, ...JSON.parse(saved) } : defaults
+  const parsed = saved ? JSON.parse(saved) as Partial<ReturnType<typeof seed>> : {}
+  const mergedCatalog = parsed.catalog ?? defaults.catalog
+  const initial: ReturnType<typeof seed> = {
+    ...defaults,
+    ...parsed,
+    catalog: mergedCatalog,
+    invoices: normalizeInvoices(parsed.invoices ?? defaults.invoices, mergedCatalog),
+    inventory: normalizeInventory(parsed.inventory ?? defaults.inventory),
+    weddingAttire: normalizeWeddingAttire(parsed.weddingAttire ?? defaults.weddingAttire),
+    weddingForms: normalizeWeddingForms(parsed.weddingForms ?? defaults.weddingForms),
+    stockOpnames: parsed.stockOpnames ?? defaults.stockOpnames,
+    refunds: parsed.refunds ?? defaults.refunds,
+  }
+
   const customers = ref(initial.customers)
   const bookings = ref(initial.bookings)
   const catalog = ref(initial.catalog)
   const invoices = ref(initial.invoices)
   const payments = ref(initial.payments)
+  const refunds = ref(initial.refunds)
   const inventory = ref(initial.inventory)
   const movements = ref(initial.movements)
+  const stockOpnames = ref(initial.stockOpnames)
   const expenses = ref(initial.expenses)
   const activities = ref(initial.activities)
   const weddingAttire = ref(initial.weddingAttire)
   const weddingForms = ref(initial.weddingForms)
+  const employees = ref(initial.employees ?? defaults.employees)
+  const jobAssignments = ref(initial.jobAssignments ?? defaults.jobAssignments)
+  const businessProfile = ref<BusinessProfile>({ ...defaults.businessProfile, ...(initial.businessProfile ?? {}) })
+  const paymentMethods = ref<string[]>(initial.paymentMethods?.length ? initial.paymentMethods : defaults.paymentMethods)
+  const poExpenseCategories = ref<string[]>(initial.poExpenseCategories?.length ? initial.poExpenseCategories : defaults.poExpenseCategories)
+  const generalExpenseCategories = ref<string[]>(initial.generalExpenseCategories?.length ? initial.generalExpenseCategories : defaults.generalExpenseCategories)
 
-  const invoiceTotal = (invoice: Invoice) => invoice.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+  const groupTotal = (group: OrderGroup) =>
+    group.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+
+  const sortedOrderGroups = (invoice: Invoice) =>
+    sortGroupsChronologically(invoice.groups ?? [])
+
+  const sortInvoiceItemsIntiFirst = (items: InvoiceItem[]): InvoiceItem[] =>
+    [...items].sort((a, b) => {
+      const typeA = resolveServiceType(a, catalog.value)
+      const typeB = resolveServiceType(b, catalog.value)
+      if (typeA === typeB) return 0
+      return typeA === 'Inti' ? -1 : 1
+    })
+
+  const invoiceTotal = (invoice: Invoice) => {
+    if (invoice.groups?.length) {
+      return invoice.groups.reduce((sum, group) => sum + groupTotal(group), 0)
+    }
+    return invoice.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+  }
+
   const bookingInvoices = (bookingId: string) => invoices.value.filter((invoice) => invoice.bookingId === bookingId)
+  const bookingInvoice = (bookingId: string) => invoices.value.find((invoice) => invoice.bookingId === bookingId)
+  const bookingPayments = (bookingId: string) =>
+    payments.value
+      .filter((payment) => payment.bookingId === bookingId)
+      .sort((a, b) => a.paidAt.localeCompare(b.paidAt))
   const bookingTotal = (bookingId: string) => bookingInvoices(bookingId).reduce((sum, invoice) => sum + invoiceTotal(invoice), 0)
   const bookingPaid = (bookingId: string) => payments.value.filter((payment) => payment.bookingId === bookingId).reduce((sum, payment) => sum + payment.amount, 0)
-  const bookingBalance = (bookingId: string) => Math.max(0, bookingTotal(bookingId) - bookingPaid(bookingId))
+  const bookingBalance = (bookingId: string) => bookingTotal(bookingId) - bookingPaid(bookingId)
   const customerFor = (id: string) => customers.value.find((customer) => customer.id === id)
   const bookingFor = (id: string) => bookings.value.find((booking) => booking.id === id)
-  const stockAvailable = (item: InventoryItem) => item.initialStock + item.stockIn - item.stockOut
+
+  const stockAvailable = (item: InventoryItem) =>
+    item.initialStock + item.stockIn - item.stockOut + (item.stockAdjustment ?? 0)
+
   const stockStatus = (item: InventoryItem) => {
     const available = stockAvailable(item)
     if (available <= 0) return 'Habis'
@@ -249,10 +619,113 @@ export const useCrmStore = defineStore('crm', () => {
     return 'Aman'
   }
 
+  const attireSchedule = (
+    attireId: string,
+    options?: { includePast?: boolean; includeCancelled?: boolean; referenceDate?: string },
+  ): AttireScheduleEntry[] => {
+    const refDate = options?.referenceDate ?? localTodayIso()
+    const includePast = options?.includePast ?? false
+    const includeCancelled = options?.includeCancelled ?? false
+    const entries: AttireScheduleEntry[] = []
+    for (const form of weddingForms.value) {
+      const booking = bookingFor(form.bookingId)
+      if (!booking) continue
+      if (!includeCancelled && booking.status === 'Dibatalkan') continue
+      if (!includePast && booking.eventDate < refDate) continue
+      const customer = customerFor(booking.customerId)
+      for (const ev of form.events ?? []) {
+        if (ev.bride?.attireId === attireId) {
+          entries.push({
+            bookingId: booking.id,
+            poNumber: booking.poNumber,
+            customerName: customer?.name ?? 'Customer',
+            eventDate: booking.eventDate,
+            eventLocation: booking.location,
+            eventNumber: ev.number,
+            eventName: ev.name || `Acara ${ev.number}`,
+            role: 'Bride',
+            bookingStatus: booking.status,
+          })
+        }
+        if (ev.groom?.attireId === attireId) {
+          entries.push({
+            bookingId: booking.id,
+            poNumber: booking.poNumber,
+            customerName: customer?.name ?? 'Customer',
+            eventDate: booking.eventDate,
+            eventLocation: booking.location,
+            eventNumber: ev.number,
+            eventName: ev.name || `Acara ${ev.number}`,
+            role: 'Groom',
+            bookingStatus: booking.status,
+          })
+        }
+      }
+    }
+    return entries.sort((a, b) => a.eventDate.localeCompare(b.eventDate))
+  }
+
+  const effectiveAttireStatus = (attire: WeddingAttire, referenceDate?: string): AttireStatus => {
+    if (attire.status === 'Laundry') return 'Laundry'
+    const activeScheduled = attireSchedule(attire.id, { includePast: false, referenceDate })
+    if (activeScheduled.length > 0) return 'Terpakai'
+    // Once event dates have passed, attire automatically returns to Tersedia
+    return 'Tersedia'
+  }
+
+  const attireConflictsOnDate = (attireId: string, eventDate: string, excludeBookingId?: string): AttireScheduleEntry[] => {
+    if (!eventDate) return []
+    return attireSchedule(attireId, { includePast: true }).filter(
+      (entry) => entry.eventDate === eventDate && (!excludeBookingId || entry.bookingId !== excludeBookingId),
+    )
+  }
+
+  const urgentAttireSchedules = (attireId: string, referenceDate?: string): AttireScheduleEntry[] => {
+    const refDate = referenceDate ?? localTodayIso()
+    return attireSchedule(attireId, { includePast: false, referenceDate: refDate }).filter((entry) => {
+      const diff = calendarDaysDiff(refDate, entry.eventDate)
+      return diff >= 0 && diff <= 1
+    })
+  }
+
+  const getLaundryUrgentAlerts = (referenceDate?: string): LaundryUrgentAlert[] => {
+    const refDate = referenceDate ?? localTodayIso()
+    const alerts: LaundryUrgentAlert[] = []
+    for (const item of weddingAttire.value) {
+      if (item.status !== 'Laundry') continue
+      const upcoming = attireSchedule(item.id, { includePast: false, referenceDate: refDate })
+      for (const entry of upcoming) {
+        const diff = calendarDaysDiff(refDate, entry.eventDate)
+        if (diff >= 0 && diff <= 1) {
+          alerts.push({
+            attireId: item.id,
+            attireName: item.name,
+            attireCode: item.code,
+            bookingId: entry.bookingId,
+            poNumber: entry.poNumber,
+            customerName: entry.customerName,
+            eventDate: entry.eventDate,
+            eventName: entry.eventName,
+            daysLeft: diff,
+            message: diff === 0
+              ? `Hari ini acara ${entry.customerName} (${entry.poNumber})! Segera siapkan baju ${item.name} yang masih berstatus Laundry.`
+              : `H-1 acara ${entry.customerName} (${entry.poNumber}) besok! Segera siapkan baju ${item.name} yang masih berstatus Laundry.`,
+          })
+        }
+      }
+    }
+    return alerts.sort((a, b) => a.daysLeft - b.daysLeft)
+  }
+
+  const laundryUrgentAlerts = computed(() => getLaundryUrgentAlerts())
+
   const totalBilling = computed(() => invoices.value.reduce((sum, invoice) => sum + invoiceTotal(invoice), 0))
   const totalPaid = computed(() => payments.value.reduce((sum, payment) => sum + payment.amount, 0))
   const totalReceivable = computed(() => Math.max(0, totalBilling.value - totalPaid.value))
   const totalExpenses = computed(() => expenses.value.reduce((sum, expense) => sum + expense.amount, 0))
+  const totalRefunds = computed(() => refunds.value.reduce((sum, refund) => sum + refund.amount, 0))
+  const totalCashOut = computed(() => totalExpenses.value + totalRefunds.value)
+  const netCashflow = computed(() => totalPaid.value - totalCashOut.value)
   const upcomingBookings = computed(() => [...bookings.value].filter((item) => item.status !== 'Dibatalkan' && item.eventDate >= '2026-11-15').sort((a, b) => a.eventDate.localeCompare(b.eventDate)))
   const lowStock = computed(() => inventory.value.filter((item) => stockStatus(item) !== 'Aman'))
 
@@ -260,7 +733,7 @@ export const useCrmStore = defineStore('crm', () => {
     activities.value.unshift({ id: uid(), at: new Date().toISOString(), title, detail, tone })
   }
 
-  const addBooking = (input: { name: string; phone: string; location: string; eventDate: string; eventTime?: string; notes?: string }) => {
+  const addBooking = (input: { name: string; phone: string; location: string; eventDate: string; eventTime?: string; stylingType?: StylingType; notes?: string }) => {
     const customer: Customer = { id: uid(), name: input.name.trim(), phone: input.phone.trim() }
     const sequence = bookings.value.length + 1
     const booking: Booking = {
@@ -270,6 +743,7 @@ export const useCrmStore = defineStore('crm', () => {
       location: input.location.trim(),
       eventDate: input.eventDate,
       eventTime: input.eventTime,
+      stylingType: input.stylingType,
       notes: input.notes,
       status: 'Draft',
       createdAt: new Date().toISOString().slice(0, 10),
@@ -280,7 +754,7 @@ export const useCrmStore = defineStore('crm', () => {
     return booking
   }
 
-  const updateBooking = (id: string, input: { name: string; phone: string; location: string; eventDate: string; eventTime?: string; notes?: string; status: BookingStatus }) => {
+  const updateBooking = (id: string, input: { name: string; phone: string; location: string; eventDate: string; eventTime?: string; stylingType?: StylingType; notes?: string; status: BookingStatus }) => {
     const booking = bookingFor(id)
     if (!booking) throw new Error('Booking tidak ditemukan.')
     const customer = customerFor(booking.customerId)
@@ -291,10 +765,107 @@ export const useCrmStore = defineStore('crm', () => {
       location: input.location.trim(),
       eventDate: input.eventDate,
       eventTime: input.eventTime,
+      stylingType: input.stylingType,
       notes: input.notes,
       status: input.status,
     })
     addActivity('Booking diperbarui', `${booking.poNumber} untuk ${customer.name}`, 'blue')
+    return booking
+  }
+
+  const addBookingRefund = (input: {
+    bookingId: string
+    refundDate: string
+    amount: number
+    method: BookingRefund['method']
+    proofImageUrl?: string
+    notes?: string
+  }) => {
+    const booking = bookingFor(input.bookingId)
+    if (!booking) throw new Error('Booking tidak ditemukan.')
+    if (!input.refundDate) throw new Error('Tanggal pengembalian wajib diisi.')
+    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+      throw new Error('Nominal pengembalian harus lebih dari nol.')
+    }
+    const customer = customerFor(booking.customerId)
+    if (booking.status === 'Dibatalkan') {
+      const maxPaid = booking.cancelledPaidAmount ?? 0
+      const alreadyRefunded = refunds.value
+        .filter((r) => r.bookingId === booking.id)
+        .reduce((sum, r) => sum + r.amount, 0)
+      const remaining = Math.max(0, maxPaid - alreadyRefunded)
+      if (input.amount > remaining) {
+        throw new Error(
+          maxPaid <= 0
+            ? 'Customer pada PO ini belum memiliki uang masuk yang dapat dikembalikan.'
+            : `Nominal pengembalian melebihi sisa uang yang sudah masuk (${new Intl.NumberFormat('id-ID').format(remaining)}).`,
+        )
+      }
+    }
+    const refund: BookingRefund = {
+      id: uid(),
+      refundNumber: `RFD-${new Date(input.refundDate).getFullYear()}-${String(refunds.value.length + 1).padStart(4, '0')}`,
+      bookingId: booking.id,
+      poNumber: booking.poNumber,
+      customerName: customer?.name ?? 'Customer',
+      refundDate: input.refundDate,
+      amount: Math.round(input.amount),
+      method: input.method,
+      proofImageUrl: input.proofImageUrl || undefined,
+      notes: input.notes?.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    }
+    refunds.value.unshift(refund)
+    addActivity(
+      'Pengembalian uang dicatat',
+      `${refund.refundNumber} (${booking.poNumber}) sebesar Rp. ${new Intl.NumberFormat('id-ID').format(refund.amount)}`,
+      'rose',
+    )
+    return refund
+  }
+
+  const cancelBooking = (
+    bookingId: string,
+    refundInput?: {
+      refundDate: string
+      amount: number
+      method: BookingRefund['method']
+      proofImageUrl?: string
+      notes?: string
+    },
+  ) => {
+    const booking = bookingFor(bookingId)
+    if (!booking) throw new Error('Booking tidak ditemukan.')
+    const customer = customerFor(booking.customerId)
+    const paidBefore = bookingPaid(bookingId)
+
+    if (refundInput && refundInput.amount > 0 && refundInput.amount > paidBefore) {
+      throw new Error(
+        paidBefore <= 0
+          ? 'Customer belum memiliki uang masuk sehingga pengembalian uang harus Rp. 0.'
+          : `Nominal pengembalian melebihi total uang yang sudah masuk (Rp. ${new Intl.NumberFormat('id-ID').format(paidBefore)}).`,
+      )
+    }
+
+    booking.status = 'Dibatalkan'
+    if (paidBefore > 0) {
+      booking.cancelledPaidAmount = (booking.cancelledPaidAmount ?? 0) + paidBefore
+    }
+
+    // Remove all orders/invoices and payments under this cancelled PO
+    invoices.value = invoices.value.filter((inv) => inv.bookingId !== bookingId)
+    payments.value = payments.value.filter((pay) => pay.bookingId !== bookingId)
+
+    // Remove or release fitting form attire bookings (attireSchedule already ignores Dibatalkan,
+    // and we also keep/preserve or clear attire? Keeping Dibatalkan skipped makes attire immediately Tersedia)
+    addActivity('Booking dibatalkan', `${booking.poNumber} · ${customer?.name ?? 'Customer'}`, 'rose')
+
+    if (refundInput && refundInput.amount > 0) {
+      addBookingRefund({
+        bookingId,
+        ...refundInput,
+      })
+    }
     return booking
   }
 
@@ -308,8 +879,39 @@ export const useCrmStore = defineStore('crm', () => {
     }
     payments.value.unshift(payment)
     const booking = bookingFor(input.bookingId)
-    addActivity('Pembayaran diterima', `${booking?.poNumber ?? 'PO'} sebesar ${new Intl.NumberFormat('id-ID').format(input.amount)}`, 'green')
+    addActivity('Pembayaran diterima', `${booking?.poNumber ?? 'PO'} sebesar Rp. ${new Intl.NumberFormat('id-ID').format(input.amount)}`, 'green')
     return payment
+  }
+
+  const updatePayment = (
+    id: string,
+    input: { amount: number; method: Payment['method']; paidAt: string; notes?: string },
+  ) => {
+    const payment = payments.value.find((p) => p.id === id)
+    if (!payment) throw new Error('Data pembayaran tidak ditemukan.')
+    const maxAllowed = bookingBalance(payment.bookingId) + payment.amount
+    if (!Number.isFinite(input.amount) || input.amount <= 0 || input.amount > maxAllowed) {
+      throw new Error('Nominal pembayaran harus lebih dari nol dan tidak boleh melebihi sisa tagihan.')
+    }
+    if (!input.paidAt) throw new Error('Tanggal pembayaran wajib diisi.')
+    Object.assign(payment, {
+      amount: Math.round(input.amount),
+      method: input.method,
+      paidAt: input.paidAt,
+      notes: input.notes?.trim() || undefined,
+    })
+    addActivity('Pembayaran diperbarui', `${payment.receiptNumber} · Rp. ${new Intl.NumberFormat('id-ID').format(payment.amount)}`, 'blue')
+    return payment
+  }
+
+  const deletePayment = (id: string) => {
+    const idx = payments.value.findIndex((p) => p.id === id)
+    if (idx < 0) throw new Error('Data pembayaran tidak ditemukan.')
+    const [removed] = payments.value.splice(idx, 1)
+    if (removed) {
+      addActivity('Pembayaran dihapus', `${removed.receiptNumber} sebesar Rp. ${new Intl.NumberFormat('id-ID').format(removed.amount)}`, 'rose')
+    }
+    return removed
   }
 
   const addCatalogItem = (input: Omit<CatalogItem, 'id' | 'code'>) => {
@@ -326,51 +928,186 @@ export const useCrmStore = defineStore('crm', () => {
     return item
   }
 
+  const snapshotLineItems = (lines: Array<{ catalogItemId: string; quantity: number; customerPrice: number }>): InvoiceItem[] =>
+    lines.map((line) => {
+      const catalogItem = catalog.value.find((item) => item.id === line.catalogItemId && item.active)
+      if (!catalogItem) throw new Error('Salah satu layanan tidak tersedia atau sudah nonaktif.')
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.customerPrice) || line.customerPrice < 0) {
+        throw new Error('Qty dan harga customer tidak valid.')
+      }
+      return {
+        id: uid(),
+        catalogItemId: catalogItem.id,
+        serviceType: catalogItem.type,
+        name: catalogItem.name,
+        quantity: line.quantity,
+        catalogPrice: catalogItem.price,
+        unitPrice: Math.round(line.customerPrice),
+        unit: catalogItem.unit,
+      }
+    })
+
   const createInvoiceFromOrder = (input: {
     bookingId: string
-    kind: Invoice['kind']
+    kind?: Invoice['kind']
     issuedAt: string
+    orderDate?: string
     dueDate?: string
     items: Array<{ catalogItemId: string; quantity: number; customerPrice: number }>
   }) => {
     const booking = bookingFor(input.bookingId)
     if (!booking) throw new Error('Booking tidak ditemukan.')
     if (!input.items.length) throw new Error('Tambahkan minimal satu layanan.')
-    if (input.kind === 'Additional' && !bookingInvoices(input.bookingId).length) {
-      throw new Error('Additional hanya dapat dibuat setelah pesanan awal memiliki invoice.')
-    }
-    if (input.kind === 'Utama' && bookingInvoices(input.bookingId).some((invoice) => invoice.kind === 'Utama')) {
-      throw new Error('Booking ini sudah mempunyai invoice utama.')
+    if (!input.issuedAt) throw new Error('Tanggal invoice dibuat wajib diisi.')
+    const orderDate = input.orderDate || input.issuedAt
+
+    if (input.kind === 'Additional') {
+      return addOrderGroupToBooking({
+        bookingId: input.bookingId,
+        orderDate,
+        items: input.items,
+      })
     }
 
-    const invoiceItems: InvoiceItem[] = input.items.map((line) => {
-      const catalogItem = catalog.value.find((item) => item.id === line.catalogItemId && item.active)
-      if (!catalogItem) throw new Error('Salah satu layanan tidak tersedia atau sudah nonaktif.')
-      if (line.quantity <= 0 || line.customerPrice < 0) throw new Error('Qty dan harga customer tidak valid.')
-      return {
-        id: uid(),
-        name: catalogItem.name,
-        quantity: line.quantity,
-        catalogPrice: catalogItem.price,
-        unitPrice: line.customerPrice,
-      }
-    })
+    if (bookingInvoice(input.bookingId)) {
+      throw new Error('Booking ini sudah mempunyai pesanan awal dan invoice.')
+    }
+
+    const invoiceItems = sortInvoiceItemsIntiFirst(snapshotLineItems(input.items))
+    const initialGroup: OrderGroup = {
+      id: uid(),
+      kind: 'Awal',
+      orderDate,
+      createdAt: new Date().toISOString(),
+      items: invoiceItems,
+    }
 
     const invoice: Invoice = {
       id: uid(),
       invoiceNumber: `INV-${new Date(input.issuedAt).getFullYear()}-${String(invoices.value.length + 1).padStart(4, '0')}`,
       bookingId: input.bookingId,
-      kind: input.kind,
+      kind: 'Utama',
       issuedAt: input.issuedAt,
       dueDate: input.dueDate,
-      items: invoiceItems,
+      groups: [initialGroup],
+      items: [...invoiceItems],
     }
     invoices.value.unshift(invoice)
-    addActivity(
-      input.kind === 'Utama' ? 'Pesanan dan invoice dibuat' : 'Additional ditambahkan',
-      `${invoice.invoiceNumber} untuk ${booking.poNumber}`,
-      input.kind === 'Utama' ? 'blue' : 'amber',
-    )
+    addActivity('Pesanan awal dibuat', `${invoice.invoiceNumber} untuk ${booking.poNumber}`, 'blue')
+    return invoice
+  }
+
+  const addOrderGroupToBooking = (input: {
+    bookingId: string
+    orderDate: string
+    items: Array<{ catalogItemId: string; quantity: number; customerPrice: number }>
+  }) => {
+    const booking = bookingFor(input.bookingId)
+    if (!booking) throw new Error('Booking tidak ditemukan.')
+    const invoice = bookingInvoice(input.bookingId)
+    if (!invoice) throw new Error('Pesanan awal harus dibuat terlebih dahulu sebelum menambah pesanan.')
+    if (!input.orderDate) throw new Error('Tanggal pemesanan wajib diisi.')
+    if (!input.items.length) throw new Error('Tambahkan minimal satu layanan.')
+
+    const snappedItems = sortInvoiceItemsIntiFirst(snapshotLineItems(input.items))
+    const newGroup: OrderGroup = {
+      id: uid(),
+      kind: 'Tambahan',
+      orderDate: input.orderDate,
+      createdAt: new Date().toISOString(),
+      items: snappedItems,
+    }
+
+    invoice.groups = sortGroupsChronologically([...invoice.groups, newGroup])
+    invoice.items = invoice.groups.flatMap((g) => g.items)
+
+    addActivity('Pesanan tambahan dicatat', `${booking.poNumber} · ${snappedItems.length} item pada ${input.orderDate}`, 'amber')
+    return invoice
+  }
+
+  const updateOrderGroup = (
+    bookingId: string,
+    groupId: string,
+    input: {
+      orderDate: string
+      items: Array<{
+        id?: string
+        catalogItemId?: string
+        serviceType?: CatalogType
+        name?: string
+        catalogPrice?: number
+        unit?: string
+        quantity: number
+        customerPrice: number
+      }>
+    },
+  ) => {
+    const booking = bookingFor(bookingId)
+    if (!booking) throw new Error('Booking tidak ditemukan.')
+    const invoice = bookingInvoice(bookingId)
+    if (!invoice) throw new Error('Invoice tidak ditemukan.')
+    const groupIndex = invoice.groups.findIndex((g) => g.id === groupId)
+    if (groupIndex < 0) throw new Error('Kelompok pesanan tidak ditemukan.')
+    if (!input.orderDate) throw new Error('Tanggal pemesanan wajib diisi.')
+    if (!input.items.length) throw new Error('Kelompok pesanan minimal harus berisi satu layanan.')
+
+    const existingGroup = invoice.groups[groupIndex]!
+    const nextItems: InvoiceItem[] = input.items.map((line) => {
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.customerPrice) || line.customerPrice < 0) {
+        throw new Error('Qty dan harga customer tidak valid.')
+      }
+      const prevItem = line.id ? existingGroup.items.find((it) => it.id === line.id) : undefined
+      if (prevItem && (!line.catalogItemId || line.catalogItemId === prevItem.catalogItemId)) {
+        return {
+          ...prevItem,
+          quantity: line.quantity,
+          unitPrice: Math.round(line.customerPrice),
+        }
+      }
+      const catalogItem = catalog.value.find((c) => c.id === line.catalogItemId)
+      if (!catalogItem) throw new Error('Pilih layanan dari katalog pada seluruh baris.')
+      return {
+        id: line.id || uid(),
+        catalogItemId: catalogItem.id,
+        serviceType: catalogItem.type,
+        name: catalogItem.name,
+        quantity: line.quantity,
+        catalogPrice: catalogItem.price,
+        unitPrice: Math.round(line.customerPrice),
+        unit: catalogItem.unit,
+      }
+    })
+
+    const updatedGroup: OrderGroup = {
+      ...existingGroup,
+      orderDate: input.orderDate,
+      items: sortInvoiceItemsIntiFirst(nextItems),
+    }
+
+    const updatedGroups = [...invoice.groups]
+    updatedGroups.splice(groupIndex, 1, updatedGroup)
+    invoice.groups = sortGroupsChronologically(updatedGroups)
+    invoice.items = invoice.groups.flatMap((g) => g.items)
+
+    addActivity('Pesanan diperbarui', `${booking.poNumber} · kelompok ${existingGroup.kind}`, 'blue')
+    return invoice
+  }
+
+  const deleteOrderGroup = (bookingId: string, groupId: string) => {
+    const booking = bookingFor(bookingId)
+    if (!booking) throw new Error('Pemesanan tidak ditemukan.')
+    const invoice = bookingInvoice(bookingId)
+    if (!invoice) throw new Error('Faktur tidak ditemukan.')
+    const idx = invoice.groups.findIndex((g) => g.id === groupId)
+    if (idx < 0) throw new Error('Kelompok pesanan tidak ditemukan.')
+    const target = invoice.groups[idx]!
+    if (invoice.groups.length <= 1) {
+      throw new Error('Minimal satu kelompok pesanan harus tersisa pada PO. Gunakan pembatalan PO jika ingin menghapus seluruh pesanan.')
+    }
+    invoice.groups.splice(idx, 1)
+    invoice.groups = sortGroupsChronologically(invoice.groups)
+    invoice.items = invoice.groups.flatMap((g) => g.items)
+    addActivity('Kelompok pesanan dihapus', `${booking.poNumber} · ${target.kind}`, 'rose')
     return invoice
   }
 
@@ -379,29 +1116,402 @@ export const useCrmStore = defineStore('crm', () => {
     addActivity('Pengeluaran dicatat', input.description, 'rose')
   }
 
-  const moveStock = (input: { itemId: string; type: StockMovement['type']; quantity: number; date: string; pic: string; notes?: string }) => {
-    const item = inventory.value.find((entry) => entry.id === input.itemId)
-    if (!item) throw new Error('Barang tidak ditemukan.')
-    if (!input.pic.trim()) throw new Error('Nama PIC wajib diisi.')
-    if (input.quantity <= 0) throw new Error('Qty harus lebih dari nol.')
-    if (input.type === 'Keluar' && input.quantity > stockAvailable(item)) throw new Error('Qty keluar melebihi stok tersedia.')
-    input.type === 'Masuk' ? (item.stockIn += input.quantity) : (item.stockOut += input.quantity)
-    movements.value.unshift({ id: uid(), ...input, pic: input.pic.trim() })
-    addActivity(`Barang ${input.type.toLowerCase()}`, `${item.name} ${input.quantity} ${item.unit}`, input.type === 'Masuk' ? 'green' : 'amber')
+  const addBatchExpenses = (input: {
+    date: string
+    method: string
+    expenseScope: 'Berdasarkan PO' | 'Di Luar PO'
+    bookingId?: string
+    proofImageUrl?: string
+    items: Array<{ category: string; description: string; amount: number }>
+  }) => {
+    if (!input.date) throw new Error('Tanggal pengeluaran wajib diisi.')
+    if (!input.items.length) throw new Error('Tambahkan minimal satu item pengeluaran.')
+    if (input.expenseScope === 'Berdasarkan PO' && !input.bookingId) {
+      throw new Error('Pilih Nomor PO untuk pengeluaran berdasarkan PO.')
+    }
+    for (const row of input.items) {
+      if (!row.description.trim()) throw new Error('Deskripsi wajib diisi pada seluruh baris pengeluaran.')
+      if (!Number.isFinite(row.amount) || row.amount <= 0) {
+        throw new Error(`Nominal pada "${row.description.trim()}" harus lebih dari nol.`)
+      }
+    }
+
+    const created: Expense[] = []
+    // Add in reverse order so row 1 stays on top cleanly
+    for (const row of [...input.items].reverse()) {
+      const record: Expense = {
+        id: uid(),
+        date: input.date,
+        category: row.category,
+        description: row.description.trim(),
+        amount: Math.round(row.amount),
+        method: input.method,
+        expenseScope: input.expenseScope,
+        bookingId: input.expenseScope === 'Berdasarkan PO' ? input.bookingId : undefined,
+        proofImageUrl: input.proofImageUrl || undefined,
+      }
+      expenses.value.unshift(record)
+      created.unshift(record)
+    }
+
+    const totalSum = created.reduce((s, r) => s + r.amount, 0)
+    addActivity(
+      'Pengeluaran dicatat',
+      `${created.length} item pengeluaran sebesar Rp. ${new Intl.NumberFormat('id-ID').format(totalSum)}`,
+      'rose',
+    )
+    return created
   }
 
-  const addInventoryItem = (input: Omit<InventoryItem, 'id' | 'code' | 'stockIn' | 'stockOut' | 'active'>) => {
+  const updateExpense = (id: string, input: Omit<Expense, 'id'>) => {
+    const existing = expenses.value.find((e) => e.id === id)
+    if (!existing) throw new Error('Data pengeluaran tidak ditemukan.')
+    Object.assign(existing, {
+      ...input,
+      bookingId: input.bookingId || undefined,
+      proofImageUrl: input.proofImageUrl || undefined,
+    })
+    addActivity('Pengeluaran diperbarui', existing.description, 'blue')
+    return existing
+  }
+
+  const deleteExpense = (id: string) => {
+    const idx = expenses.value.findIndex((e) => e.id === id)
+    if (idx < 0) throw new Error('Data pengeluaran tidak ditemukan.')
+    const [removed] = expenses.value.splice(idx, 1)
+    if (removed) {
+      addActivity('Pengeluaran dihapus', removed.description, 'rose')
+    }
+    return removed
+  }
+
+  const moveStock = (input: { itemId: string; type: 'Masuk' | 'Keluar'; quantity: number; date: string; pic: string; notes?: string; proofImageUrl?: string }) => {
+    submitBatchStockMovement({
+      type: input.type,
+      date: input.date,
+      pic: input.pic,
+      notes: input.notes,
+      proofImageUrl: input.proofImageUrl,
+      items: [{ itemId: input.itemId, quantity: input.quantity }],
+    })
+  }
+
+  const submitBatchStockMovement = (input: {
+    type: 'Masuk' | 'Keluar'
+    date: string
+    pic: string
+    notes?: string
+    proofImageUrl?: string
+    items: Array<{ itemId: string; quantity: number }>
+  }) => {
+    if (!input.pic.trim()) throw new Error('Nama PIC wajib diisi.')
+    if (!input.date) throw new Error('Tanggal transaksi wajib diisi.')
+    if (!input.items.length) throw new Error('Tambahkan minimal satu barang.')
+
+    // Validate all rows first (including summed qty if same item appears more than once)
+    const qtyByItem = new Map<string, number>()
+    for (const row of input.items) {
+      if (!row.itemId) throw new Error('Pilih barang pada seluruh baris.')
+      if (!Number.isFinite(row.quantity) || row.quantity <= 0) throw new Error('Qty harus lebih dari nol.')
+      const item = inventory.value.find((entry) => entry.id === row.itemId)
+      if (!item) throw new Error('Barang tidak ditemukan.')
+      qtyByItem.set(row.itemId, (qtyByItem.get(row.itemId) ?? 0) + row.quantity)
+    }
+
+    if (input.type === 'Keluar') {
+      for (const [itemId, totalQty] of qtyByItem.entries()) {
+        const item = inventory.value.find((entry) => entry.id === itemId)!
+        if (totalQty > stockAvailable(item)) {
+          throw new Error(`Qty keluar untuk ${item.name} (${totalQty}) melebihi stok tersedia (${stockAvailable(item)}).`)
+        }
+      }
+    }
+
+    const batchId = uid()
+    for (const row of input.items) {
+      const item = inventory.value.find((entry) => entry.id === row.itemId)!
+      if (input.type === 'Masuk') item.stockIn += row.quantity
+      else item.stockOut += row.quantity
+      movements.value.unshift({
+        id: uid(),
+        batchId,
+        itemId: row.itemId,
+        type: input.type,
+        quantity: row.quantity,
+        date: input.date,
+        pic: input.pic.trim(),
+        notes: input.notes?.trim() || undefined,
+        proofImageUrl: input.proofImageUrl || undefined,
+      })
+    }
+
+    addActivity(
+      `Barang ${input.type.toLowerCase()}`,
+      `${input.items.length} jenis barang oleh ${input.pic.trim()}`,
+      input.type === 'Masuk' ? 'green' : 'amber',
+    )
+    return batchId
+  }
+
+  const submitStockOpname = (input: {
+    date: string
+    pic: string
+    notes?: string
+    items: Array<{ itemId: string; physicalStock: number; notes?: string }>
+  }) => {
+    if (!input.pic.trim()) throw new Error('Nama PIC stok opname wajib diisi.')
+    if (!input.date) throw new Error('Tanggal stok opname wajib diisi.')
+    if (!input.items.length) throw new Error('Pilih minimal satu barang untuk stok opname.')
+
+    const opnameItems: StockOpnameItem[] = input.items.map((row) => {
+      const item = inventory.value.find((entry) => entry.id === row.itemId)
+      if (!item) throw new Error('Barang tidak ditemukan.')
+      if (!Number.isFinite(row.physicalStock) || row.physicalStock < 0) {
+        throw new Error(`Stok fisik untuk ${item.name} tidak boleh negatif.`)
+      }
+      const systemStock = stockAvailable(item)
+      const diff = row.physicalStock - systemStock
+      return {
+        itemId: item.id,
+        itemName: item.name,
+        itemCode: item.code,
+        unit: item.unit,
+        systemStock,
+        physicalStock: row.physicalStock,
+        diff,
+        notes: row.notes?.trim() || undefined,
+      }
+    })
+
+    const recordId = uid()
+    for (const line of opnameItems) {
+      if (line.diff !== 0) {
+        const item = inventory.value.find((entry) => entry.id === line.itemId)!
+        item.stockAdjustment = (item.stockAdjustment ?? 0) + line.diff
+        movements.value.unshift({
+          id: uid(),
+          opnameId: recordId,
+          itemId: item.id,
+          type: 'Penyesuaian',
+          quantity: line.diff,
+          date: input.date,
+          pic: input.pic.trim(),
+          notes: `Stok Opname${line.notes ? ` · ${line.notes}` : ''}`,
+        })
+      }
+    }
+
+    const record: StockOpnameRecord = {
+      id: recordId,
+      opnameNumber: `SO-${new Date(input.date).getFullYear()}-${String(stockOpnames.value.length + 1).padStart(4, '0')}`,
+      date: input.date,
+      pic: input.pic.trim(),
+      notes: input.notes?.trim() || undefined,
+      items: opnameItems,
+      createdAt: new Date().toISOString(),
+    }
+    stockOpnames.value.unshift(record)
+
+    const diffCount = opnameItems.filter((i) => i.diff !== 0).length
+    addActivity(
+      'Stok opname diselaraskan',
+      `${record.opnameNumber} · ${opnameItems.length} barang dicek (${diffCount} penyesuaian)`,
+      diffCount > 0 ? 'amber' : 'green',
+    )
+    return record
+  }
+
+  const updateStockMovement = (
+    id: string,
+    input: { itemId: string; type: 'Masuk' | 'Keluar'; quantity: number; date: string; pic: string; notes?: string; proofImageUrl?: string },
+  ) => {
+    const mov = movements.value.find((m) => m.id === id)
+    if (!mov) throw new Error('Riwayat transaksi barang tidak ditemukan.')
+    if (!input.pic.trim()) throw new Error('Nama penanggung jawab wajib diisi.')
+    if (!input.date) throw new Error('Tanggal transaksi wajib diisi.')
+    if (!Number.isFinite(input.quantity) || input.quantity <= 0) throw new Error('Jumlah harus lebih dari nol.')
+
+    const oldItem = inventory.value.find((i) => i.id === mov.itemId)
+    const newItem = inventory.value.find((i) => i.id === input.itemId)
+    if (!newItem) throw new Error('Barang tujuan tidak ditemukan.')
+
+    // Revert old effect temporarily to validate & apply cleanly
+    if (oldItem) {
+      if (mov.type === 'Masuk') oldItem.stockIn = Math.max(0, oldItem.stockIn - mov.quantity)
+      else if (mov.type === 'Keluar') oldItem.stockOut = Math.max(0, oldItem.stockOut - mov.quantity)
+    }
+
+    if (input.type === 'Keluar' && input.quantity > stockAvailable(newItem)) {
+      // Restore old before throwing
+      if (oldItem) {
+        if (mov.type === 'Masuk') oldItem.stockIn += mov.quantity
+        else if (mov.type === 'Keluar') oldItem.stockOut += mov.quantity
+      }
+      throw new Error(`Jumlah keluar untuk ${newItem.name} (${input.quantity}) melebihi stok tersedia (${stockAvailable(newItem)}).`)
+    }
+
+    if (input.type === 'Masuk') newItem.stockIn += input.quantity
+    else newItem.stockOut += input.quantity
+
+    Object.assign(mov, {
+      itemId: input.itemId,
+      type: input.type,
+      quantity: input.quantity,
+      date: input.date,
+      pic: input.pic.trim(),
+      notes: input.notes?.trim() || undefined,
+      proofImageUrl: input.proofImageUrl || undefined,
+    })
+
+    addActivity(`Riwayat barang ${input.type.toLowerCase()} diperbarui`, `${newItem.name} (${input.quantity} ${newItem.unit})`, 'blue')
+    return mov
+  }
+
+  const deleteStockMovement = (id: string) => {
+    const idx = movements.value.findIndex((m) => m.id === id)
+    if (idx < 0) throw new Error('Riwayat transaksi barang tidak ditemukan.')
+    const [removed] = movements.value.splice(idx, 1)
+    if (removed) {
+      const item = inventory.value.find((i) => i.id === removed.itemId)
+      if (item) {
+        if (removed.type === 'Masuk') item.stockIn = Math.max(0, item.stockIn - removed.quantity)
+        else if (removed.type === 'Keluar') item.stockOut = Math.max(0, item.stockOut - removed.quantity)
+        else item.stockAdjustment = (item.stockAdjustment ?? 0) - removed.quantity
+      }
+      addActivity('Riwayat barang dihapus', `${item?.name ?? 'Barang'} · ${removed.type}`, 'rose')
+    }
+    return removed
+  }
+
+  const updateStockOpname = (
+    id: string,
+    input: { date: string; pic: string; notes?: string; items: Array<{ itemId: string; physicalStock: number; notes?: string }> },
+  ) => {
+    const record = stockOpnames.value.find((r) => r.id === id)
+    if (!record) throw new Error('Data pemeriksaan stok tidak ditemukan.')
+    if (!input.pic.trim()) throw new Error('Nama penanggung jawab wajib diisi.')
+    if (!input.date) throw new Error('Tanggal pemeriksaan stok wajib diisi.')
+    if (!input.items.length) throw new Error('Pilih minimal satu barang.')
+
+    // Revert prior adjustments from this opname
+    for (const prevLine of record.items) {
+      if (prevLine.diff !== 0) {
+        const item = inventory.value.find((i) => i.id === prevLine.itemId)
+        if (item) item.stockAdjustment = (item.stockAdjustment ?? 0) - prevLine.diff
+      }
+    }
+    movements.value = movements.value.filter((m) => m.opnameId !== record.id)
+
+    const nextItems: StockOpnameItem[] = input.items.map((row) => {
+      const item = inventory.value.find((entry) => entry.id === row.itemId)
+      if (!item) throw new Error('Barang tidak ditemukan.')
+      if (!Number.isFinite(row.physicalStock) || row.physicalStock < 0) {
+        throw new Error(`Stok fisik untuk ${item.name} tidak boleh negatif.`)
+      }
+      const systemStock = stockAvailable(item)
+      const diff = row.physicalStock - systemStock
+      return {
+        itemId: item.id,
+        itemName: item.name,
+        itemCode: item.code,
+        unit: item.unit,
+        systemStock,
+        physicalStock: row.physicalStock,
+        diff,
+        notes: row.notes?.trim() || undefined,
+      }
+    })
+
+    for (const line of nextItems) {
+      if (line.diff !== 0) {
+        const item = inventory.value.find((entry) => entry.id === line.itemId)!
+        item.stockAdjustment = (item.stockAdjustment ?? 0) + line.diff
+        movements.value.unshift({
+          id: uid(),
+          opnameId: record.id,
+          itemId: item.id,
+          type: 'Penyesuaian',
+          quantity: line.diff,
+          date: input.date,
+          pic: input.pic.trim(),
+          notes: `Stok Opname${line.notes ? ` · ${line.notes}` : ''}`,
+        })
+      }
+    }
+
+    Object.assign(record, {
+      date: input.date,
+      pic: input.pic.trim(),
+      notes: input.notes?.trim() || undefined,
+      items: nextItems,
+    })
+
+    addActivity('Stok opname diperbarui', `${record.opnameNumber} · ${nextItems.length} barang`, 'blue')
+    return record
+  }
+
+  const deleteStockOpname = (id: string) => {
+    const idx = stockOpnames.value.findIndex((r) => r.id === id)
+    if (idx < 0) throw new Error('Data pemeriksaan stok tidak ditemukan.')
+    const [removed] = stockOpnames.value.splice(idx, 1)
+    if (removed) {
+      for (const line of removed.items) {
+        if (line.diff !== 0) {
+          const item = inventory.value.find((i) => i.id === line.itemId)
+          if (item) item.stockAdjustment = (item.stockAdjustment ?? 0) - line.diff
+        }
+      }
+      movements.value = movements.value.filter((m) => m.opnameId !== removed.id)
+      addActivity('Stok opname dihapus', removed.opnameNumber, 'rose')
+    }
+    return removed
+  }
+
+  const addInventoryItem = (input: Omit<InventoryItem, 'id' | 'code' | 'stockIn' | 'stockOut' | 'stockAdjustment' | 'active'>) => {
     const item: InventoryItem = {
       ...input,
       id: uid(),
       code: `BRG-${String(inventory.value.length + 1).padStart(4, '0')}`,
       stockIn: 0,
       stockOut: 0,
+      stockAdjustment: 0,
       active: true,
     }
     inventory.value.unshift(item)
-    addActivity('Barang baru ditambahkan', `${item.name} masuk ke master inventory`, 'blue')
+    addActivity('Barang baru ditambahkan', `${item.name} masuk ke katalog inventory`, 'blue')
     return item
+  }
+
+  const updateInventoryItem = (id: string, input: {
+    name: string
+    category: string
+    unit: string
+    location: string
+    initialStock: number
+    minimumStock: number
+  }) => {
+    const item = inventory.value.find((entry) => entry.id === id)
+    if (!item) throw new Error('Barang tidak ditemukan.')
+    Object.assign(item, {
+      name: input.name.trim(),
+      category: input.category.trim(),
+      unit: input.unit.trim(),
+      location: input.location.trim(),
+      initialStock: Math.max(0, Number(input.initialStock) || 0),
+      minimumStock: Math.max(0, Number(input.minimumStock) || 0),
+    })
+    addActivity('Barang diperbarui', `${item.name} diperbarui di katalog inventory`, 'blue')
+    return item
+  }
+
+  const deleteInventoryItem = (id: string) => {
+    const idx = inventory.value.findIndex((entry) => entry.id === id)
+    if (idx < 0) throw new Error('Barang tidak ditemukan.')
+    const [removed] = inventory.value.splice(idx, 1)
+    if (removed) {
+      addActivity('Barang dihapus', `${removed.name} dihapus dari katalog inventory`, 'rose')
+    }
+    return removed
   }
 
   const addWeddingAttire = (input: Omit<WeddingAttire, 'id' | 'code'>) => {
@@ -412,6 +1522,14 @@ export const useCrmStore = defineStore('crm', () => {
     }
     weddingAttire.value.unshift(item)
     addActivity('Busana ditambahkan', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
+    return item
+  }
+
+  const updateWeddingAttire = (id: string, input: Omit<WeddingAttire, 'id' | 'code'>) => {
+    const item = weddingAttire.value.find((entry) => entry.id === id)
+    if (!item) throw new Error('Busana tidak ditemukan.')
+    Object.assign(item, input)
+    addActivity('Busana diperbarui', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
     return item
   }
 
@@ -432,6 +1550,137 @@ export const useCrmStore = defineStore('crm', () => {
     return form
   }
 
+  const deleteWeddingForm = (bookingId: string) => {
+    const index = weddingForms.value.findIndex((form) => form.bookingId === bookingId)
+    if (index >= 0) weddingForms.value.splice(index, 1)
+  }
+
+  const activeEmployees = computed(() => employees.value.filter((emp) => emp.active))
+
+  const addEmployee = (input: { name: string; role: string; email?: string; phone?: string; active?: boolean }) => {
+    const cleanName = input.name.trim()
+    if (!cleanName) throw new Error('Nama karyawan wajib diisi.')
+    const emp: EmployeeRecord = {
+      id: uid(),
+      name: cleanName,
+      role: input.role.trim() || 'MUA / Tim',
+      email: input.email?.trim() || undefined,
+      phone: input.phone?.trim() || undefined,
+      active: input.active ?? true,
+      lastLogin: 'Baru ditambahkan',
+    }
+    employees.value.push(emp)
+    addActivity('Karyawan ditambahkan', `${emp.name} (${emp.role})`, 'blue')
+    return emp
+  }
+
+  const updateEmployee = (id: string, input: Partial<Omit<EmployeeRecord, 'id'>>) => {
+    const emp = employees.value.find((e) => e.id === id)
+    if (!emp) throw new Error('Karyawan tidak ditemukan.')
+    if (typeof input.name === 'string') emp.name = input.name.trim()
+    if (typeof input.role === 'string') emp.role = input.role.trim()
+    if (input.email !== undefined) emp.email = input.email?.trim() || undefined
+    if (input.phone !== undefined) emp.phone = input.phone?.trim() || undefined
+    if (typeof input.active === 'boolean') emp.active = input.active
+    return emp
+  }
+
+  const toggleEmployeeStatus = (id: string) => {
+    const emp = employees.value.find((e) => e.id === id)
+    if (!emp) throw new Error('Karyawan tidak ditemukan.')
+    emp.active = !emp.active
+    return emp
+  }
+
+  const jobForBooking = (bookingId: string) =>
+    jobAssignments.value.find((job) => job.bookingId === bookingId)
+
+  const assignedEmployeesForBooking = (bookingId: string) => {
+    const job = jobForBooking(bookingId)
+    if (!job?.employeeIds.length) return []
+    return job.employeeIds
+      .map((empId) => employees.value.find((e) => e.id === empId))
+      .filter((e): e is EmployeeRecord => Boolean(e))
+  }
+
+  const toggleBookingEmployee = (bookingId: string, employeeId: string) => {
+    const booking = bookingFor(bookingId)
+    if (!booking) throw new Error('Booking PO tidak ditemukan.')
+    let job = jobForBooking(bookingId)
+    if (!job) {
+      job = { bookingId, employeeIds: [], updatedAt: new Date().toISOString() }
+      jobAssignments.value.unshift(job)
+    }
+    const idx = job.employeeIds.indexOf(employeeId)
+    if (idx >= 0) job.employeeIds.splice(idx, 1)
+    else job.employeeIds.push(employeeId)
+    job.updatedAt = new Date().toISOString()
+    return job
+  }
+
+  const setBookingJobNotes = (bookingId: string, notes: string) => {
+    const booking = bookingFor(bookingId)
+    if (!booking) throw new Error('Booking PO tidak ditemukan.')
+    let job = jobForBooking(bookingId)
+    if (!job) {
+      job = { bookingId, employeeIds: [], updatedAt: new Date().toISOString() }
+      jobAssignments.value.unshift(job)
+    }
+    job.notes = notes.trim() || undefined
+    job.updatedAt = new Date().toISOString()
+    return job
+  }
+
+  const updateBusinessProfile = (patch: Partial<BusinessProfile>) => {
+    Object.assign(businessProfile.value, patch)
+    addActivity('Profil bisnis diperbarui', businessProfile.value.name || 'Azura Makeup Artist', 'blue')
+    return businessProfile.value
+  }
+
+  const dropdownListRef = (group: DropdownOptionGroup) => {
+    if (group === 'paymentMethods') return paymentMethods
+    if (group === 'poExpenseCategories') return poExpenseCategories
+    return generalExpenseCategories
+  }
+
+  const addDropdownOption = (group: DropdownOptionGroup, rawLabel: string) => {
+    const label = rawLabel.trim()
+    if (!label) throw new Error('Nama opsi dropdown wajib diisi.')
+    const target = dropdownListRef(group)
+    if (target.value.some((item) => item.toLowerCase() === label.toLowerCase())) {
+      throw new Error(`Opsi "${label}" sudah tersedia.`)
+    }
+    target.value.push(label)
+    addActivity('Pengaturan dropdown diperbarui', `Menambahkan opsi "${label}"`, 'blue')
+    return label
+  }
+
+  const updateDropdownOption = (group: DropdownOptionGroup, oldLabel: string, rawNextLabel: string) => {
+    const nextLabel = rawNextLabel.trim()
+    if (!nextLabel) throw new Error('Nama opsi dropdown tidak boleh kosong.')
+    const target = dropdownListRef(group)
+    const index = target.value.indexOf(oldLabel)
+    if (index < 0) throw new Error('Opsi tidak ditemukan.')
+    if (
+      nextLabel.toLowerCase() !== oldLabel.toLowerCase()
+      && target.value.some((item) => item.toLowerCase() === nextLabel.toLowerCase())
+    ) {
+      throw new Error(`Opsi "${nextLabel}" sudah tersedia.`)
+    }
+    target.value.splice(index, 1, nextLabel)
+    addActivity('Pengaturan dropdown diperbarui', `${oldLabel} → ${nextLabel}`, 'blue')
+    return nextLabel
+  }
+
+  const removeDropdownOption = (group: DropdownOptionGroup, label: string) => {
+    const target = dropdownListRef(group)
+    if (target.value.length <= 1) {
+      throw new Error('Sisakan minimal 1 opsi aktif.')
+    }
+    target.value = target.value.filter((item) => item !== label)
+    addActivity('Opsi dropdown dihapus', label, 'amber')
+  }
+
   const resetDemo = () => {
     const fresh = seed()
     customers.value = fresh.customers
@@ -441,23 +1690,36 @@ export const useCrmStore = defineStore('crm', () => {
     payments.value = fresh.payments
     inventory.value = fresh.inventory
     movements.value = fresh.movements
+    stockOpnames.value = fresh.stockOpnames
     expenses.value = fresh.expenses
     activities.value = fresh.activities
     weddingAttire.value = fresh.weddingAttire
     weddingForms.value = fresh.weddingForms
+    refunds.value = fresh.refunds
+    employees.value = fresh.employees
+    jobAssignments.value = fresh.jobAssignments
+    businessProfile.value = fresh.businessProfile
+    paymentMethods.value = fresh.paymentMethods
+    poExpenseCategories.value = fresh.poExpenseCategories
+    generalExpenseCategories.value = fresh.generalExpenseCategories
   }
 
   let persistenceTimer: ReturnType<typeof setTimeout> | undefined
 
   const persistSnapshot = () => {
+    if (typeof localStorage === 'undefined') return
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       customers: customers.value, bookings: bookings.value, catalog: catalog.value, invoices: invoices.value,
-      payments: payments.value, inventory: inventory.value, movements: movements.value, expenses: expenses.value, activities: activities.value,
+      payments: payments.value, refunds: refunds.value, inventory: inventory.value, movements: movements.value, stockOpnames: stockOpnames.value,
+      expenses: expenses.value, activities: activities.value,
       weddingAttire: weddingAttire.value, weddingForms: weddingForms.value,
+      employees: employees.value, jobAssignments: jobAssignments.value, businessProfile: businessProfile.value,
+      paymentMethods: paymentMethods.value, poExpenseCategories: poExpenseCategories.value, generalExpenseCategories: generalExpenseCategories.value,
     }))
   }
 
   const schedulePersistence = () => {
+    if (typeof window === 'undefined') return
     if (persistenceTimer) clearTimeout(persistenceTimer)
     persistenceTimer = setTimeout(() => {
       persistenceTimer = undefined
@@ -466,17 +1728,25 @@ export const useCrmStore = defineStore('crm', () => {
     }, 180)
   }
 
-  watch([customers, bookings, catalog, invoices, payments, inventory, movements, expenses, activities, weddingAttire, weddingForms], () => {
+  watch([customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms, employees, jobAssignments, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories], () => {
     schedulePersistence()
   }, { deep: true })
 
-  window.addEventListener('pagehide', persistSnapshot)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', persistSnapshot)
+  }
 
   return {
-    customers, bookings, catalog, invoices, payments, inventory, movements, expenses, activities, weddingAttire, weddingForms,
-    totalBilling, totalPaid, totalReceivable, totalExpenses, upcomingBookings, lowStock,
-    invoiceTotal, bookingInvoices, bookingTotal, bookingPaid, bookingBalance, customerFor, bookingFor,
-    stockAvailable, stockStatus, addBooking, updateBooking, addPayment, addCatalogItem, updateCatalogItem, createInvoiceFromOrder, addExpense, moveStock, addInventoryItem,
-    addWeddingAttire, updateWeddingAttireStatus, saveWeddingForm, resetDemo,
+    customers, bookings, catalog, invoices, payments, refunds, inventory, movements, stockOpnames, expenses, activities, weddingAttire, weddingForms,
+    employees, jobAssignments, activeEmployees, businessProfile, paymentMethods, poExpenseCategories, generalExpenseCategories,
+    totalBilling, totalPaid, totalReceivable, totalExpenses, totalRefunds, totalCashOut, netCashflow, upcomingBookings, lowStock, laundryUrgentAlerts,
+    groupTotal, sortedOrderGroups, sortInvoiceItemsIntiFirst, invoiceTotal, bookingInvoices, bookingInvoice, bookingPayments, bookingTotal, bookingPaid, bookingBalance, customerFor, bookingFor,
+    stockAvailable, stockStatus, attireSchedule, effectiveAttireStatus, attireConflictsOnDate, urgentAttireSchedules, getLaundryUrgentAlerts,
+    addBooking, updateBooking, cancelBooking, addBookingRefund, addPayment, updatePayment, deletePayment, addCatalogItem, updateCatalogItem,
+    createInvoiceFromOrder, addOrderGroupToBooking, updateOrderGroup, deleteOrderGroup,
+    addExpense, addBatchExpenses, updateExpense, deleteExpense, moveStock, submitBatchStockMovement, submitStockOpname, updateStockMovement, deleteStockMovement, updateStockOpname, deleteStockOpname, addInventoryItem, updateInventoryItem, deleteInventoryItem,
+    addWeddingAttire, updateWeddingAttire, updateWeddingAttireStatus, saveWeddingForm, deleteWeddingForm,
+    addEmployee, updateEmployee, toggleEmployeeStatus, jobForBooking, assignedEmployeesForBooking, toggleBookingEmployee, setBookingJobNotes,
+    updateBusinessProfile, addDropdownOption, updateDropdownOption, removeDropdownOption, resetDemo,
   }
 })

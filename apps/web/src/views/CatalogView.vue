@@ -4,8 +4,10 @@ import { Plus, Search, Image as ImageIcon, Pencil, Check, UploadCloud, LoaderCir
 import { useRouter } from 'vue-router'
 import { useCrmStore, type CatalogItem, type CatalogType } from '../stores/crm'
 import { formatCurrency } from '../utils/format'
+import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
+import CurrencyInput from '../components/CurrencyInput.vue'
 
 const store = useCrmStore()
 const router = useRouter()
@@ -47,24 +49,21 @@ const continueToOrder = () => {
 }
 
 const handleFile = async (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
+  const inputEl = event.target as HTMLInputElement
+  const file = inputEl.files?.[0]
   if (!file) return
   uploadError.value = ''
-  if (file.size > 5 * 1024 * 1024) { uploadError.value = 'Ukuran gambar maksimal 5 MB.'; return }
-  imagePreview.value = URL.createObjectURL(file)
-  const body = new FormData()
-  body.append('file', file)
-  body.append('purpose', 'catalog')
-  body.append('visibility', 'public')
   uploading.value = true
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/files`, { method: 'POST', body })
-    const payload = await response.json() as { ok: boolean; data?: { url: string }; error?: { message: string } }
-    if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message ?? 'Upload gagal.')
-    form.imageUrl = payload.data.url
+    const result = await uploadImageWithFallback(file, 'catalog')
+    form.imageUrl = result.url
+    imagePreview.value = result.url
   } catch (error) {
     uploadError.value = error instanceof Error ? error.message : 'Upload gagal.'
-  } finally { uploading.value = false }
+  } finally {
+    uploading.value = false
+    inputEl.value = ''
+  }
 }
 
 const submit = () => {
@@ -81,11 +80,11 @@ const submit = () => {
 <template>
   <div class="page-stack">
     <section class="page-heading">
-      <div><span class="eyebrow">Workspace</span><h2>Katalog Jasa</h2><p>Harga referensi layanan inti dan additional. Harga transaksi tetap dapat disesuaikan.</p></div>
+      <div><span class="eyebrow">Ruang Kerja</span><h2>Katalog Jasa</h2><p>Harga acuan layanan inti dan layanan tambahan. Harga transaksi tetap dapat disesuaikan.</p></div>
       <button class="primary-button" @click="openCreate"><Plus :size="18" />Tambah Layanan</button>
     </section>
     <section class="catalog-toolbar">
-      <div class="segmented-tabs"><button v-for="tab in ['Semua', 'Inti', 'Additional'] as const" :key="tab" :class="{ active: activeTab === tab }" @click="activeTab = tab">{{ tab === 'Semua' ? 'Semua Layanan' : `Katalog ${tab}` }}</button></div>
+      <div class="segmented-tabs"><button v-for="tab in ['Semua', 'Inti', 'Additional'] as const" :key="tab" :class="{ active: activeTab === tab }" @click="activeTab = tab">{{ tab === 'Semua' ? 'Semua Layanan' : tab === 'Inti' ? 'Layanan Inti' : 'Layanan Tambahan' }}</button></div>
       <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Cari layanan" /></label>
     </section>
     <section class="catalog-grid">
@@ -104,7 +103,7 @@ const submit = () => {
         <label><span>Nama layanan *</span><input v-model="form.name" placeholder="Contoh: Makeup Bridesmaid" required /></label>
         <label><span>Jenis katalog *</span><select v-model="form.type"><option>Inti</option><option>Additional</option></select></label>
         <label class="span-2"><span>Deskripsi *</span><textarea v-model="form.description" rows="3" required /></label>
-        <label><span>Harga katalog *</span><input v-model.number="form.price" type="number" min="1" /></label>
+        <label><span>Harga katalog *</span><CurrencyInput v-model="form.price" placeholder="250.000" aria-label="Harga katalog" /></label>
         <label><span>Satuan *</span><input v-model="form.unit" placeholder="orang / sesi" /></label>
         <label class="span-2"><span>Gambar layanan</span><div class="upload-zone"><img v-if="imagePreview" :src="imagePreview" alt="Preview" /><div v-else><UploadCloud :size="25" /><strong>Unggah JPG, PNG, atau WebP</strong><span>Maksimal 5 MB · disimpan di R2 lokal</span></div><input type="file" accept="image/jpeg,image/png,image/webp" @change="handleFile" /></div></label>
         <p v-if="uploading" class="upload-state span-2"><LoaderCircle class="spin" :size="16" />Mengunggah ke R2 lokal…</p>
