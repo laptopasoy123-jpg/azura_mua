@@ -39,8 +39,13 @@ const getAutoTableFinalY = (doc: jsPDF, fallback: number): number => {
 const formatMeasureVal = (field: string, raw?: string) => {
   const trimmed = raw?.trim()
   if (!trimmed) return '-'
-  if (field === 'Shoes' || field === 'Slop' || field === 'List LD') return trimmed
-  return `${trimmed} cm`
+  if (field === 'Shoes' || field === 'Slop') {
+    return /^size\b/i.test(trimmed) ? trimmed : `Size ${trimmed}`
+  }
+  if (field === 'List LD') {
+    return /cm\b/i.test(trimmed) ? trimmed : `${trimmed} cm`
+  }
+  return /cm\b/i.test(trimmed) ? trimmed : `${trimmed} cm`
 }
 
 export const buildWeddingFittingPdfDoc = async (params: {
@@ -416,6 +421,7 @@ export const buildWeddingFittingPdfDoc = async (params: {
   drawEditorialFooter(doc, {
     marginX,
     showPageNumbers: true,
+    framed: true,
   })
 
   return doc
@@ -764,6 +770,7 @@ export const buildWeddingAttireReportPdfDoc = async (input: WeddingAttireReportI
   drawEditorialFooter(doc, {
     marginX,
     showPageNumbers: true,
+    framed: true,
   })
 
   return doc

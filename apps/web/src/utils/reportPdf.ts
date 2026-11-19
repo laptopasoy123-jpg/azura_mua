@@ -476,7 +476,6 @@ export const buildSelectedReportsPdfDoc = async (params: {
         item.code,
         item.name,
         item.category,
-        item.location,
         `${data.stockAvailable(item)} ${item.unit}`,
         `${item.minimumStock} ${item.unit}`,
         displayStockStatus(data.stockStatus(item)),
@@ -488,20 +487,19 @@ export const buildSelectedReportsPdfDoc = async (params: {
           ...tableBase.styles,
           minCellHeight: data.inventory.length ? 12 : 9,
         },
-        head: [['Photo', 'Code', 'Item Name', 'Category', 'Storage', 'Current Stock', 'Minimum', 'Status']],
-        body: rows.length ? rows : [['', '-', 'No inventory items yet', '-', '-', '-', '-', '-']],
+        head: [['Photo', 'Code', 'Item Name', 'Category', 'Current Stock', 'Minimum', 'Status']],
+        body: rows.length ? rows : [['', '-', 'No inventory items yet', '-', '-', '-', '-']],
         columnStyles: {
-          0: { cellWidth: 14, halign: 'center' },
-          1: { cellWidth: 20, fontStyle: 'bold' },
-          2: { cellWidth: 42, fontStyle: 'bold' },
-          3: { cellWidth: 25 },
-          4: { cellWidth: 21 },
-          5: { cellWidth: 21, halign: 'center', fontStyle: 'bold' },
-          6: { cellWidth: 19, halign: 'center' },
-          7: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+          0: { cellWidth: 16, halign: 'center' },
+          1: { cellWidth: 22, fontStyle: 'bold' },
+          2: { cellWidth: 54, fontStyle: 'bold' },
+          3: { cellWidth: 28 },
+          4: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+          5: { cellWidth: 19, halign: 'center' },
+          6: { cellWidth: 21, halign: 'center', fontStyle: 'bold' },
         },
         didParseCell: (hookData) => {
-          if (hookData.section !== 'body' || hookData.column.index !== 7) return
+          if (hookData.section !== 'body' || hookData.column.index !== 6) return
           const val = String(hookData.cell.raw ?? '')
           if (val === 'In Stock') {
             hookData.cell.styles.fillColor = PDF_PALETTE.successBg
@@ -538,6 +536,7 @@ export const buildSelectedReportsPdfDoc = async (params: {
   drawEditorialFooter(doc, {
     marginX,
     showPageNumbers: true,
+    framed: true,
   })
 
   return doc

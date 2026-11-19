@@ -806,11 +806,11 @@ export const useCrmStore = defineStore('crm', () => {
     )
   }
 
-  const urgentAttireSchedules = (attireId: string, referenceDate?: string): AttireScheduleEntry[] => {
+  const urgentAttireSchedules = (attireId: string, referenceDate?: string, maxDays = 1): AttireScheduleEntry[] => {
     const refDate = referenceDate ?? localTodayIso()
     return attireSchedule(attireId, { includePast: false, referenceDate: refDate }).filter((entry) => {
       const diff = calendarDaysDiff(refDate, entry.eventDate)
-      return diff >= 0 && diff <= 1
+      return diff >= 0 && diff <= maxDays
     })
   }
 
@@ -864,6 +864,12 @@ export const useCrmStore = defineStore('crm', () => {
   const actionToast = ref<ActionToast | null>(null)
   let actionToastTimer: ReturnType<typeof setTimeout> | undefined
 
+  const pdfDownloadState = ref<{ active: boolean; title: string; subtitle: string }>({
+    active: false,
+    title: '',
+    subtitle: '',
+  })
+
   const dismissActionToast = () => {
     if (actionToastTimer) {
       clearTimeout(actionToastTimer)
@@ -880,7 +886,26 @@ export const useCrmStore = defineStore('crm', () => {
     actionToastTimer = setTimeout(() => {
       if (actionToast.value?.id === id) actionToast.value = null
       actionToastTimer = undefined
-    }, 4200)
+    }, 3200)
+  }
+
+  const runWithPdfLoader = async (title: string, subtitle: string, fn: () => Promise<void> | void) => {
+    pdfDownloadState.value = { active: true, title, subtitle }
+    const started = Date.now()
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      await fn()
+      const elapsed = Date.now() - started
+      if (elapsed < 650) {
+        await new Promise((resolve) => setTimeout(resolve, 650 - elapsed))
+      }
+      pdfDownloadState.value = { active: false, title: '', subtitle: '' }
+      showActionToast('PDF Downloaded Successfully', `${title} — ${subtitle}`, 'green')
+    } catch (error) {
+      pdfDownloadState.value = { active: false, title: '', subtitle: '' }
+      showActionToast('PDF Download Failed', error instanceof Error ? error.message : 'Unable to generate PDF', 'rose')
+      throw error
+    }
   }
 
   const addActivity = (title: string, detail: string, tone: Activity['tone']) => {
@@ -995,6 +1020,51 @@ export const useCrmStore = defineStore('crm', () => {
     syncRefund(refund)
     syncExpense(cancelExpense)
     return refund
+  }
+
+  const updateBookingRefund = (
+    id: string,
+    input: {
+      bookingId: string
+      refundDate: string
+      amount: number
+      method: BookingRefund['method']
+      proofImageUrl?: string
+      notes?: string
+    },
+  ) => {
+    const existing = refunds.value.find((r) => r.id === id)
+    if (!existing) throw new Error('Refund record not found.')
+    const booking = bookingFor(input.bookingId) ?? bookingFor(existing.bookingId)
+    if (!booking) throw new Error('Booking not found.')
+    if (!input.amount || input.amount <= 0) throw new Error('Refund amount must be greater than Rp. 0.')
+
+    const customer = customerFor(booking.customerId)
+    existing.bookingId = booking.id
+    existing.refundDate = input.refundDate
+    existing.amount = Math.round(Number(input.amount))
+    existing.method = input.method
+    existing.proofImageUrl = input.proofImageUrl || undefined
+    existing.notes = input.notes?.trim() || undefined
+
+    const linkedExpense = expenses.value.find((e) => e.refundId === existing.id)
+    if (linkedExpense) {
+      linkedExpense.bookingId = booking.id
+      linkedExpense.date = existing.refundDate
+      linkedExpense.amount = existing.amount
+      linkedExpense.method = existing.method
+      linkedExpense.proofImageUrl = existing.proofImageUrl
+      linkedExpense.description = `Cancel Payment — ${booking.poNumber} (${customer?.name ?? 'Customer'})`
+      syncExpense(linkedExpense)
+    }
+
+    addActivity(
+      'Cancel refund updated',
+      `${existing.refundNumber} (${booking.poNumber}) updated to Rp. ${new Intl.NumberFormat('id-ID').format(existing.amount)}`,
+      'blue',
+    )
+    syncRefund(existing)
+    return existing
   }
 
   const cancelBooking = (
@@ -1363,6 +1433,15 @@ export const useCrmStore = defineStore('crm', () => {
       bookingId: input.bookingId || undefined,
       proofImageUrl: input.proofImageUrl || undefined,
     })
+    if (existing.refundId) {
+      const linkedRefund = refunds.value.find((r) => r.id === existing.refundId)
+      if (linkedRefund) {
+        linkedRefund.amount = existing.amount
+        linkedRefund.refundDate = existing.date
+        linkedRefund.proofImageUrl = existing.proofImageUrl
+        syncRefund(linkedRefund)
+      }
+    }
     addActivity('Expense updated', existing.description, 'blue')
     syncExpense(existing)
     return existing
@@ -2050,13 +2129,13 @@ export const useCrmStore = defineStore('crm', () => {
     totalBilling, totalPaid, totalReceivable, totalExpenses, totalRefunds, totalCashOut, netCashflow, upcomingBookings, lowStock, laundryUrgentAlerts,
     groupTotal, sortedOrderGroups, sortInvoiceItemsIntiFirst, invoiceTotal, bookingInvoices, bookingInvoice, bookingPayments, bookingTotal, bookingPaid, bookingBalance, customerFor, bookingFor,
     stockAvailable, stockStatus, attireSchedule, effectiveAttireStatus, attireConflictsOnDate, urgentAttireSchedules, getLaundryUrgentAlerts,
-    addBooking, updateBooking, cancelBooking, addBookingRefund, addPayment, updatePayment, deletePayment, addCatalogItem, updateCatalogItem,
+    addBooking, updateBooking, cancelBooking, addBookingRefund, updateBookingRefund, addPayment, updatePayment, deletePayment, addCatalogItem, updateCatalogItem,
     createInvoiceFromOrder, addOrderGroupToBooking, updateOrderGroup, deleteOrderGroup,
     addExpense, addBatchExpenses, updateExpense, deleteExpense, moveStock, submitBatchStockMovement, submitStockOpname, updateStockMovement, deleteStockMovement, updateStockOpname, deleteStockOpname, addInventoryItem, updateInventoryItem, deleteInventoryItem,
     addWeddingAttire, updateWeddingAttire, updateWeddingAttireStatus, saveWeddingForm, deleteWeddingForm,
     addEmployee, updateEmployee, toggleEmployeeStatus, jobForBooking, assignedEmployeesForBooking, toggleBookingEmployee, setBookingJobNotes,
     updateBusinessProfile, addDropdownOption, updateDropdownOption, removeDropdownOption, resetDemo,
-    actionToast, showActionToast, dismissActionToast,
+    actionToast, showActionToast, dismissActionToast, pdfDownloadState, runWithPdfLoader,
     dbSyncState: supabaseSyncState, refreshFromDatabase: hydrateFromSupabase, syncLocalDataToDatabase,
   }
 })

@@ -43,6 +43,7 @@ const cancelRefundForm = reactive<{
 
 // Standalone Refund modal
 const showRefundModal = ref(false)
+const editingRefundId = ref('')
 const refundError = ref('')
 const refundUploading = ref(false)
 const refundForm = reactive<{
@@ -91,7 +92,9 @@ const selectedRefundBooking = computed(() => store.bookingFor(refundForm.booking
 const refundPaidAmount = computed(() => selectedRefundBooking.value?.cancelledPaidAmount ?? 0)
 const refundAlreadyReturned = computed(() =>
   refundForm.bookingId
-    ? store.refunds.filter((r) => r.bookingId === refundForm.bookingId).reduce((sum, r) => sum + r.amount, 0)
+    ? store.refunds
+        .filter((r) => r.bookingId === refundForm.bookingId && r.id !== editingRefundId.value)
+        .reduce((sum, r) => sum + r.amount, 0)
     : 0,
 )
 const refundMaxAllowed = computed(() => Math.max(0, refundPaidAmount.value - refundAlreadyReturned.value))
@@ -108,7 +111,16 @@ const paymentStatus = (id: string) => {
   return 'Unpaid'
 }
 
-const resetForm = () => Object.assign(form, { name: '', phone: '', location: '', eventDate: '', eventTime: '', stylingType: '', notes: '', status: 'Draft' })
+const resetForm = () => Object.assign(form, {
+  name: '',
+  phone: '',
+  location: '',
+  eventDate: '',
+  eventTime: '',
+  stylingType: (store.stylingTypes[0] || 'Hijabdo') as StylingType,
+  notes: '',
+  status: 'Draft',
+})
 const openCreate = () => { editingId.value = ''; error.value = ''; resetForm(); showForm.value = true }
 const openEdit = (booking: Booking) => {
   const customer = store.customerFor(booking.customerId)
@@ -216,6 +228,7 @@ const confirmCancelBooking = () => {
 }
 
 const openRefundModal = (booking?: Booking) => {
+  editingRefundId.value = ''
   refundError.value = ''
   const defaultBookingId = booking?.id ?? cancelledBookings.value[0]?.id ?? ''
   const target = store.bookingFor(defaultBookingId)
@@ -226,6 +239,20 @@ const openRefundModal = (booking?: Booking) => {
     method: store.paymentMethods[0] || 'Transfer',
     proofImageUrl: '',
     notes: target ? `Refund for ${target.poNumber}` : '',
+  })
+  showRefundModal.value = true
+}
+
+const openEditRefundModal = (refund: BookingRefund) => {
+  editingRefundId.value = refund.id
+  refundError.value = ''
+  Object.assign(refundForm, {
+    bookingId: refund.bookingId,
+    refundDate: (refund.refundDate ?? '').slice(0, 10),
+    amount: refund.amount,
+    method: refund.method,
+    proofImageUrl: refund.proofImageUrl ?? '',
+    notes: refund.notes ?? '',
   })
   showRefundModal.value = true
 }
@@ -251,14 +278,26 @@ const submitRefund = () => {
   try {
     refundError.value = ''
     if (!refundForm.bookingId) throw new Error('Please select a cancelled PO first.')
-    store.addBookingRefund({
-      bookingId: refundForm.bookingId,
-      refundDate: refundForm.refundDate,
-      amount: refundForm.amount,
-      method: refundForm.method,
-      proofImageUrl: refundForm.proofImageUrl || undefined,
-      notes: refundForm.notes,
-    })
+    if (editingRefundId.value) {
+      store.updateBookingRefund(editingRefundId.value, {
+        bookingId: refundForm.bookingId,
+        refundDate: refundForm.refundDate,
+        amount: refundForm.amount,
+        method: refundForm.method,
+        proofImageUrl: refundForm.proofImageUrl || undefined,
+        notes: refundForm.notes,
+      })
+    } else {
+      store.addBookingRefund({
+        bookingId: refundForm.bookingId,
+        refundDate: refundForm.refundDate,
+        amount: refundForm.amount,
+        method: refundForm.method,
+        proofImageUrl: refundForm.proofImageUrl || undefined,
+        notes: refundForm.notes,
+      })
+    }
+    editingRefundId.value = ''
     showRefundModal.value = false
     activeView.value = 'refunds'
   } catch (err) {
@@ -277,7 +316,6 @@ const openProofZoom = (url: string) => {
     <section class="page-heading">
       <div><span class="eyebrow">Workspace</span><h2>Customers &amp; Bookings</h2><p>Manage customer contacts, event PO bookings, PO cancellations, and refund payouts.</p></div>
       <div class="heading-actions">
-        <button class="secondary-button" @click="openRefundModal()"><RotateCcw :size="17" />Record Refund</button>
         <button class="primary-button" @click="openCreate"><Plus :size="18" />Add Booking</button>
       </div>
     </section>
@@ -363,9 +401,8 @@ const openProofZoom = (url: string) => {
       <div class="table-toolbar">
         <div>
           <strong>Cancellation Refund History</strong>
-          <p class="refund-subcopy">Every cancellation refund is automatically logged as an expense entry under Cancel Payment.</p>
+          <p class="refund-subcopy">Every cancellation refund is automatically logged as an expense entry under Cancel Payment and can be edited anytime.</p>
         </div>
-        <button class="primary-button" @click="openRefundModal()"><Plus :size="17" />Record Refund</button>
       </div>
       <div class="data-table-wrap">
         <table class="data-table">
@@ -378,6 +415,7 @@ const openProofZoom = (url: string) => {
               <th>Amount</th>
               <th>Proof</th>
               <th>Notes</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -394,9 +432,16 @@ const openProofZoom = (url: string) => {
                 <span v-else class="subtle-line">—</span>
               </td>
               <td>{{ refund.notes || '—' }}</td>
+              <td>
+                <div class="row-actions">
+                  <button type="button" class="icon-button" title="Edit refund details" @click="openEditRefundModal(refund)">
+                    <Pencil :size="15" />
+                  </button>
+                </div>
+              </td>
             </tr>
             <tr v-if="!store.refunds.length">
-              <td colspan="7">
+              <td colspan="8">
                 <div class="empty-state">
                   <RotateCcw :size="26" />
                   <strong>No cancellation refunds yet</strong>
@@ -419,7 +464,6 @@ const openProofZoom = (url: string) => {
         <label>
           <span>Styling Type *</span>
           <select v-model="form.stylingType">
-            <option value="">Select styling type</option>
             <option v-for="sty in store.stylingTypes" :key="sty" :value="sty">{{ sty }}</option>
             <option v-if="form.stylingType && !store.stylingTypes.includes(form.stylingType)" :value="form.stylingType">{{ form.stylingType }}</option>
           </select>
@@ -520,12 +564,17 @@ const openProofZoom = (url: string) => {
       </form>
     </UiModal>
 
-    <UiModal :open="showRefundModal" title="Record Cancellation Refund" description="Refund payouts are automatically added to Expenses (source: Cancel Payment) and Cashflow." wide @close="showRefundModal = false">
+    <UiModal
+      :open="showRefundModal"
+      :title="editingRefundId ? 'Edit Cancellation Refund' : 'Record Cancellation Refund'"
+      description="Refund payouts are automatically synced with Expenses (source: Cancel Payment) and Cashflow."
+      wide
+      @close="showRefundModal = false"
+    >
       <form class="form-grid" @submit.prevent="submitRefund">
         <label class="span-2">
           <span>Cancelled PO Number *</span>
-          <select v-model="refundForm.bookingId">
-            <option value="">Select cancelled PO</option>
+          <select v-model="refundForm.bookingId" :disabled="Boolean(editingRefundId)">
             <option v-for="b in cancelledBookings" :key="b.id" :value="b.id">
               {{ b.poNumber }} — {{ store.customerFor(b.customerId)?.name }}{{ b.cancelledPaidAmount ? ` (Paid ${formatCurrency(b.cancelledPaidAmount)})` : '' }}
             </option>

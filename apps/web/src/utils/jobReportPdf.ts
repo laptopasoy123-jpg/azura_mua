@@ -63,57 +63,63 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
 
   const tableBody = input.rows.length
     ? input.rows.map((row, idx) => [
-        String(idx + 1),
-        `${formatDate(row.eventDate)}${row.eventTime ? `\nAt ${row.eventTime}` : ''}`,
-        `${row.poNumber}\n(${displayBookingStatus(row.status)})`,
-        `${row.customerName}${row.customerPhone ? `\n${row.customerPhone}` : ''}${row.stylingType ? `\nStyling: ${row.stylingType}` : ''}`,
-        row.location || '-',
-        row.servicesSummary || '-',
-        row.assignedNames.length ? row.assignedNames.join('\n') : 'Unassigned',
-        row.notes || '-',
-      ])
+      String(idx + 1),
+      `${formatDate(row.eventDate)}${row.eventTime ? `\nCall Time: ${row.eventTime}` : ''}`,
+      `${row.poNumber}\n${displayBookingStatus(row.status)}`,
+      `${row.customerName}${row.customerPhone ? `\nTel: ${row.customerPhone}` : ''}${row.stylingType ? `\nStyling: ${row.stylingType}` : ''}`,
+      row.location || '-',
+      row.servicesSummary || '-',
+      row.assignedNames.length ? row.assignedNames.map((n, i) => `${i + 1}. ${n}`).join('\n') : 'Unassigned',
+      row.notes || '-',
+    ])
     : [['-', '-', '-', 'No job assignments found in the selected date range.', '-', '-', '-', '-']]
 
   autoTable(doc, {
     startY: y,
     margin: { left: margin, right: margin, bottom: 18 },
     tableWidth: contentWidth,
-    head: [['NO.', 'EVENT SCHEDULE', 'PO NO.', 'CUSTOMER & STYLING', 'EVENT VENUE', 'ORDERED SERVICES', 'ASSIGNED CREW', 'CREW NOTES']],
+    head: [['NO.', 'EVENT DATE & TIME', 'PO & STATUS', 'CLIENT & STYLING', 'VENUE LOCATION', 'ORDERED SERVICES', 'ASSIGNED TEAM', 'FIELD NOTES']],
     body: tableBody,
     theme: 'grid',
     rowPageBreak: 'avoid',
     styles: {
-      fontSize: 8.1,
-      cellPadding: 2.6,
+      fontSize: 8.3,
+      cellPadding: 3,
       textColor: PDF_PALETTE.ink,
-      lineColor: [212, 202, 188],
+      lineColor: [204, 192, 176],
       lineWidth: 0.3,
-      valign: 'top',
+      valign: 'middle',
     },
     headStyles: {
       fillColor: PDF_PALETTE.espresso,
       textColor: PDF_PALETTE.cream,
       fontStyle: 'bold',
-      fontSize: 7.7,
+      fontSize: 7.9,
+      cellPadding: 3,
       lineColor: [90, 78, 66],
       lineWidth: 0.3,
     },
     alternateRowStyles: {
-      fillColor: [252, 250, 246],
+      fillColor: [251, 248, 243],
     },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 31 },
+      0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 31, fontStyle: 'bold' },
       2: { cellWidth: 27, fontStyle: 'bold' },
       3: { cellWidth: 42 },
-      4: { cellWidth: 42 },
-      5: { cellWidth: 49 },
-      6: { cellWidth: 40, fontStyle: 'bold' },
-      7: { cellWidth: 28 },
+      4: { cellWidth: 41 },
+      5: { cellWidth: 48 },
+      6: { cellWidth: 41, fontStyle: 'bold', fillColor: PDF_PALETTE.ivory },
+      7: { cellWidth: 29 },
     },
     didParseCell: (hookData) => {
-      if (hookData.section === 'body' && hookData.column.index === 6 && String(hookData.cell.raw) === 'Unassigned') {
-        hookData.cell.styles.textColor = PDF_PALETTE.dangerFg
+      if (hookData.section === 'body' && hookData.column.index === 6) {
+        if (String(hookData.cell.raw) === 'Unassigned') {
+          hookData.cell.styles.textColor = PDF_PALETTE.dangerFg
+          hookData.cell.styles.fillColor = PDF_PALETTE.dangerBg
+        } else {
+          hookData.cell.styles.textColor = PDF_PALETTE.espresso
+        }
       }
     },
   })

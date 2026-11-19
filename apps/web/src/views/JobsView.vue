@@ -16,6 +16,7 @@ const search = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 const employeeFilter = ref('')
+const poFilter = ref('')
 
 // Complete Job Details & Crew Selection Modal
 const showDetailModal = ref(false)
@@ -55,6 +56,7 @@ const bookingServicesText = (bookingId: string) => {
 const filteredBookings = computed(() => {
   const q = search.value.trim().toLowerCase()
   return activeBookings.value.filter((booking) => {
+    if (poFilter.value && booking.id !== poFilter.value) return false
     if (fromDate.value && booking.eventDate < fromDate.value) return false
     if (toDate.value && booking.eventDate > toDate.value) return false
     const assigned = store.assignedEmployeesForBooking(booking.id)
@@ -105,6 +107,7 @@ const resetFilters = () => {
   fromDate.value = ''
   toDate.value = ''
   employeeFilter.value = ''
+  poFilter.value = ''
 }
 
 // Inline employee manager modal
@@ -159,40 +162,46 @@ const startEditStaff = (emp: EmployeeRecord) => {
 }
 
 const exportPdf = async () => {
-  const { downloadJobReportPdf } = await import('../utils/jobReportPdf')
-  const rows: JobReportRow[] = filteredBookings.value.map((booking) => {
-    const customer = store.customerFor(booking.customerId)
-    const assigned = store.assignedEmployeesForBooking(booking.id)
-    const job = store.jobForBooking(booking.id)
-    return {
-      poNumber: booking.poNumber,
-      eventDate: booking.eventDate,
-      eventTime: booking.eventTime,
-      customerName: customer?.name ?? 'Customer',
-      customerPhone: customer?.phone,
-      stylingType: booking.stylingType,
-      location: booking.location,
-      servicesSummary: bookingServicesText(booking.id) || 'No service items yet',
-      assignedNames: assigned.map((e) => e.name),
-      notes: job?.notes || booking.notes,
-      status: booking.status,
-    }
-  })
-
   const empName = employeeFilter.value && employeeFilter.value !== '__unassigned__'
     ? store.employees.find((e) => e.id === employeeFilter.value)?.name
     : employeeFilter.value === '__unassigned__'
       ? 'Unassigned'
       : undefined
 
-  downloadJobReportPdf({
-    fromDate: fromDate.value,
-    toDate: toDate.value,
-    filterEmployeeName: empName,
-    rows,
-    employees: store.activeEmployees,
-    businessProfile: store.businessProfile,
-  })
+  await store.runWithPdfLoader(
+    'Team Job Assignments PDF',
+    `${filteredBookings.value.length} PO · ${empName || 'All Staff'}`,
+    async () => {
+      const { downloadJobReportPdf } = await import('../utils/jobReportPdf')
+      const rows: JobReportRow[] = filteredBookings.value.map((booking) => {
+        const customer = store.customerFor(booking.customerId)
+        const assigned = store.assignedEmployeesForBooking(booking.id)
+        const job = store.jobForBooking(booking.id)
+        return {
+          poNumber: booking.poNumber,
+          eventDate: booking.eventDate,
+          eventTime: booking.eventTime,
+          customerName: customer?.name ?? 'Customer',
+          customerPhone: customer?.phone,
+          stylingType: booking.stylingType,
+          location: booking.location,
+          servicesSummary: bookingServicesText(booking.id) || 'No service items yet',
+          assignedNames: assigned.map((e) => e.name),
+          notes: job?.notes || booking.notes,
+          status: booking.status,
+        }
+      })
+
+      downloadJobReportPdf({
+        fromDate: fromDate.value,
+        toDate: toDate.value,
+        filterEmployeeName: empName,
+        rows,
+        employees: store.activeEmployees,
+        businessProfile: store.businessProfile,
+      })
+    },
+  )
 }
 </script>
 
@@ -222,12 +231,7 @@ const exportPdf = async () => {
     </section>
 
     <section class="panel table-panel">
-      <div class="job-filter-bar">
-        <label class="table-search">
-          <Search :size="17" />
-          <input v-model="search" type="search" placeholder="Search PO, customer, venue, or employee…" />
-        </label>
-
+      <div class="job-filter-bar job-filter-bar--stacked">
         <div class="job-date-filters">
           <label class="job-filter-field">
             <span>From Date</span>
@@ -250,10 +254,29 @@ const exportPdf = async () => {
               </select>
             </div>
           </label>
+        </div>
+
+        <div class="job-order-search-row">
+          <label class="job-filter-field job-po-select-field">
+            <span>Filter PO / Customer</span>
+            <select v-model="poFilter" aria-label="Filter by PO or Customer">
+              <option value="">All Active PO Orders ({{ activeBookings.length }})</option>
+              <option v-for="b in activeBookings" :key="b.id" :value="b.id">
+                {{ b.poNumber }} — {{ store.customerFor(b.customerId)?.name }} ({{ formatDate(b.eventDate) }})
+              </option>
+            </select>
+          </label>
+          <label class="job-filter-field job-search-field">
+            <span>Search Order / Customer / Venue</span>
+            <div class="table-search">
+              <Search :size="17" />
+              <input v-model="search" type="search" placeholder="Search PO number, customer name, venue, or staff…" />
+            </div>
+          </label>
           <button
-            v-if="search || fromDate || toDate || employeeFilter"
+            v-if="search || fromDate || toDate || employeeFilter || poFilter"
             type="button"
-            class="soft-button"
+            class="soft-button job-reset-btn"
             title="Reset filters"
             @click="resetFilters"
           >
@@ -342,23 +365,25 @@ const exportPdf = async () => {
       @close="showDetailModal = false"
     >
       <template v-if="detailBooking">
-        <div class="detail-grid">
-          <div>
+        <div class="detail-grid job-overview-grid">
+          <div class="job-overview-card">
             <span>PO Number &amp; Status</span>
-            <strong class="mono-code">{{ detailBooking.poNumber }}</strong>
-            <StatusBadge :label="displayBookingStatus(detailBooking.status)" />
+            <div class="job-overview-inline">
+              <strong class="mono-code">{{ detailBooking.poNumber }}</strong>
+              <StatusBadge :label="displayBookingStatus(detailBooking.status)" />
+            </div>
           </div>
-          <div>
+          <div class="job-overview-card">
             <span>Event Schedule</span>
             <strong>{{ formatDate(detailBooking.eventDate) }}</strong>
-            <small>{{ detailBooking.eventTime ? `Time: ${detailBooking.eventTime}` : 'Time not specified' }}</small>
+            <small>{{ detailBooking.eventTime ? `Ready / Call Time: ${detailBooking.eventTime}` : 'Time not specified' }}</small>
           </div>
-          <div>
+          <div class="job-overview-card">
             <span>Customer</span>
             <strong>{{ detailCustomer?.name ?? '-' }}</strong>
             <small>{{ detailCustomer?.phone ?? '-' }}</small>
           </div>
-          <div>
+          <div class="job-overview-card">
             <span>Venue &amp; Styling</span>
             <strong>{{ detailBooking.location }}</strong>
             <small>{{ detailBooking.stylingType ? `Styling: ${detailBooking.stylingType}` : 'No styling type specified' }}</small>

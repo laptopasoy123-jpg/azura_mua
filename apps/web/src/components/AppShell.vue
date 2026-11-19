@@ -286,26 +286,57 @@ const upcomingCustomerAlerts = computed(() => {
 
     <Transition name="toast-slide" mode="out-in">
       <div
-        v-if="store.actionToast"
+        v-if="store.pdfDownloadState.active"
+        class="pdf-loader-backdrop"
+        role="status"
+        aria-live="assertive"
+      >
+        <div class="pdf-loader-card">
+          <div class="pdf-loader-orbit">
+            <span class="pdf-loader-spinner" aria-hidden="true"></span>
+            <div class="pdf-loader-logo">
+              <img
+                v-if="store.businessProfile.logoUrl"
+                :src="store.businessProfile.logoUrl"
+                :alt="store.businessProfile.name"
+              />
+              <span v-else>{{ (store.businessProfile.name || 'A').charAt(0).toUpperCase() }}</span>
+            </div>
+          </div>
+          <div class="pdf-loader-copy">
+            <span class="pdf-loader-eyebrow">Generating Official PDF</span>
+            <strong>{{ store.pdfDownloadState.title || 'Preparing Document...' }}</strong>
+            <p>{{ store.pdfDownloadState.subtitle || 'Formatting high-resolution studio stationery' }}</p>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition name="toast-slide" mode="out-in">
+      <div
+        v-if="store.actionToast && !store.pdfDownloadState.active"
         :key="store.actionToast.id"
-        class="action-toast-popup"
-        :class="`is-${store.actionToast.tone}`"
+        class="action-popup-backdrop"
         role="status"
         aria-live="polite"
+        @click.self="store.dismissActionToast"
       >
-        <span class="action-toast-icon" aria-hidden="true">
-          <Trash2 v-if="store.actionToast.tone === 'rose'" :size="18" />
-          <AlertTriangle v-else-if="store.actionToast.tone === 'amber'" :size="18" />
-          <CheckCircle2 v-else-if="store.actionToast.tone === 'green' || store.actionToast.tone === 'blue'" :size="18" />
-          <Info v-else :size="18" />
-        </span>
-        <div class="action-toast-copy">
-          <strong>{{ store.actionToast.title }}</strong>
-          <span>{{ store.actionToast.detail }}</span>
+        <div class="action-toast-popup" :class="`is-${store.actionToast.tone}`">
+          <button type="button" class="action-toast-close" aria-label="Dismiss notification" @click="store.dismissActionToast">
+            <X :size="15" />
+          </button>
+          <span class="action-toast-icon" aria-hidden="true">
+            <Trash2 v-if="store.actionToast.tone === 'rose'" :size="22" />
+            <AlertTriangle v-else-if="store.actionToast.tone === 'amber'" :size="22" />
+            <CheckCircle2 v-else-if="store.actionToast.tone === 'green' || store.actionToast.tone === 'blue'" :size="22" />
+            <Info v-else :size="22" />
+          </span>
+          <div class="action-toast-copy">
+            <strong>{{ store.actionToast.title }}</strong>
+            <span>{{ store.actionToast.detail }}</span>
+          </div>
+          <button type="button" class="action-toast-ok" @click="store.dismissActionToast">OK</button>
         </div>
-        <button type="button" class="action-toast-close" aria-label="Dismiss notification" @click="store.dismissActionToast">
-          <X :size="15" />
-        </button>
       </div>
     </Transition>
   </div>

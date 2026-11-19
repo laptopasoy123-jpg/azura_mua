@@ -350,7 +350,7 @@ const openItemForm = (fromMovement = false) => {
     unit: store.units[0] ?? 'pcs',
     initialStock: 0,
     minimumStock: 0,
-    location: '',
+    location: '-',
     imageUrl: '',
   })
   itemError.value = ''
@@ -367,7 +367,7 @@ const openEditItemForm = (item: InventoryItem) => {
     unit: item.unit,
     initialStock: item.initialStock,
     minimumStock: item.minimumStock,
-    location: item.location,
+    location: item.location || '-',
     imageUrl: item.imageUrl ?? '',
   })
   itemError.value = ''
@@ -389,8 +389,8 @@ const confirmDeleteItem = () => {
 
 const submitItem = () => {
   itemError.value = ''
-  if (!itemForm.name.trim() || !itemForm.category.trim() || !itemForm.unit.trim() || !itemForm.location.trim()) {
-    itemError.value = 'Item name, category, unit, and storage location are required.'
+  if (!itemForm.name.trim() || !itemForm.category.trim() || !itemForm.unit.trim()) {
+    itemError.value = 'Item name, category, and unit are required.'
     return
   }
   if (itemForm.initialStock < 0 || itemForm.minimumStock < 0) {
@@ -402,7 +402,7 @@ const submitItem = () => {
       name: itemForm.name,
       category: itemForm.category,
       unit: itemForm.unit,
-      location: itemForm.location,
+      location: itemForm.location.trim() || '-',
       initialStock: itemForm.initialStock,
       minimumStock: itemForm.minimumStock,
       imageUrl: itemForm.imageUrl,
@@ -412,7 +412,7 @@ const submitItem = () => {
       name: itemForm.name,
       category: itemForm.category,
       unit: itemForm.unit,
-      location: itemForm.location,
+      location: itemForm.location.trim() || '-',
       initialStock: itemForm.initialStock,
       minimumStock: itemForm.minimumStock,
       imageUrl: itemForm.imageUrl || undefined,
@@ -431,30 +431,36 @@ const submitItem = () => {
 const formatDiff = (diff: number) => (diff > 0 ? `+${diff}` : String(diff))
 
 const exportInventoryPdf = async () => {
-  const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
-  await downloadSelectedReportsPdf({
-    selectedKeys: ['inventory'],
-    data: {
-      customers: store.customers,
-      bookings: store.bookings,
-      invoices: store.invoices,
-      payments: store.payments,
-      refunds: store.refunds,
-      expenses: store.expenses,
-      inventory: store.inventory,
-      movements: store.movements,
-      stockOpnames: store.stockOpnames,
-      businessProfile: store.businessProfile,
-      sortedOrderGroups: store.sortedOrderGroups,
-      groupTotal: store.groupTotal,
-      invoiceTotal: store.invoiceTotal,
-      bookingTotal: store.bookingTotal,
-      bookingPaid: store.bookingPaid,
-      bookingBalance: store.bookingBalance,
-      stockAvailable: store.stockAvailable,
-      stockStatus: store.stockStatus,
+  await store.runWithPdfLoader(
+    'Inventory Stock Report',
+    `${store.inventory.length} SKU Items`,
+    async () => {
+      const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
+      await downloadSelectedReportsPdf({
+        selectedKeys: ['inventory'],
+        data: {
+          customers: store.customers,
+          bookings: store.bookings,
+          invoices: store.invoices,
+          payments: store.payments,
+          refunds: store.refunds,
+          expenses: store.expenses,
+          inventory: store.inventory,
+          movements: store.movements,
+          stockOpnames: store.stockOpnames,
+          businessProfile: store.businessProfile,
+          sortedOrderGroups: store.sortedOrderGroups,
+          groupTotal: store.groupTotal,
+          invoiceTotal: store.invoiceTotal,
+          bookingTotal: store.bookingTotal,
+          bookingPaid: store.bookingPaid,
+          bookingBalance: store.bookingBalance,
+          stockAvailable: store.stockAvailable,
+          stockStatus: store.stockStatus,
+        },
+      })
     },
-  })
+  )
 }
 </script>
 
@@ -497,7 +503,6 @@ const exportInventoryPdf = async () => {
               <tr>
                 <th>Item &amp; Photo</th>
                 <th>Category</th>
-                <th>Storage</th>
                 <th>Initial</th>
                 <th>In</th>
                 <th>Out</th>
@@ -519,7 +524,6 @@ const exportInventoryPdf = async () => {
                   </div>
                 </td>
                 <td>{{ item.category }}</td>
-                <td>{{ item.location }}</td>
                 <td>{{ item.initialStock }}</td>
                 <td class="positive-number">+{{ item.stockIn }}</td>
                 <td class="negative-number">−{{ item.stockOut }}</td>
@@ -844,11 +848,10 @@ const exportInventoryPdf = async () => {
     <!-- Add / Edit Inventory Item WITH Photo Upload & Dropdown Settings synced Category/Unit -->
     <UiModal :open="showItemForm" :title="editingItemId ? 'Edit Inventory Item' : 'Add Inventory Item'" :description="editingItemId ? 'Update item name, photo, category, unit, or minimum threshold.' : 'Item code is generated automatically and synced with Dropdown Settings.'" wide @close="showItemForm = false">
       <form class="form-grid" @submit.prevent="submitItem">
-        <label><span>Item Name *</span><input v-model="itemForm.name" placeholder="e.g. Lip Tint Velvet" /></label>
+        <label class="span-2"><span>Item Name *</span><input v-model="itemForm.name" placeholder="e.g. Lip Tint Velvet" /></label>
         <label>
           <span>Category *</span>
           <select v-model="itemForm.category">
-            <option value="">Select category</option>
             <option v-for="cat in store.inventoryCategories" :key="cat" :value="cat">{{ cat }}</option>
             <option v-if="itemForm.category && !store.inventoryCategories.includes(itemForm.category)" :value="itemForm.category">{{ itemForm.category }}</option>
           </select>
@@ -860,7 +863,6 @@ const exportInventoryPdf = async () => {
             <option v-if="itemForm.unit && !store.units.includes(itemForm.unit)" :value="itemForm.unit">{{ itemForm.unit }}</option>
           </select>
         </label>
-        <label><span>Storage Location *</span><input v-model="itemForm.location" placeholder="e.g. Drawer A4" /></label>
         <label><span>Initial Stock</span><input v-model.number="itemForm.initialStock" type="number" min="0" /></label>
         <label><span>Minimum Stock Alert</span><input v-model.number="itemForm.minimumStock" type="number" min="0" /></label>
         <div class="span-2 attire-upload-block">

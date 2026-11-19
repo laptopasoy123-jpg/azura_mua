@@ -172,31 +172,36 @@ const cashflowDrillRows = computed(() => {
 const exportCashflowRangePdf = async () => {
   exportingCashflow.value = true
   try {
-    const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
-    await downloadSelectedReportsPdf({
-      selectedKeys: ['cashflow', 'payments', 'expenses'],
-      fromDate: cashflowFrom.value,
-      toDate: cashflowTo.value,
-      data: {
-        customers: store.customers,
-        bookings: store.bookings,
-        invoices: store.invoices,
-        payments: store.payments,
-        refunds: store.refunds,
-        expenses: store.expenses,
-        inventory: store.inventory,
-        movements: store.movements,
-        stockOpnames: store.stockOpnames,
-        businessProfile: store.businessProfile,
-        sortedOrderGroups: store.sortedOrderGroups,
-        groupTotal: store.groupTotal,
-        invoiceTotal: store.invoiceTotal,
-        bookingTotal: store.bookingTotal,
-        bookingPaid: store.bookingPaid,
-        bookingBalance: store.bookingBalance,
-        stockAvailable: store.stockAvailable,
-        stockStatus: store.stockStatus,
-      },
+    const periodLabel = cashflowFrom.value || cashflowTo.value
+      ? `${cashflowFrom.value || 'Start'} to ${cashflowTo.value || 'Present'}`
+      : 'All Recorded Dates'
+    await store.runWithPdfLoader('Monthly Cashflow Report', periodLabel, async () => {
+      const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
+      await downloadSelectedReportsPdf({
+        selectedKeys: ['cashflow', 'payments', 'expenses'],
+        fromDate: cashflowFrom.value,
+        toDate: cashflowTo.value,
+        data: {
+          customers: store.customers,
+          bookings: store.bookings,
+          invoices: store.invoices,
+          payments: store.payments,
+          refunds: store.refunds,
+          expenses: store.expenses,
+          inventory: store.inventory,
+          movements: store.movements,
+          stockOpnames: store.stockOpnames,
+          businessProfile: store.businessProfile,
+          sortedOrderGroups: store.sortedOrderGroups,
+          groupTotal: store.groupTotal,
+          invoiceTotal: store.invoiceTotal,
+          bookingTotal: store.bookingTotal,
+          bookingPaid: store.bookingPaid,
+          bookingBalance: store.bookingBalance,
+          stockAvailable: store.stockAvailable,
+          stockStatus: store.stockStatus,
+        },
+      })
     })
   } finally {
     exportingCashflow.value = false
@@ -299,27 +304,31 @@ const exportCashflowRangePdf = async () => {
       </article>
 
       <article class="panel invoice-summary">
-        <header class="panel-header"><div><span class="eyebrow">Invoices</span><h3>Payment Status</h3><p>Click any status below to view matching POs.</p></div></header>
+        <header class="panel-header"><div><span class="eyebrow">Invoices</span><h3>Payment Status</h3><p>Click any status below to view matching POs in the database.</p></div></header>
         <div class="donut-wrap">
           <div
-            class="donut"
+            class="donut interactive-row"
+            role="button"
+            tabindex="0"
             :style="{
               '--paid': `${(invoiceBuckets.paid.length / Math.max(1, store.invoices.length)) * 360}deg`,
               '--partial': `${((invoiceBuckets.paid.length + invoiceBuckets.partial.length) / Math.max(1, store.invoices.length)) * 360}deg`,
             }"
+            @click="openDrill('billing')"
+            @keydown.enter="openDrill('billing')"
           >
-            <div><strong>{{ store.invoices.length }}</strong><span>Total</span></div>
+            <div><strong>{{ store.invoices.length }} PO</strong><span>Total</span></div>
           </div>
         </div>
-        <div class="invoice-legend" style="display: grid; gap: 4px;">
+        <div class="invoice-legend" style="display: grid; gap: 6px;">
           <button type="button" class="invoice-legend-btn" @click="openDrill('invoices-paid')">
-            <i class="paid" /><span>Paid</span><strong>{{ invoiceBuckets.paid.length }}</strong>
+            <i class="paid" /><span>Paid</span><strong>{{ invoiceBuckets.paid.length }} PO</strong>
           </button>
           <button type="button" class="invoice-legend-btn" @click="openDrill('invoices-partial')">
-            <i class="partial" /><span>Partial</span><strong>{{ invoiceBuckets.partial.length }}</strong>
+            <i class="partial" /><span>Partial</span><strong>{{ invoiceBuckets.partial.length }} PO</strong>
           </button>
           <button type="button" class="invoice-legend-btn" @click="openDrill('invoices-unpaid')">
-            <i class="unpaid" /><span>Unpaid</span><strong>{{ invoiceBuckets.unpaid.length }}</strong>
+            <i class="unpaid" /><span>Unpaid</span><strong>{{ invoiceBuckets.unpaid.length }} PO</strong>
           </button>
         </div>
       </article>
@@ -355,8 +364,8 @@ const exportCashflowRangePdf = async () => {
           >
             <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.name" class="item-thumb-img" />
             <span v-else class="stock-icon"><PackageSearch :size="19" /></span>
-            <div><strong>{{ item.name }}</strong><span>{{ item.category }} · {{ item.location }}</span></div>
-            <div class="stock-count"><strong>{{ store.stockAvailable(item) }}</strong><span>{{ item.unit }}</span></div>
+            <div><strong>{{ item.name }}</strong><span>{{ item.category }}</span></div>
+            <div class="stock-count"><strong>{{ store.stockAvailable(item) }} {{ item.unit }}</strong></div>
             <StatusBadge :label="displayStockStatus(store.stockStatus(item))" />
           </div>
           <div v-if="!store.lowStock.length" class="empty-state" style="min-height: 110px;">

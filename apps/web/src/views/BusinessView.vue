@@ -26,6 +26,8 @@ const showInvoice = ref(false)
 const selectedInvoiceId = ref('')
 const selectedOrderBookingId = ref('')
 const orderSearch = ref('')
+const invoiceSearch = ref('')
+const invoiceStatusFilter = ref<'All' | 'Paid' | 'Partial' | 'Unpaid'>('All')
 const expenseError = ref('')
 const orderError = ref('')
 const exportingReports = ref(false)
@@ -129,6 +131,10 @@ const filteredExpenses = computed(() =>
     return true
   }),
 )
+const editingExpenseRecord = computed(() =>
+  editingExpenseId.value ? store.expenses.find((e) => e.id === editingExpenseId.value) ?? null : null,
+)
+const editingExpenseIsCancel = computed(() => editingExpenseRecord.value?.source === 'Bayar Cancel')
 const order = reactive<{ bookingId: string; issuedAt: string; orderDate: string; dueDate: string; items: OrderLine[] }>({
   bookingId: '',
   issuedAt: new Date().toISOString().slice(0, 10),
@@ -175,6 +181,23 @@ const filteredOrderInvoices = computed(() => {
       inv.invoiceNumber.toLowerCase().includes(query)
       || (booking?.poNumber.toLowerCase().includes(query) ?? false)
       || (customer?.name.toLowerCase().includes(query) ?? false)
+    )
+  })
+})
+
+const filteredInvoices = computed(() => {
+  const query = invoiceSearch.value.trim().toLowerCase()
+  return store.invoices.filter((inv) => {
+    const status = paymentStatus(inv.bookingId)
+    if (invoiceStatusFilter.value !== 'All' && status !== invoiceStatusFilter.value) return false
+    if (!query) return true
+    const booking = store.bookingFor(inv.bookingId)
+    const customer = booking ? store.customerFor(booking.customerId) : undefined
+    return (
+      inv.invoiceNumber.toLowerCase().includes(query)
+      || (booking?.poNumber.toLowerCase().includes(query) ?? false)
+      || (customer?.name.toLowerCase().includes(query) ?? false)
+      || (customer?.phone.toLowerCase().includes(query) ?? false)
     )
   })
 })
@@ -281,7 +304,8 @@ const onCatalogChange = (line: OrderLine) => {
 
 const openOrder = (catalogItemId = '') => {
   const today = new Date().toISOString().slice(0, 10)
-  Object.assign(order, { bookingId: '', issuedAt: today, orderDate: today, dueDate: '', items: [] })
+  const defaultBookingId = eligibleBookings.value[0]?.id ?? ''
+  Object.assign(order, { bookingId: defaultBookingId, issuedAt: today, orderDate: today, dueDate: '', items: [] })
   if (catalogItemId) {
     const item = store.catalog.find((entry) => entry.id === catalogItemId)
     if (item) {
@@ -295,6 +319,8 @@ const openOrder = (catalogItemId = '') => {
         customerPrice: item.price,
       })
     }
+  } else {
+    addGroupRowByType(order.items, props.module === 'additional' ? 'Additional' : 'Inti')
   }
   orderError.value = ''
   showOrder.value = true
@@ -373,6 +399,7 @@ const openAddGroupForm = () => {
   addGroupError.value = ''
   addGroupForm.orderDate = new Date().toISOString().slice(0, 10)
   addGroupForm.items = []
+  addGroupRowByType(addGroupForm.items, 'Additional')
   showAddGroupForm.value = true
 }
 
@@ -383,13 +410,19 @@ const cancelAddGroupForm = () => {
 }
 
 const addGroupRowByType = (targetList: OrderLine[], filterType: 'All' | CatalogType) => {
+  const defaultItem = filterType === 'Inti'
+    ? coreCatalog.value[0]
+    : filterType === 'Additional'
+      ? additionalCatalog.value[0]
+      : eligibleCatalog.value[0]
   targetList.push({
     key: crypto.randomUUID(),
-    catalogItemId: '',
-    serviceName: '',
+    catalogItemId: defaultItem?.id ?? '',
+    serviceName: defaultItem?.name ?? '',
+    serviceKind: defaultItem?.type,
     filterType,
     quantity: 1,
-    customerPrice: 0,
+    customerPrice: defaultItem?.price ?? 0,
   })
 }
 
@@ -604,21 +637,27 @@ const previewInvoice = (invoice: Invoice) => {
   showInvoice.value = true
 }
 const downloadInvoice = async (invoice: Invoice) => {
-  const { downloadInvoicePdf } = await import('../utils/invoicePdf')
   const booking = store.bookingFor(invoice.bookingId)
   const customer = booking ? store.customerFor(booking.customerId) : undefined
-  downloadInvoicePdf({
-    invoice,
-    booking,
-    customer,
-    sortedGroups: store.sortedOrderGroups(invoice),
-    payments: store.bookingPayments(invoice.bookingId),
-    totalBilling: store.bookingTotal(invoice.bookingId),
-    totalPaid: store.bookingPaid(invoice.bookingId),
-    balance: store.bookingBalance(invoice.bookingId),
-    businessProfile: store.businessProfile,
-    sortItemsIntiFirst: store.sortInvoiceItemsIntiFirst,
-  })
+  await store.runWithPdfLoader(
+    `Invoice ${invoice.invoiceNumber}`,
+    `${booking?.poNumber ?? 'PO'} · ${customer?.name ?? 'Customer'}`,
+    async () => {
+      const { downloadInvoicePdf } = await import('../utils/invoicePdf')
+      downloadInvoicePdf({
+        invoice,
+        booking,
+        customer,
+        sortedGroups: store.sortedOrderGroups(invoice),
+        payments: store.bookingPayments(invoice.bookingId),
+        totalBilling: store.bookingTotal(invoice.bookingId),
+        totalPaid: store.bookingPaid(invoice.bookingId),
+        balance: store.bookingBalance(invoice.bookingId),
+        businessProfile: store.businessProfile,
+        sortItemsIntiFirst: store.sortInvoiceItemsIntiFirst,
+      })
+    },
+  )
 }
 const printInvoice = () => window.print()
 
@@ -646,32 +685,38 @@ const exportSelectedReportsPdf = async (overrideKeys?: ReportKey[]) => {
     const keys = overrideKeys ?? selectedReportKeys.value
     if (!keys.length) throw new Error('Select at least one report section to export as PDF.')
     exportingReports.value = true
-    const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
-    await downloadSelectedReportsPdf({
-      selectedKeys: keys,
-      fromDate: reportFromDate.value,
-      toDate: reportToDate.value,
-      data: {
-        customers: store.customers,
-        bookings: store.bookings,
-        invoices: store.invoices,
-        payments: store.payments,
-        refunds: store.refunds,
-        expenses: store.expenses,
-        inventory: store.inventory,
-        movements: store.movements,
-        stockOpnames: store.stockOpnames,
-        businessProfile: store.businessProfile,
-        sortedOrderGroups: store.sortedOrderGroups,
-        groupTotal: store.groupTotal,
-        invoiceTotal: store.invoiceTotal,
-        bookingTotal: store.bookingTotal,
-        bookingPaid: store.bookingPaid,
-        bookingBalance: store.bookingBalance,
-        stockAvailable: store.stockAvailable,
-        stockStatus: store.stockStatus,
+    await store.runWithPdfLoader(
+      'Executive Business Report',
+      `${keys.length} report section(s) exported`,
+      async () => {
+        const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
+        await downloadSelectedReportsPdf({
+          selectedKeys: keys,
+          fromDate: reportFromDate.value,
+          toDate: reportToDate.value,
+          data: {
+            customers: store.customers,
+            bookings: store.bookings,
+            invoices: store.invoices,
+            payments: store.payments,
+            refunds: store.refunds,
+            expenses: store.expenses,
+            inventory: store.inventory,
+            movements: store.movements,
+            stockOpnames: store.stockOpnames,
+            businessProfile: store.businessProfile,
+            sortedOrderGroups: store.sortedOrderGroups,
+            groupTotal: store.groupTotal,
+            invoiceTotal: store.invoiceTotal,
+            bookingTotal: store.bookingTotal,
+            bookingPaid: store.bookingPaid,
+            bookingBalance: store.bookingBalance,
+            stockAvailable: store.stockAvailable,
+            stockStatus: store.stockStatus,
+          },
+        })
       },
-    })
+    )
   } catch (err) {
     reportError.value = err instanceof Error ? err.message : 'Failed to generate PDF report.'
   } finally {
@@ -705,14 +750,28 @@ watch(() => route.query.catalog, (catalog) => {
     </section>
 
     <template v-if="module === 'invoices'">
-      <section class="summary-strip">
-        <div><span>Total Invoices</span><strong>{{ store.invoices.length }}</strong></div>
+      <section class="summary-strip summary-strip--invoices">
+        <div class="summary-card-featured"><span>Total Invoices</span><strong>{{ store.invoices.length }}</strong></div>
         <div><span>Total Billed</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
         <div><span>Collected</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
         <div><span>Receivables</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
       </section>
+
+      <section class="panel invoice-filter-bar">
+        <label class="table-search">
+          <Search :size="17" />
+          <input v-model="invoiceSearch" placeholder="Search customer name, PO number, or invoice no..." />
+        </label>
+        <div class="segmented-tabs">
+          <button type="button" :class="{ active: invoiceStatusFilter === 'All' }" @click="invoiceStatusFilter = 'All'">All ({{ store.invoices.length }})</button>
+          <button type="button" :class="{ active: invoiceStatusFilter === 'Paid' }" @click="invoiceStatusFilter = 'Paid'">Paid</button>
+          <button type="button" :class="{ active: invoiceStatusFilter === 'Partial' }" @click="invoiceStatusFilter = 'Partial'">Partial</button>
+          <button type="button" :class="{ active: invoiceStatusFilter === 'Unpaid' }" @click="invoiceStatusFilter = 'Unpaid'">Unpaid</button>
+        </div>
+      </section>
+
       <section class="invoice-card-list">
-        <article v-for="invoice in store.invoices" :key="invoice.id" class="invoice-row-card">
+        <article v-for="invoice in filteredInvoices" :key="invoice.id" class="invoice-row-card">
           <span class="document-icon"><ReceiptText :size="22" /></span>
           <div class="invoice-main">
             <span>Issued {{ formatDate(invoice.issuedAt) }} · {{ store.sortedOrderGroups(invoice).length }} order group(s)</span>
@@ -730,12 +789,17 @@ watch(() => route.query.catalog, (catalog) => {
             <button class="icon-button" title="Download Invoice PDF" @click="downloadInvoice(invoice)"><Download :size="16" /></button>
           </div>
         </article>
+        <div v-if="!filteredInvoices.length" class="panel empty-state">
+          <ReceiptText :size="26" />
+          <strong>No matching invoices found</strong>
+          <span>Try clearing the search query or switching the payment status filter.</span>
+        </div>
       </section>
     </template>
 
     <template v-else-if="module === 'orders'">
-      <section class="summary-strip">
-        <div><span>PO Orders</span><strong>{{ store.invoices.length }}</strong></div>
+      <section class="summary-strip summary-strip--orders">
+        <div class="summary-card-featured"><span>PO Orders</span><strong>{{ store.invoices.length }}</strong></div>
         <div><span>Total Billed</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
         <div><span>Payments Received</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
         <div><span>Balance Due</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
@@ -858,10 +922,10 @@ watch(() => route.query.catalog, (catalog) => {
 
     <template v-else-if="module === 'expenses'">
       <section class="summary-strip">
+        <div><span>Transactions</span><strong>{{ store.expenses.length }}</strong></div>
         <div><span>Total Expenses</span><strong>{{ formatCurrency(store.totalExpenses) }}</strong></div>
         <div><span>PO Linked</span><strong>{{ formatCurrency(store.expenses.filter((e) => e.bookingId).reduce((s, e) => s + e.amount, 0)) }}</strong></div>
         <div><span>Cancel Payouts</span><strong>{{ formatCurrency(store.expenses.filter((e) => e.source === 'Bayar Cancel').reduce((s, e) => s + e.amount, 0)) }}</strong></div>
-        <div><span>Transactions</span><strong>{{ store.expenses.length }}</strong></div>
       </section>
       <section class="panel table-panel">
         <div class="table-toolbar">
@@ -884,11 +948,14 @@ watch(() => route.query.catalog, (catalog) => {
                       {{ row.bookingId ? 'PO Linked' : 'Studio Overhead' }}
                     </span>
                     <span v-if="row.source === 'Bayar Cancel'" class="source-pill is-cancel">
-                      Cancel Payment
+                      Auto Cancel Refund
                     </span>
                   </div>
                 </td>
-                <td><strong>{{ row.description }}</strong></td>
+                <td>
+                  <strong>{{ row.description }}</strong>
+                  <span v-if="row.source === 'Bayar Cancel'" class="subtle-line">Auto-recorded upon booking cancellation</span>
+                </td>
                 <td>{{ row.category }}</td>
                 <td>{{ row.bookingId ? store.bookingFor(row.bookingId)?.poNumber : 'Studio Overhead' }}</td>
                 <td>{{ row.method === 'Cash' || row.method === 'Tunai' ? 'Cash' : row.method }}</td>
@@ -982,93 +1049,115 @@ watch(() => route.query.catalog, (catalog) => {
       </section>
     </template>
 
-    <UiModal :open="showExpense" :title="editingExpenseId ? 'Edit Expense Record' : 'Record Expenses (Batch Enabled)'" description="Select expense scope and log one or more expense lines at once." wide @close="showExpense = false">
+    <UiModal
+      :open="showExpense"
+      :title="editingExpenseIsCancel ? 'Edit Cancel Payment (Auto Refund)' : (editingExpenseId ? 'Edit Expense Record' : 'Record Expenses (Batch Enabled)')"
+      :description="editingExpenseIsCancel ? 'This is an automatic cancellation refund entry. Only Date, Amount, and Payment Proof can be modified.' : 'Select expense scope and log one or more expense lines at once.'"
+      wide
+      @close="showExpense = false"
+    >
       <form class="form-grid" @submit.prevent="submitExpense">
-        <div class="span-2 expense-scope-toggle">
-          <span>Expense Scope *</span>
-          <div class="segmented-tabs">
-            <button
-              type="button"
-              :class="{ active: expense.expenseScope === 'Berdasarkan PO' }"
-              @click="expense.expenseScope = 'Berdasarkan PO'; expense.items.forEach((l) => { if (!store.poExpenseCategories.includes(l.category)) l.category = store.poExpenseCategories[0] ?? l.category })"
-            >
-              PO Linked
-            </button>
-            <button
-              type="button"
-              :class="{ active: expense.expenseScope === 'Di Luar PO' }"
-              @click="expense.expenseScope = 'Di Luar PO'; expense.bookingId = ''; expense.items.forEach((l) => { if (!store.generalExpenseCategories.includes(l.category)) l.category = store.generalExpenseCategories[0] ?? l.category })"
-            >
-              Studio Overhead (Outside PO)
-            </button>
-          </div>
-        </div>
-        <label><span>Date *</span><input v-model="expense.date" type="date" /></label>
-        <label>
-          <span>Payment Method *</span>
-          <select v-model="expense.method">
-            <option v-for="m in store.paymentMethods" :key="m" :value="m">{{ m }}</option>
-            <option v-if="expense.method && !store.paymentMethods.includes(expense.method)" :value="expense.method">
-              {{ expense.method === 'Cash' || expense.method === 'Tunai' ? 'Cash' : expense.method }}
-            </option>
-          </select>
-        </label>
-        <label v-if="expense.expenseScope === 'Berdasarkan PO'" class="span-2">
-          <span>Select PO Number *</span>
-          <select v-model="expense.bookingId">
-            <option value="">Select linked PO</option>
-            <option v-for="booking in store.bookings.filter((b) => b.status !== 'Dibatalkan')" :key="booking.id" :value="booking.id">
-              {{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }}
-            </option>
-          </select>
-        </label>
-
-        <div class="order-lines span-2">
-          <div class="order-lines-head">
+        <template v-if="editingExpenseIsCancel">
+          <div class="span-2 paid-info-banner">
             <div>
-              <strong>Expense Line Items ({{ expense.items.length }} Row(s))</strong>
-              <span>Log multiple items together in a single batch save.</span>
+              <strong>Automatic Cancellation Refund ({{ editingExpenseRecord?.description }})</strong>
+              <span>Linked PO and category are locked to preserve cancellation audit history. Changes here sync with Refund History.</span>
             </div>
-            <button v-if="!editingExpenseId" type="button" class="soft-button" @click="addExpenseLine">
-              <Plus :size="15" />+ Add Line
-            </button>
+          </div>
+          <label><span>Refund / Expense Date *</span><input v-model="expense.date" type="date" /></label>
+          <label v-if="expense.items[0]">
+            <span>Refund Amount *</span>
+            <CurrencyInput v-model="expense.items[0].amount" aria-label="Cancel payment amount" />
+          </label>
+        </template>
+
+        <template v-else>
+          <div class="span-2 expense-scope-toggle">
+            <span>Expense Scope *</span>
+            <div class="segmented-tabs">
+              <button
+                type="button"
+                :class="{ active: expense.expenseScope === 'Berdasarkan PO' }"
+                @click="expense.expenseScope = 'Berdasarkan PO'; expense.items.forEach((l) => { if (!store.poExpenseCategories.includes(l.category)) l.category = store.poExpenseCategories[0] ?? l.category })"
+              >
+                PO Linked
+              </button>
+              <button
+                type="button"
+                :class="{ active: expense.expenseScope === 'Di Luar PO' }"
+                @click="expense.expenseScope = 'Di Luar PO'; expense.bookingId = ''; expense.items.forEach((l) => { if (!store.generalExpenseCategories.includes(l.category)) l.category = store.generalExpenseCategories[0] ?? l.category })"
+              >
+                Studio Overhead (Outside PO)
+              </button>
+            </div>
+          </div>
+          <label><span>Date *</span><input v-model="expense.date" type="date" /></label>
+          <label>
+            <span>Payment Method *</span>
+            <select v-model="expense.method">
+              <option v-for="m in store.paymentMethods" :key="m" :value="m">{{ m }}</option>
+              <option v-if="expense.method && !store.paymentMethods.includes(expense.method)" :value="expense.method">
+                {{ expense.method === 'Cash' || expense.method === 'Tunai' ? 'Cash' : expense.method }}
+              </option>
+            </select>
+          </label>
+          <label v-if="expense.expenseScope === 'Berdasarkan PO'" class="span-2">
+            <span>Select PO Number *</span>
+            <select v-model="expense.bookingId">
+              <option value="">Select linked PO</option>
+              <option v-for="booking in store.bookings.filter((b) => b.status !== 'Dibatalkan')" :key="booking.id" :value="booking.id">
+                {{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }}
+              </option>
+            </select>
+          </label>
+
+          <div class="order-lines span-2">
+            <div class="order-lines-head">
+              <div>
+                <strong>Expense Line Items ({{ expense.items.length }} Row(s))</strong>
+                <span>Log multiple items together in a single batch save.</span>
+              </div>
+              <button v-if="!editingExpenseId" type="button" class="soft-button" @click="addExpenseLine">
+                <Plus :size="15" />Add Line
+              </button>
+            </div>
+
+            <div v-for="(line, idx) in expense.items" :key="line.key" class="expense-batch-row">
+              <label>
+                <span>Category {{ idx + 1 }} *</span>
+                <select v-model="line.category">
+                  <option v-for="cat in expenseCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
+                  <option v-if="line.category && !expenseCategoryOptions.includes(line.category)" :value="line.category">
+                    {{ line.category }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span>Description *</span>
+                <input v-model="line.description" placeholder="e.g. Crew transport to venue / supplies" />
+              </label>
+              <label>
+                <span>Amount *</span>
+                <CurrencyInput v-model="line.amount" aria-label="Expense amount" />
+              </label>
+              <button
+                v-if="!editingExpenseId"
+                type="button"
+                class="icon-button order-line-remove"
+                :disabled="expense.items.length === 1"
+                title="Remove row"
+                @click="expense.items.splice(idx, 1)"
+              >
+                <Trash2 :size="16" />
+              </button>
+            </div>
           </div>
 
-          <div v-for="(line, idx) in expense.items" :key="line.key" class="expense-batch-row">
-            <label>
-              <span>Category {{ idx + 1 }} *</span>
-              <select v-model="line.category">
-                <option v-for="cat in expenseCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
-                <option v-if="line.category && !expenseCategoryOptions.includes(line.category)" :value="line.category">
-                  {{ line.category }}
-                </option>
-              </select>
-            </label>
-            <label>
-              <span>Description *</span>
-              <input v-model="line.description" placeholder="e.g. Crew transport to venue / supplies" />
-            </label>
-            <label>
-              <span>Amount *</span>
-              <CurrencyInput v-model="line.amount" aria-label="Expense amount" />
-            </label>
-            <button
-              v-if="!editingExpenseId"
-              type="button"
-              class="icon-button order-line-remove"
-              :disabled="expense.items.length === 1"
-              title="Remove row"
-              @click="expense.items.splice(idx, 1)"
-            >
-              <Trash2 :size="16" />
-            </button>
+          <div class="order-grand-total span-2">
+            <span>Batch Total ({{ expense.items.length }} Item(s))</span>
+            <strong>{{ formatCurrency(expenseBatchTotal) }}</strong>
           </div>
-        </div>
-
-        <div class="order-grand-total span-2">
-          <span>Batch Total ({{ expense.items.length }} Item(s))</span>
-          <strong>{{ formatCurrency(expenseBatchTotal) }}</strong>
-        </div>
+        </template>
 
         <div class="span-2 attire-upload-block">
           <span class="upload-field-label">Payment Receipt / Proof (Optional)</span>
@@ -1153,7 +1242,6 @@ watch(() => route.query.catalog, (catalog) => {
         <label class="span-2">
           <span>PO Number *</span>
           <select v-model="order.bookingId">
-            <option value="">Select PO booking</option>
             <option v-for="booking in eligibleBookings" :key="booking.id" :value="booking.id">{{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }} — {{ formatDate(booking.eventDate) }}</option>
           </select>
         </label>
@@ -1170,24 +1258,24 @@ watch(() => route.query.catalog, (catalog) => {
           <div class="order-lines-head">
             <div>
               <strong>{{ module === 'additional' ? 'Add-on Service Items' : 'Order Services (Core & Add-ons)' }}</strong>
-              <span>{{ module === 'additional' ? 'Click + Add-on to add extra services; item snapshot pricing is stored automatically.' : 'Click + Core Service or + Add-on to build this customer order.' }}</span>
+              <span>{{ module === 'additional' ? 'Click Add-on to add extra services; item snapshot pricing is stored automatically.' : 'Click Core Service or Add-on to build this customer order.' }}</span>
             </div>
             <div class="add-group-add-trigger">
               <button v-if="module === 'orders'" type="button" class="soft-button add-inti-button" @click="addGroupRowByType(order.items, 'Inti')">
-                <Plus :size="14" />+ Core Service
+                <Plus :size="14" />Core Service
               </button>
               <button type="button" class="soft-button add-additional-button" @click="addGroupRowByType(order.items, 'Additional')">
-                <Plus :size="14" />+ Add-on
+                <Plus :size="14" />Add-on
               </button>
             </div>
           </div>
 
           <div v-if="!order.items.length" class="empty-order-lines-hint">
             <template v-if="module === 'additional'">
-              No services added yet. Click <strong>+ Add-on</strong> to insert a service row.
+              No services added yet. Click <strong>Add-on</strong> to insert a service row.
             </template>
             <template v-else>
-              No services added yet. Click <strong>+ Core Service</strong> or <strong>+ Add-on</strong> to insert items.
+              No services added yet. Click <strong>Core Service</strong> or <strong>Add-on</strong> to insert items.
             </template>
           </div>
 
@@ -1210,7 +1298,6 @@ watch(() => route.query.catalog, (catalog) => {
                     {{ line.filterType === 'Inti' ? 'Core' : line.filterType === 'Additional' ? 'Add-on' : (line.serviceKind === 'Inti' ? 'Core' : 'Add-on') }}
                   </span>
                   <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                    <option value="">{{ line.filterType === 'Inti' ? 'Select core service' : line.filterType === 'Additional' ? 'Select add-on service' : 'Select service' }}</option>
                     <option v-for="item in (line.filterType === 'Inti' ? coreCatalog : line.filterType === 'Additional' ? additionalCatalog : eligibleCatalog)" :key="item.id" :value="item.id">
                       {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
                     </option>
@@ -1301,10 +1388,10 @@ watch(() => route.query.catalog, (catalog) => {
                 </label>
                 <div class="add-group-add-trigger">
                   <button type="button" class="soft-button add-inti-button" @click="addGroupRowByType(editGroupForm.items, 'Inti')">
-                    <Plus :size="14" />+ Core
+                    <Plus :size="14" />Core
                   </button>
                   <button type="button" class="soft-button add-additional-button" @click="addGroupRowByType(editGroupForm.items, 'Additional')">
-                    <Plus :size="14" />+ Add-on
+                    <Plus :size="14" />Add-on
                   </button>
                 </div>
               </div>
@@ -1321,7 +1408,6 @@ watch(() => route.query.catalog, (catalog) => {
                 <div v-for="(line, idx) in editGroupForm.items" :key="line.key" class="order-line-row">
                   <div class="order-line-service">
                     <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                      <option value="">Select service</option>
                       <option
                         v-if="line.catalogItemId && !store.catalog.some((c) => c.id === line.catalogItemId)"
                         :value="line.catalogItemId"
@@ -1423,16 +1509,16 @@ watch(() => route.query.catalog, (catalog) => {
               </label>
               <div class="add-group-add-trigger">
                 <button type="button" class="soft-button add-inti-button" @click="addGroupRowByType(addGroupForm.items, 'Inti')">
-                  <Plus :size="15" />+ Core
+                  <Plus :size="15" />Core
                 </button>
                 <button type="button" class="soft-button add-additional-button" @click="addGroupRowByType(addGroupForm.items, 'Additional')">
-                  <Plus :size="15" />+ Add-on
+                  <Plus :size="15" />Add-on
                 </button>
               </div>
             </div>
 
             <div v-if="!addGroupForm.items.length" class="empty-order-lines-hint">
-              Click <strong>+ Core</strong> or <strong>+ Add-on</strong> above to insert service lines.
+              Click <strong>Core</strong> or <strong>Add-on</strong> above to insert service lines.
             </div>
 
             <div v-else class="order-lines-grid">
@@ -1454,7 +1540,6 @@ watch(() => route.query.catalog, (catalog) => {
                       {{ line.filterType === 'Inti' ? 'Core' : line.filterType === 'Additional' ? 'Add-on' : (line.serviceKind === 'Inti' ? 'Core' : 'Add-on') }}
                     </span>
                     <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                      <option value="">{{ line.filterType === 'Inti' ? 'Select core service' : line.filterType === 'Additional' ? 'Select add-on' : 'Select service' }}</option>
                       <template v-if="line.filterType === 'Inti' || line.filterType === 'Additional'">
                         <option v-for="item in catalogOptionsForLine(line)" :key="item.id" :value="item.id">
                           {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
@@ -1509,7 +1594,7 @@ watch(() => route.query.catalog, (catalog) => {
 
           <div class="add-order-group-bar">
             <button v-if="!showAddGroupForm" type="button" class="outline-button add-pesanan-button" @click="openAddGroupForm">
-              <Plus :size="17" />+ Add Order Group
+              <Plus :size="17" />Add Order Group
             </button>
           </div>
         </div>

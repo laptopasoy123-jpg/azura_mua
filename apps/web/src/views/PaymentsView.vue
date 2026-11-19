@@ -59,8 +59,9 @@ const methodLabel = (method: Payment['method']) => (method === 'Cash' ? 'Cash' :
 const openCreate = () => {
   editingId.value = ''
   error.value = ''
+  const firstPayable = store.bookings.find((b) => store.bookingBalance(b.id) > 0)
   Object.assign(form, {
-    bookingId: '',
+    bookingId: firstPayable?.id ?? '',
     amount: 0,
     method: store.paymentMethods[0] || 'Transfer',
     paidAt: new Date().toISOString().slice(0, 10),
@@ -150,8 +151,16 @@ const submit = () => {
 }
 
 const downloadReceipt = async (payment: Payment) => {
-  const { downloadPaymentReceiptPdf } = await import('../utils/receiptPdf')
-  downloadPaymentReceiptPdf(receiptParamsFor(payment))
+  const booking = store.bookingFor(payment.bookingId)
+  const customer = booking ? store.customerFor(booking.customerId) : undefined
+  await store.runWithPdfLoader(
+    `Receipt ${payment.receiptNumber}`,
+    `${booking?.poNumber ?? 'PO'} · ${customer?.name ?? 'Customer'}`,
+    async () => {
+      const { downloadPaymentReceiptPdf } = await import('../utils/receiptPdf')
+      downloadPaymentReceiptPdf(receiptParamsFor(payment))
+    },
+  )
 }
 
 const digitsPhone = (phone: string) => {
@@ -238,10 +247,10 @@ const onSendWhatsApp = async (payment: Payment) => {
     </section>
 
     <section class="summary-strip">
+      <div><span>Transactions</span><strong>{{ store.payments.length }}</strong></div>
       <div><span>Total Billed</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
       <div><span>Total Received</span><strong>{{ formatCurrency(store.totalPaid) }}</strong></div>
       <div><span>Open Receivables</span><strong>{{ formatCurrency(store.totalReceivable) }}</strong></div>
-      <div><span>Transactions</span><strong>{{ store.payments.length }}</strong></div>
     </section>
 
     <div v-if="waHint" class="flow-note">
@@ -333,7 +342,6 @@ const onSendWhatsApp = async (payment: Payment) => {
         <label class="span-2">
           <span>PO Number *</span>
           <select v-model="form.bookingId" :disabled="Boolean(editingId)">
-            <option value="">Select PO booking</option>
             <option
               v-for="booking in store.bookings.filter((b) => Boolean(editingId) ? b.id === form.bookingId : store.bookingBalance(b.id) > 0)"
               :key="booking.id"

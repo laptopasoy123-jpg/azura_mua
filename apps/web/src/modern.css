@@ -3547,3 +3547,729 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   }
   .editorial-hero-date { text-align: left; padding-left: 0; border-left: 0; border-top: 1px solid rgba(196,167,125,.45); padding-top: 8px; }
 }
+
+/* ==========================================================================
+   COMPREHENSIVE MOBILE & DESKTOP UX POLISH (CENTERED POPUPS, PDF LOADER,
+   SUMMARY STRIPS, WEDDING PORTAL, JOBS, INVENTORY & DROPDOWN SETTINGS)
+   ========================================================================== */
+
+/* 1. Centered Action Success Popup & Branded PDF Loader Overlay */
+.action-popup-backdrop,
+.pdf-loader-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 265;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(24, 19, 15, 0.48);
+  backdrop-filter: blur(5px);
+}
+
+.pdf-loader-backdrop {
+  z-index: 275;
+  background: rgba(24, 19, 15, 0.58);
+}
+
+.action-popup-backdrop .action-toast-popup {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  width: min(400px, calc(100vw - 32px));
+  max-width: 400px;
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 26px 24px 22px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #fffdf9 0%, #f9f3ea 100%);
+  border: 1px solid rgba(182, 138, 86, 0.38);
+  box-shadow: 0 28px 64px rgba(20, 15, 11, 0.32);
+}
+
+.action-popup-backdrop .action-toast-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 10px 22px rgba(24, 19, 15, 0.08);
+}
+
+.action-popup-backdrop .action-toast-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.action-popup-backdrop .action-toast-copy strong {
+  font-family: var(--font-display);
+  font-size: 19px;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.action-popup-backdrop .action-toast-copy span {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.action-popup-backdrop .action-toast-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.action-toast-ok {
+  margin-top: 4px;
+  min-width: 132px;
+  height: 38px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(196, 167, 125, 0.45);
+  background: var(--espresso);
+  color: #fff8ee;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.action-toast-ok:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(34, 27, 22, 0.22);
+}
+
+.pdf-loader-card {
+  width: min(380px, calc(100vw - 32px));
+  padding: 28px 24px 24px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #27211d 0%, #1c1714 100%);
+  color: #f8f2e9;
+  border: 1px solid rgba(196, 167, 125, 0.45);
+  box-shadow: 0 28px 68px rgba(12, 9, 7, 0.45);
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.pdf-loader-orbit {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  display: grid;
+  place-items: center;
+}
+
+.pdf-loader-spinner {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(196, 167, 125, 0.2);
+  border-top-color: #d4af7a;
+  border-right-color: #d4af7a;
+  animation: pdfOrbitSpin 0.95s linear infinite;
+}
+
+.pdf-loader-logo {
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  background: rgba(255, 248, 238, 0.1);
+  border: 1px solid rgba(196, 167, 125, 0.42);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  color: #f4e3c6;
+}
+
+.pdf-loader-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pdf-loader-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.pdf-loader-eyebrow {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #d4af7a;
+  font-weight: 700;
+}
+
+.pdf-loader-copy strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: #fff9f0;
+}
+
+.pdf-loader-copy p {
+  margin: 0;
+  font-size: 12.5px;
+  color: rgba(248, 242, 233, 0.76);
+}
+
+@keyframes pdfOrbitSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 2. Dashboard Low Stock Count & Interactive Range */
+.stock-alert-row .stock-count strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(182, 138, 86, 0.15);
+  color: var(--espresso);
+  white-space: nowrap;
+}
+
+.cashflow-live-kpis > div {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cashflow-live-kpis > div strong {
+  font-size: clamp(16px, 2vw, 22px);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.2;
+}
+
+/* 3. Summary Strips (Orders, Invoices, Payments, Expenses, Bookings, Jobs) */
+.summary-strip > div {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.summary-strip > div strong {
+  font-size: clamp(16px, 2.05vw, 24px);
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.summary-strip .summary-card-featured strong {
+  font-size: clamp(22px, 2.7vw, 30px);
+  color: var(--espresso);
+}
+
+/* 4. Invoices Filter Bar & Order Details Header Alignment */
+.invoice-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 18px;
+  flex-wrap: wrap;
+}
+
+.invoice-filter-bar .table-search {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.order-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.order-group-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.order-group-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.order-group-subtotal {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  text-align: right;
+}
+
+.order-group-subtotal span {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* 5. Team Assignments Stacked Filter Bar & 2x2 Job Overview Grid */
+.job-filter-bar--stacked {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.job-filter-bar--stacked .job-date-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.job-order-search-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(240px, 1.4fr) auto;
+  gap: 12px;
+  align-items: end;
+  width: 100%;
+}
+
+.job-order-search-row .table-search {
+  width: 100%;
+  max-width: none;
+}
+
+.job-reset-btn {
+  height: 40px;
+}
+
+.job-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.job-overview-card {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(245, 238, 228, 0.55);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.job-overview-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 6. Wedding Portal Clean Uniforms, Family, Lenses, Vendors & Sessions Layout */
+.uniform-sections {
+  display: grid;
+  gap: 14px;
+}
+
+.uniform-group-box {
+  padding: 15px 16px;
+  border-radius: 16px;
+  background: rgba(248, 243, 235, 0.6);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+}
+
+.uniform-group-box h4 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--espresso);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(182, 138, 86, 0.32);
+}
+
+.uniform-group-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.uniform-group-fields--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.uniform-group-fields--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.uniform-group-fields label,
+.mini-field-grid label,
+.event-basic-fields label,
+.couple-detail-card label {
+  min-width: 0;
+}
+
+.uniform-group-fields input,
+.uniform-group-fields select,
+.mini-field-grid input,
+.event-basic-fields input,
+.couple-detail-card input {
+  width: 100%;
+  min-width: 0;
+}
+
+.mini-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+/* 7. Inventory Tabs & Dropdown Settings Polish */
+.inventory-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px;
+  background: rgba(247, 241, 232, 0.55);
+  border-bottom: 1px solid var(--line);
+}
+
+.inventory-tabs button {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid rgba(182, 138, 86, 0.25);
+  background: #fffdf9;
+  color: var(--muted);
+  transition: all 0.16s ease;
+}
+
+.inventory-tabs button.active {
+  background: var(--espresso);
+  color: #fff8ee;
+  border-color: var(--espresso);
+  box-shadow: 0 6px 14px rgba(34, 27, 22, 0.16);
+}
+
+.dropdown-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 16px;
+}
+
+.dropdown-setting-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #fffdf9 0%, #fbf7f0 100%);
+  box-shadow: 0 10px 24px rgba(34, 27, 22, 0.04);
+}
+
+.dropdown-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dropdown-add-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+}
+
+.dropdown-add-row .primary-button {
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.dropdown-option-list {
+  display: grid;
+  gap: 8px;
+  max-height: 290px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.dropdown-option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(182, 138, 86, 0.22);
+}
+
+/* 8. Mobile & Tablet Responsive Refinements */
+@media (max-width: 820px) {
+  /* Topbar DaySheet pill containment */
+  .topbar-live-clock {
+    max-width: 100%;
+    width: 100%;
+    overflow: hidden;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 6px 10px;
+    gap: 6px 8px;
+    box-sizing: border-box;
+  }
+
+  .topbar-daysheet-link {
+    margin-left: 0;
+    padding: 3px 9px;
+    font-size: 11px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Centered modals on mobile — never stuck at the top edge */
+  .modal-backdrop {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 16px 12px !important;
+  }
+
+  .modal-card,
+  .modal-card.wide {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: calc(100dvh - 36px) !important;
+    margin: auto !important;
+    border-radius: 20px !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .modal-header {
+    padding: 14px 16px 12px !important;
+    flex-shrink: 0;
+  }
+
+  .modal-body {
+    padding: 14px 16px 18px !important;
+    overflow-y: auto !important;
+    flex: 1 1 auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Time & Date inputs on mobile */
+  input[type="time"],
+  input[type="date"] {
+    width: 100%;
+    max-width: 100%;
+    min-height: 40px;
+    font-size: 14px;
+    box-sizing: border-box;
+  }
+
+  /* Compact Cancel Booking & Refund banners on mobile */
+  .cancel-impact-box,
+  .paid-info-banner {
+    padding: 11px 13px !important;
+    font-size: 12.5px !important;
+    gap: 8px !important;
+  }
+
+  .cancel-impact-box ul {
+    margin: 6px 0 0;
+    padding-left: 16px;
+    font-size: 12px;
+  }
+
+  /* Dashboard interactive range mobile cards */
+  .cashflow-filter-strip {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px !important;
+  }
+
+  .cashflow-live-kpis {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+
+  .cashflow-live-kpis > div {
+    padding: 12px 14px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+  }
+
+  .cashflow-live-kpis > div strong {
+    font-size: clamp(15px, 4.4vw, 19px) !important;
+    text-align: right;
+  }
+
+  .stock-alert-row .stock-count strong {
+    font-size: 13.5px;
+    padding: 5px 10px;
+  }
+
+  /* Customer Booking search & status filter containment */
+  .table-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 12px 14px !important;
+  }
+
+  .table-toolbar .table-search,
+  .table-toolbar .filter-row,
+  .table-toolbar .filter-row select {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box;
+  }
+
+  /* Summary Strips on mobile: 2x2 balanced grid with contained currency */
+  .summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .summary-strip > div {
+    padding: 12px 13px !important;
+  }
+
+  .summary-strip > div strong {
+    font-size: clamp(14.5px, 4.1vw, 18px) !important;
+  }
+
+  .summary-strip .summary-card-featured strong {
+    font-size: clamp(20px, 5.4vw, 24px) !important;
+  }
+
+  /* Orders: left-align unit price and subtotal on mobile so numbers fit */
+  .order-line-row .currency-input-wrap input,
+  .order-line-row input[type="number"],
+  .order-line-subtotal,
+  .order-line-subtotal strong {
+    text-align: left !important;
+    justify-content: flex-start !important;
+  }
+
+  .order-group-head {
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+  }
+
+  .order-group-head-right {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+    padding-top: 6px;
+    border-top: 1px dashed var(--line);
+  }
+
+  /* Invoice & Receipt Eye Preview mobile fit */
+  .editorial-sheet {
+    border-radius: 14px !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .editorial-sheet-body {
+    padding: 12px !important;
+    gap: 12px !important;
+  }
+
+  .editorial-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .editorial-table {
+    min-width: 460px;
+  }
+
+  /* Wedding Portal forms on mobile */
+  .measurement-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .measurement-card > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .event-basic-fields--three,
+  .couple-detail-grid,
+  .uniform-group-fields--two,
+  .uniform-group-fields--three,
+  .mini-field-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .event-detail-card,
+  .couple-detail-card,
+  .uniform-group-box {
+    padding: 12px !important;
+  }
+
+  /* Team Assignments filter bar & 2x2 job overview on mobile */
+  .job-filter-bar--stacked .job-date-filters,
+  .job-order-search-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .job-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .job-overview-card {
+    padding: 10px 11px !important;
+  }
+
+  .job-overview-card strong {
+    font-size: 13px !important;
+  }
+
+  /* Inventory tabs & heading actions on mobile */
+  .inventory-tabs {
+    padding: 10px 12px;
+    gap: 6px;
+  }
+
+  .inventory-tabs button {
+    flex: 1 1 calc(50% - 6px);
+    justify-content: center;
+    text-align: center;
+    font-size: 12.5px;
+    padding: 0 10px;
+  }
+
+  .dropdown-settings-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+

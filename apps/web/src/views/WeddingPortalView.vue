@@ -69,17 +69,22 @@ const scheduleReportTo = ref('')
 const downloadScheduleReport = async () => {
   downloadingSchedulePdf.value = true
   try {
-    const { downloadWeddingAttireReportPdf } = await import('../utils/weddingPdf')
-    await downloadWeddingAttireReportPdf({
-      fromDate: scheduleReportFrom.value,
-      toDate: scheduleReportTo.value,
-      bookings: store.bookings,
-      customers: store.customers,
-      weddingForms: store.weddingForms,
-      attireList: store.weddingAttire,
-      effectiveStatus: store.effectiveAttireStatus,
-      attireSchedule: store.attireSchedule,
-      businessProfile: store.businessProfile,
+    const periodLabel = scheduleReportFrom.value || scheduleReportTo.value
+      ? `${scheduleReportFrom.value || 'Start'} to ${scheduleReportTo.value || 'End'}`
+      : 'All Scheduled Dates'
+    await store.runWithPdfLoader('Wardrobe Allocation Schedule Report', periodLabel, async () => {
+      const { downloadWeddingAttireReportPdf } = await import('../utils/weddingPdf')
+      await downloadWeddingAttireReportPdf({
+        fromDate: scheduleReportFrom.value,
+        toDate: scheduleReportTo.value,
+        bookings: store.bookings,
+        customers: store.customers,
+        weddingForms: store.weddingForms,
+        attireList: store.weddingAttire,
+        effectiveStatus: store.effectiveAttireStatus,
+        attireSchedule: store.attireSchedule,
+        businessProfile: store.businessProfile,
+      })
     })
   } finally {
     downloadingSchedulePdf.value = false
@@ -150,7 +155,20 @@ const fittingForm = reactive<WeddingFittingForm>(blankForm())
 const editModalForm = reactive<WeddingFittingForm>(blankForm())
 const attireForm = reactive({ name: '', category: 'Bride' as AttireCategory, size: '', status: 'Tersedia' as AttireStatus, notes: '', imageUrl: '' })
 
+const localTodayIso = () => {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
 const effectiveStatus = (item: WeddingAttire) => store.effectiveAttireStatus(item)
+
+// Card badge status reflects today's active booking or laundry status
+const cardTodayStatus = (item: WeddingAttire): AttireStatus => {
+  if (item.status === 'Laundry') return 'Laundry'
+  const today = localTodayIso()
+  if (store.attireConflictsOnDate(item.id, today).length > 0) return 'Booked'
+  return 'Tersedia'
+}
 
 // Cached per-attire schedules so wardrobe cards don't recompute on every render pass
 const scheduleMapByAttire = computed(() => {
@@ -158,8 +176,8 @@ const scheduleMapByAttire = computed(() => {
   for (const item of store.weddingAttire) {
     map.set(item.id, {
       active: store.attireSchedule(item.id),
-      all: store.attireSchedule(item.id, { includePast: true }),
-      status: effectiveStatus(item),
+      all: store.attireSchedule(item.id, { includePast: true, includeCancelled: false }),
+      status: cardTodayStatus(item),
     })
   }
   return map
@@ -454,7 +472,7 @@ const onAttireStatusSelect = (item: WeddingAttire, nextStatus: AttireStatus, eve
     }
   }
 
-  const urgentSchedule = store.urgentAttireSchedules(item.id)
+  const urgentSchedule = store.urgentAttireSchedules(item.id, undefined, 2)
   if (nextStatus === 'Laundry' && urgentSchedule.length > 0) {
     resetSelectToStored()
     statusAlertBlocked.value = false
@@ -465,6 +483,16 @@ const onAttireStatusSelect = (item: WeddingAttire, nextStatus: AttireStatus, eve
     return
   }
   store.updateWeddingAttireStatus(item.id, nextStatus)
+}
+
+const urgentDayBadgeLabel = (eventDate: string) => {
+  const today = localTodayIso()
+  const a = new Date(`${today}T00:00:00`)
+  const b = new Date(`${eventDate.slice(0, 10)}T00:00:00`)
+  const diff = Math.round((b.getTime() - a.getTime()) / 86_400_000)
+  if (diff <= 0) return 'Today (Hari-H)'
+  if (diff === 1) return 'Tomorrow (H-1)'
+  return `H-${diff}`
 }
 
 const confirmStatusAlertOverride = () => {
@@ -482,11 +510,6 @@ const cancelStatusAlertOverride = () => {
   showStatusAlert.value = false
 }
 
-const localTodayIso = () => {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
-
 const calendarEntryStatus = (entry: AttireScheduleEntry): 'Cancelled' | 'Completed' | 'In Use' | 'Booked' => {
   if (entry.bookingStatus === 'Dibatalkan') return 'Cancelled'
   const today = localTodayIso()
@@ -497,7 +520,7 @@ const calendarEntryStatus = (entry: AttireScheduleEntry): 'Cancelled' | 'Complet
 
 const openAttireCalendar = (item: WeddingAttire) => {
   calendarAttire.value = item
-  const schedule = store.attireSchedule(item.id, { includePast: true, includeCancelled: true })
+  const schedule = store.attireSchedule(item.id, { includePast: true, includeCancelled: false })
   if (schedule.length) {
     const firstDate = new Date(`${schedule[0]!.eventDate}T00:00:00`)
     calendarYear.value = firstDate.getFullYear()
@@ -525,7 +548,7 @@ const shiftCalendarMonth = (delta: number) => {
 const calendarScheduleMap = computed(() => {
   const map = new Map<string, ReturnType<typeof store.attireSchedule>>()
   if (!calendarAttire.value) return map
-  for (const entry of store.attireSchedule(calendarAttire.value.id, { includePast: true, includeCancelled: true })) {
+  for (const entry of store.attireSchedule(calendarAttire.value.id, { includePast: true, includeCancelled: false })) {
     const list = map.get(entry.eventDate) ?? []
     list.push(entry)
     map.set(entry.eventDate, list)
@@ -557,7 +580,7 @@ const calendarCells = computed(() => {
 
 const selectedDateBookings = computed(() => {
   if (!calendarAttire.value) return []
-  const all = store.attireSchedule(calendarAttire.value.id, { includePast: true, includeCancelled: true })
+  const all = store.attireSchedule(calendarAttire.value.id, { includePast: true, includeCancelled: false })
   if (!selectedCalendarDate.value) return all
   const matching = all.filter((item) => item.eventDate === selectedCalendarDate.value)
   return matching.length ? matching : all
@@ -654,13 +677,20 @@ const downloadSavedPdf = async (targetForm?: WeddingFittingForm) => {
   }
   downloadingPdf.value = true
   try {
-    const { generateWeddingFittingPdf } = await import('../utils/weddingPdf')
-    await generateWeddingFittingPdf({
-      form: formToExport,
-      booking,
-      attireList: store.weddingAttire,
-      businessProfile: store.businessProfile,
-    })
+    const customer = store.customerFor(booking.customerId)
+    await store.runWithPdfLoader(
+      `Wedding Fitting Form — ${booking.poNumber}`,
+      `${customer?.name ?? 'Customer'} · ${formatDate(booking.eventDate)}`,
+      async () => {
+        const { generateWeddingFittingPdf } = await import('../utils/weddingPdf')
+        await generateWeddingFittingPdf({
+          form: formToExport,
+          booking,
+          attireList: store.weddingAttire,
+          businessProfile: store.businessProfile,
+        })
+      },
+    )
   } catch (error) {
     formError.value = error instanceof Error ? error.message : 'Failed to generate PDF.'
   } finally {
@@ -1009,7 +1039,7 @@ const fittingList = computed(() =>
 
           <div v-if="fittingForm.events.length < 3" class="add-event-row">
             <button type="button" class="outline-button add-event-button" @click="addEventSectionTo(fittingForm)">
-              <Plus :size="16" />+ Add Session
+              <Plus :size="16" />Add Session
             </button>
           </div>
         </div>
@@ -1031,28 +1061,22 @@ const fittingList = computed(() =>
 
           <div class="uniform-sections">
             <div class="uniform-group-box">
-              <h4>Domas Group</h4>
-              <div class="uniform-group-fields">
+              <h4>Domas &amp; Manggolo</h4>
+              <div class="uniform-group-fields uniform-group-fields--two">
                 <label>
                   <span>Domas Uniform &amp; Details</span>
                   <input v-model="fittingForm.uniforms.domas" placeholder="Color / style / hijab option" />
                 </label>
-              </div>
-            </div>
-
-            <div class="uniform-group-box">
-              <h4>Manggolo Group</h4>
-              <div class="uniform-group-fields uniform-group-fields--manggolo">
-                <label class="uniform-span-2">
+                <label>
                   <span>Manggolo Uniform &amp; Details</span>
                   <input v-model="fittingForm.uniforms.manggolo" placeholder="Manggolo uniform details" />
                 </label>
                 <label>
-                  <span>Blangkon Qty</span>
+                  <span>Blangkon Qty (pcs)</span>
                   <input v-model.number="fittingForm.manggoloBlangkon" type="number" min="0" placeholder="0" />
                 </label>
                 <label>
-                  <span>Slippers Qty</span>
+                  <span>Slippers Qty (pairs)</span>
                   <input v-model.number="fittingForm.manggoloSlop" type="number" min="0" placeholder="0" />
                 </label>
               </div>
@@ -1060,7 +1084,7 @@ const fittingList = computed(() =>
 
             <div class="uniform-group-box">
               <h4>Family &amp; Guest Greeters</h4>
-              <div class="uniform-group-fields uniform-group-fields--two">
+              <div class="uniform-group-fields uniform-group-fields--three">
                 <label v-for="([key, label, placeholder]) in familyUniformFields" :key="key">
                   <span>{{ label }}</span>
                   <input v-model="fittingForm.uniforms[key]" :placeholder="placeholder" />
@@ -1300,8 +1324,8 @@ const fittingList = computed(() =>
 
     <UiModal
       :open="showStatusAlert"
-      :title="statusAlertBlocked ? 'Cannot Change Status to Available — Scheduled Today' : 'Urgent Schedule Warning (H-1 / Event Day)'"
-      :description="statusAlertBlocked ? 'This attire is currently assigned to an event taking place today based on the event date.' : 'This attire is scheduled for today or tomorrow (H-1) in the Fitting Database.'"
+      :title="statusAlertBlocked ? 'Cannot Change Status to Available — Scheduled Today' : 'Upcoming Event Warning (H-2 / H-1 / Today)'"
+      :description="statusAlertBlocked ? 'This attire is currently assigned to an active event taking place today.' : 'This attire is reserved for an upcoming wedding within the next 2 days (H-2 / H-1 / Today).'"
       @close="cancelStatusAlertOverride"
     >
       <div v-if="pendingAlertAttire" class="laundry-alert-body">
@@ -1309,27 +1333,33 @@ const fittingList = computed(() =>
           <AlertTriangle :size="20" />
           <div>
             <strong v-if="statusAlertBlocked">{{ pendingAlertAttire.name }} is booked for an event today and cannot be switched to Available!</strong>
-            <strong v-else>{{ pendingAlertAttire.name }} is needed today or tomorrow (H-1)!</strong>
+            <strong v-else>{{ pendingAlertAttire.name }} will be worn soon!</strong>
             <p v-if="statusAlertBlocked">
               Status changes to <b>Available</b> are locked while an active booking exists on today's date:
             </p>
             <p v-else>
-              If you switch status to <b>Laundry</b>, make sure it is cleaned and ready in time for:
+              This attire will be used by the following customer(s) on <b>H-2 / H-1 / Today</b>:
             </p>
           </div>
         </div>
         <ul class="laundry-conflict-list">
           <li v-for="entry in statusAlertConflicts" :key="`${entry.bookingId}-${entry.eventNumber}`">
-            <strong>{{ formatDate(entry.eventDate) }}</strong> — {{ entry.customerName }} ({{ entry.poNumber }}) · {{ entry.eventName }}
+            <strong>{{ urgentDayBadgeLabel(entry.eventDate) }} · {{ formatDate(entry.eventDate) }}</strong> — Will be worn by <b>{{ entry.customerName }}</b> ({{ entry.poNumber }}) · {{ entry.eventName }}
           </li>
         </ul>
+        <div v-if="!statusAlertBlocked" class="paid-info-banner" style="margin-top: 10px;">
+          <div>
+            <strong>Important Reminder After Laundry</strong>
+            <span>Please remember to update this attire's status back to <b>Available</b> immediately after laundry is finished so it is ready for the customer!</span>
+          </div>
+        </div>
       </div>
       <div class="modal-actions">
         <button type="button" :class="statusAlertBlocked ? 'primary-button' : 'secondary-button'" @click="cancelStatusAlertOverride">
           {{ statusAlertBlocked ? 'Understood' : 'Cancel' }}
         </button>
         <button v-if="!statusAlertBlocked" type="button" class="danger-button" @click="confirmStatusAlertOverride">
-          Set to Laundry Anyway
+          Set to Laundry &amp; Remind Me
         </button>
       </div>
     </UiModal>
@@ -1470,7 +1500,7 @@ const fittingList = computed(() =>
 
             <div v-if="editModalForm.events.length < 3" class="add-event-row">
               <button type="button" class="outline-button add-event-button" @click="addEventSectionTo(editModalForm)">
-                <Plus :size="16" />+ Add Session
+                <Plus :size="16" />Add Session
               </button>
             </div>
           </div>
@@ -1484,20 +1514,25 @@ const fittingList = computed(() =>
           <div class="uniform-sections">
             <div class="uniform-group-box">
               <h4>Domas &amp; Manggolo</h4>
-              <div class="uniform-group-fields uniform-group-fields--manggolo">
-                <label><span>Domas Uniform</span><input v-model="editModalForm.uniforms.domas" placeholder="Color / style / hijab option" /></label>
-                <label><span>Manggolo Uniform</span><input v-model="editModalForm.uniforms.manggolo" placeholder="Manggolo uniform details" /></label>
-                <label><span>Blangkon Qty</span><input v-model.number="editModalForm.manggoloBlangkon" type="number" min="0" placeholder="0" /></label>
-                <label><span>Slippers Qty</span><input v-model.number="editModalForm.manggoloSlop" type="number" min="0" placeholder="0" /></label>
+              <div class="uniform-group-fields uniform-group-fields--two">
+                <label><span>Domas Uniform &amp; Details</span><input v-model="editModalForm.uniforms.domas" placeholder="Color / style / hijab option" /></label>
+                <label><span>Manggolo Uniform &amp; Details</span><input v-model="editModalForm.uniforms.manggolo" placeholder="Manggolo uniform details" /></label>
+                <label><span>Blangkon Qty (pcs)</span><input v-model.number="editModalForm.manggoloBlangkon" type="number" min="0" placeholder="0" /></label>
+                <label><span>Slippers Qty (pairs)</span><input v-model.number="editModalForm.manggoloSlop" type="number" min="0" placeholder="0" /></label>
               </div>
             </div>
             <div class="uniform-group-box">
-              <h4>Family, Greeters, Lenses &amp; Extras</h4>
-              <div class="uniform-group-fields uniform-group-fields--two">
+              <h4>Family &amp; Guest Greeters</h4>
+              <div class="uniform-group-fields uniform-group-fields--three">
                 <label v-for="([key, label, placeholder]) in familyUniformFields" :key="key">
                   <span>{{ label }}</span>
                   <input v-model="editModalForm.uniforms[key]" :placeholder="placeholder" />
                 </label>
+              </div>
+            </div>
+            <div class="uniform-group-box">
+              <h4>Contact Lenses &amp; Extras</h4>
+              <div class="uniform-group-fields uniform-group-fields--two">
                 <label>
                   <span>Contact Lenses</span>
                   <select v-model="editModalForm.uniforms.softlens">
