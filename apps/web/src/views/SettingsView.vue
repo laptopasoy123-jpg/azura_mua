@@ -19,10 +19,10 @@ import {
   Package,
 } from '@lucide/vue'
 import { useCrmStore, type DropdownOptionGroup, type EmployeeRecord, type InventoryItem } from '../stores/crm'
+import { sortAlpha } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import UiModal from '../components/UiModal.vue'
 import SearchSelect from '../components/SearchSelect.vue'
-import DataPagination from '../components/DataPagination.vue'
 
 const props = withDefaults(defineProps<{ section?: 'profile' | 'dropdown' }>(), {
   section: 'profile',
@@ -323,44 +323,21 @@ const handleDeleteInvItem = (item: InventoryItem) => {
   }
 }
 
-type SettingCardKey = 'employees' | DropdownOptionGroup | 'inventoryItems'
-
-const cardPages = reactive<Record<SettingCardKey, number>>({
-  employees: 1,
-  paymentMethods: 1,
-  poExpenseCategories: 1,
-  generalExpenseCategories: 1,
-  stylingTypes: 1,
-  inventoryCategories: 1,
-  units: 1,
-  inventoryItems: 1,
-})
-
-const cardSizes = reactive<Record<SettingCardKey, number>>({
-  employees: 10,
-  paymentMethods: 10,
-  poExpenseCategories: 10,
-  generalExpenseCategories: 10,
-  stylingTypes: 10,
-  inventoryCategories: 10,
-  units: 10,
-  inventoryItems: 10,
-})
-
-const sliceCardList = <T,>(key: SettingCardKey, items: T[]): T[] => {
-  const size = cardSizes[key]
-  const totalPages = Math.max(1, Math.ceil(items.length / size))
-  if (cardPages[key] > totalPages) cardPages[key] = totalPages
-  const start = (cardPages[key] - 1) * size
-  return items.slice(start, start + size)
-}
+const sortedEmployees = computed(() => sortAlpha(store.employees, (emp) => emp.name))
+const sortedPaymentMethods = computed(() => sortAlpha(store.paymentMethods, (x) => x))
+const sortedPoCategories = computed(() => sortAlpha(store.poExpenseCategories, (x) => x))
+const sortedGeneralCategories = computed(() => sortAlpha(store.generalExpenseCategories, (x) => x))
+const sortedStylingTypes = computed(() => sortAlpha(store.stylingTypes, (x) => x))
+const sortedInventoryCategories = computed(() => sortAlpha(store.inventoryCategories, (x) => x))
+const sortedUnits = computed(() => sortAlpha(store.units, (x) => x))
+const sortedInventory = computed(() => sortAlpha(store.inventory, (item) => item.name))
 
 const invCategoryOptions = computed(() =>
-  store.inventoryCategories.map((c) => ({ value: c, label: c })),
+  sortedInventoryCategories.value.map((c) => ({ value: c, label: c })),
 )
 
 const invUnitOptions = computed(() =>
-  store.units.map((u) => ({ value: u, label: u })),
+  sortedUnits.value.map((u) => ({ value: u, label: u })),
 )
 </script>
 
@@ -463,8 +440,8 @@ const invUnitOptions = computed(() =>
           <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
-        <ul class="dropdown-option-list">
-          <li v-for="emp in sliceCardList('employees', store.employees)" :key="emp.id" class="dropdown-option-row" :class="{ 'is-inactive': !emp.active }">
+        <ul class="dropdown-option-list is-scrollable">
+          <li v-for="emp in sortedEmployees" :key="emp.id" class="dropdown-option-row" :class="{ 'is-inactive': !emp.active }">
             <template v-if="editingEmpId === emp.id">
               <div class="dropdown-edit-inline">
                 <input v-model="editEmpDraft.name" placeholder="Employee name" />
@@ -491,7 +468,7 @@ const invUnitOptions = computed(() =>
             </template>
           </li>
         </ul>
-        <DataPagination v-model:current-page="cardPages.employees" v-model:page-size="cardSizes.employees" :total-items="store.employees.length" compact />
+        <p class="dropdown-settings-note"><span>Sorted A–Z · Showing all {{ sortedEmployees.length }} staff</span><span>Scroll list to view more</span></p>
       </article>
 
       <!-- Card 2: Payment Methods -->
@@ -510,8 +487,8 @@ const invUnitOptions = computed(() =>
           <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
-        <ul class="dropdown-option-list">
-          <li v-for="item in sliceCardList('paymentMethods', store.paymentMethods)" :key="item" class="dropdown-option-row">
+        <ul class="dropdown-option-list is-scrollable">
+          <li v-for="item in sortedPaymentMethods" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'paymentMethods' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="Method name" />
@@ -530,7 +507,7 @@ const invUnitOptions = computed(() =>
             </template>
           </li>
         </ul>
-        <DataPagination v-model:current-page="cardPages.paymentMethods" v-model:page-size="cardSizes.paymentMethods" :total-items="store.paymentMethods.length" compact />
+        <p class="dropdown-settings-note"><span>Sorted A–Z · Showing all {{ sortedPaymentMethods.length }} options</span><span>Scroll list to view more</span></p>
       </article>
 
       <!-- Card 3: PO Expense Categories -->
@@ -549,8 +526,8 @@ const invUnitOptions = computed(() =>
           <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
-        <ul class="dropdown-option-list">
-          <li v-for="item in sliceCardList('poExpenseCategories', store.poExpenseCategories)" :key="item" class="dropdown-option-row">
+        <ul class="dropdown-option-list is-scrollable">
+          <li v-for="item in sortedPoCategories" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'poExpenseCategories' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="PO category name" />
@@ -569,7 +546,7 @@ const invUnitOptions = computed(() =>
             </template>
           </li>
         </ul>
-        <DataPagination v-model:current-page="cardPages.poExpenseCategories" v-model:page-size="cardSizes.poExpenseCategories" :total-items="store.poExpenseCategories.length" compact />
+        <p class="dropdown-settings-note"><span>Sorted A–Z · Showing all {{ sortedPoCategories.length }} categories</span><span>Scroll list to view more</span></p>
       </article>
 
       <!-- Card 4: General Expense Categories -->
@@ -588,8 +565,8 @@ const invUnitOptions = computed(() =>
           <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
-        <ul class="dropdown-option-list">
-          <li v-for="item in sliceCardList('generalExpenseCategories', store.generalExpenseCategories)" :key="item" class="dropdown-option-row">
+        <ul class="dropdown-option-list is-scrollable">
+          <li v-for="item in sortedGeneralCategories" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'generalExpenseCategories' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="General category name" />
@@ -608,7 +585,7 @@ const invUnitOptions = computed(() =>
             </template>
           </li>
         </ul>
-        <DataPagination v-model:current-page="cardPages.generalExpenseCategories" v-model:page-size="cardSizes.generalExpenseCategories" :total-items="store.generalExpenseCategories.length" compact />
+        <p class="dropdown-settings-note"><span>Sorted A–Z · Showing all {{ sortedGeneralCategories.length }} categories</span><span>Scroll list to view more</span></p>
       </article>
 
       <!-- Card 5: Styling Types -->
@@ -627,8 +604,8 @@ const invUnitOptions = computed(() =>
           <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
-        <ul class="dropdown-option-list">
-          <li v-for="item in sliceCardList('stylingTypes', store.stylingTypes)" :key="item" class="dropdown-option-row">
+        <ul class="dropdown-option-list is-scrollable">
+          <li v-for="item in sortedStylingTypes" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'stylingTypes' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="Styling type" />
@@ -647,7 +624,7 @@ const invUnitOptions = computed(() =>
             </template>
           </li>
         </ul>
-        <DataPagination v-model:current-page="cardPages.stylingTypes" v-model:page-size="cardSizes.stylingTypes" :total-items="store.stylingTypes.length" compact />
+        <p class="dropdown-settings-note"><span>Sorted A–Z · Showing all {{ sortedStylingTypes.length }} options</span><span>Scroll list to view more</span></p>
       </article>
 
       <!-- Card 6: Inventory Categories -->
@@ -666,8 +643,8 @@ const invUnitOptions = computed(() =>
           <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
-        <ul class="dropdown-option-list">
-          <li v-for="item in sliceCardList('inventoryCategories', store.inventoryCategories)" :key="item" class="dropdown-option-row">
+        <ul class="dropdown-option-list is-scrollable">
+          <li v-for="item in sortedInventoryCategories" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'inventoryCategories' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="Category name" />
@@ -686,7 +663,7 @@ const invUnitOptions = computed(() =>
             </template>
           </li>
         </ul>
-        <DataPagination v-model:current-page="cardPages.inventoryCategories" v-model:page-size="cardSizes.inventoryCategories" :total-items="store.inventoryCategories.length" compact />
+        <p class="dropdown-settings-note"><span>Sorted A–Z · Showing all {{ sortedInventoryCategories.length }} categories</span><span>Scroll list to view more</span></p>
       </article>
 
       <!-- Card 7: Measurement Units -->
@@ -705,8 +682,8 @@ const invUnitOptions = computed(() =>
           <button type="submit" class="primary-button"><Plus :size="15" />Add</button>
         </form>
 
-        <ul class="dropdown-option-list">
-          <li v-for="item in sliceCardList('units', store.units)" :key="item" class="dropdown-option-row">
+        <ul class="dropdown-option-list is-scrollable">
+          <li v-for="item in sortedUnits" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'units' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="Unit label" />
@@ -725,7 +702,7 @@ const invUnitOptions = computed(() =>
             </template>
           </li>
         </ul>
-        <DataPagination v-model:current-page="cardPages.units" v-model:page-size="cardSizes.units" :total-items="store.units.length" compact />
+        <p class="dropdown-settings-note"><span>Sorted A–Z · Showing all {{ sortedUnits.length }} units</span><span>Scroll list to view more</span></p>
       </article>
 
       <!-- Card 8: Inventory Item Names & Product Photos -->
@@ -751,8 +728,8 @@ const invUnitOptions = computed(() =>
           <button type="submit" class="primary-button" :disabled="uploadingNewInvPhoto"><Plus :size="15" />Add</button>
         </form>
 
-        <ul class="dropdown-option-list">
-          <li v-for="item in sliceCardList('inventoryItems', store.inventory)" :key="item.id" class="dropdown-option-row">
+        <ul class="dropdown-option-list is-scrollable">
+          <li v-for="item in sortedInventory" :key="item.id" class="dropdown-option-row">
             <template v-if="editingInvId === item.id">
               <label class="inv-photo-pick-btn" title="Upload product photo">
                 <img v-if="editInvDraft.imageUrl" :src="editInvDraft.imageUrl" :alt="item.name" />
@@ -795,7 +772,7 @@ const invUnitOptions = computed(() =>
             </template>
           </li>
         </ul>
-        <DataPagination v-model:current-page="cardPages.inventoryItems" v-model:page-size="cardSizes.inventoryItems" :total-items="store.inventory.length" compact />
+        <p class="dropdown-settings-note"><span>Sorted A–Z · Showing all {{ sortedInventory.length }} items</span><span>Scroll list to view more</span></p>
       </article>
     </section>
 

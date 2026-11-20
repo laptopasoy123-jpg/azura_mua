@@ -7,7 +7,7 @@ import {
   UploadCloud, LoaderCircle, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp,
 } from '@lucide/vue'
 import { useCrmStore, type CatalogType, type Expense, type Invoice, type OrderGroup } from '../stores/crm'
-import { formatCurrency, formatDate } from '../utils/format'
+import { formatCurrency, formatDate, sortAlpha } from '../utils/format'
 import { REPORT_CATALOG, type ReportKey } from '../utils/reportCatalog'
 import { downloadInvoicePdf, resolveInvoiceShareUrl } from '../utils/invoicePdf'
 import { downloadSelectedReportsPdf } from '../utils/reportPdf'
@@ -246,15 +246,20 @@ const eligibleBookings = computed(() => store.bookings.filter((booking) => {
   return props.module === 'orders' ? !hasInvoice : hasInvoice
 }))
 
-const coreCatalog = computed(() => store.catalog.filter((item) => item.active && item.type === 'Inti'))
-const additionalCatalog = computed(() => store.catalog.filter((item) => item.active && item.type === 'Additional'))
+const coreCatalog = computed(() => sortAlpha(store.catalog.filter((item) => item.active && item.type === 'Inti'), (i) => i.name))
+const additionalCatalog = computed(() => sortAlpha(store.catalog.filter((item) => item.active && item.type === 'Additional'), (i) => i.name))
 const eligibleCatalog = computed(() =>
-  store.catalog.filter((item) => item.active && (props.module === 'orders' || item.type === 'Additional')),
+  sortAlpha(store.catalog.filter((item) => item.active && (props.module === 'orders' || item.type === 'Additional')), (i) => i.name),
 )
+
+const orderCustomerSortDir = ref<'none' | 'asc' | 'desc'>('none')
+const toggleOrderCustomerSort = () => {
+  orderCustomerSortDir.value = orderCustomerSortDir.value === 'none' ? 'asc' : orderCustomerSortDir.value === 'asc' ? 'desc' : 'none'
+}
 
 const filteredOrderInvoices = computed(() => {
   const query = orderSearch.value.trim().toLowerCase()
-  return store.invoices.filter((inv) => {
+  const list = store.invoices.filter((inv) => {
     const status = paymentStatus(inv.bookingId)
     if (orderStatusFilter.value !== 'All' && status !== orderStatusFilter.value) return false
     if (!query) return true
@@ -266,6 +271,8 @@ const filteredOrderInvoices = computed(() => {
       || (customer?.name.toLowerCase().includes(query) ?? false)
     )
   })
+  if (orderCustomerSortDir.value === 'none') return list
+  return sortAlpha(list, (inv) => store.customerFor(store.bookingFor(inv.bookingId)?.customerId ?? '')?.name ?? '', orderCustomerSortDir.value)
 })
 
 const paginatedOrderInvoices = computed(() => {
@@ -1198,7 +1205,12 @@ watch(() => route.query.catalog, (catalog) => {
             <thead>
               <tr>
                 <th>PO Number</th>
-                <th>Customer</th>
+                <th>
+                  <button type="button" class="th-sort-btn" :class="{ 'is-active': orderCustomerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleOrderCustomerSort">
+                    <span>Customer</span>
+                    <em>{{ orderCustomerSortDir === 'asc' ? 'A–Z ↑' : orderCustomerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                  </button>
+                </th>
                 <th>Invoice Issued</th>
                 <th>Total Billing</th>
                 <th>Balance Due</th>

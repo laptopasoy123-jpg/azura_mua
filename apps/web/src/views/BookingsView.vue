@@ -6,7 +6,7 @@ import {
   Ban, RotateCcw, UploadCloud, LoaderCircle, Image as ImageIcon, AlertTriangle,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type BookingRefund, type BookingStatus, type StylingType } from '../stores/crm'
-import { displayBookingStatus, formatCurrency, formatDate, initials } from '../utils/format'
+import { displayBookingStatus, formatCurrency, formatDate, initials, sortAlpha } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -86,12 +86,21 @@ const form = reactive({
   status: 'Draft' as BookingStatus,
 })
 
-const rows = computed(() => store.bookings.filter((booking) => {
-  const customer = store.customerFor(booking.customerId)
-  const query = search.value.toLowerCase()
-  const matchesSearch = !query || booking.poNumber.toLowerCase().includes(query) || customer?.name.toLowerCase().includes(query) || customer?.phone.includes(query)
-  return matchesSearch && (status.value === 'All' || booking.status === status.value)
-}))
+const customerSortDir = ref<'none' | 'asc' | 'desc'>('none')
+const toggleCustomerSort = () => {
+  customerSortDir.value = customerSortDir.value === 'none' ? 'asc' : customerSortDir.value === 'asc' ? 'desc' : 'none'
+}
+
+const rows = computed(() => {
+  const filtered = store.bookings.filter((booking) => {
+    const customer = store.customerFor(booking.customerId)
+    const query = search.value.toLowerCase()
+    const matchesSearch = !query || booking.poNumber.toLowerCase().includes(query) || customer?.name.toLowerCase().includes(query) || customer?.phone.includes(query)
+    return matchesSearch && (status.value === 'All' || booking.status === status.value)
+  })
+  if (customerSortDir.value === 'none') return filtered
+  return sortAlpha(filtered, (b) => store.customerFor(b.customerId)?.name ?? '', customerSortDir.value)
+})
 
 const paginatedRows = computed(() => {
   const start = (bookingPage.value - 1) * bookingPageSize.value
@@ -430,7 +439,17 @@ const openProofZoom = (url: string) => {
       </div>
       <div class="data-table-wrap">
         <table class="data-table booking-table">
-          <thead><tr><th>Customer</th><th>Booking</th><th>Event</th><th>Billing</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>
+                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleCustomerSort">
+                  <span>Customer</span>
+                  <em>{{ customerSortDir === 'asc' ? 'A–Z ↑' : customerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                </button>
+              </th>
+              <th>Booking</th><th>Event</th><th>Billing</th><th>Status</th><th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
             <tr
               v-for="booking in paginatedRows"

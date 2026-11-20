@@ -20,7 +20,7 @@ import {
   type WeddingEventDetail,
   type WeddingFittingForm,
 } from '../stores/crm'
-import { displayAttireStatus, formatDate, uid } from '../utils/format'
+import { displayAttireStatus, formatDate, sortAlpha, uid } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import { downloadWeddingAttireReportPdf, generateWeddingFittingPdf } from '../utils/weddingPdf'
 
@@ -210,13 +210,21 @@ const attireSummaryCounts = computed(() => {
   return { available, booked, inUse, laundry }
 })
 
-const filteredAttire = computed(() => store.weddingAttire.filter((item) => {
-  const query = search.value.toLowerCase()
-  const eff = scheduleMapByAttire.value.get(item.id)?.status ?? effectiveStatus(item)
-  return (!query || item.name.toLowerCase().includes(query) || item.code.toLowerCase().includes(query) || item.size.toLowerCase().includes(query))
-    && (category.value === 'All' || item.category === category.value)
-    && (status.value === 'All' || eff === status.value)
-}))
+const attireSortDir = ref<'asc' | 'desc'>('asc')
+const toggleAttireSort = () => {
+  attireSortDir.value = attireSortDir.value === 'asc' ? 'desc' : 'asc'
+}
+
+const filteredAttire = computed(() => {
+  const list = store.weddingAttire.filter((item) => {
+    const query = search.value.toLowerCase()
+    const eff = scheduleMapByAttire.value.get(item.id)?.status ?? effectiveStatus(item)
+    return (!query || item.name.toLowerCase().includes(query) || item.code.toLowerCase().includes(query) || item.size.toLowerCase().includes(query))
+      && (category.value === 'All' || item.category === category.value)
+      && (status.value === 'All' || eff === status.value)
+  })
+  return sortAlpha(list, (i) => i.name, attireSortDir.value)
+})
 
 const paginatedAttire = computed(() => {
   const start = (attirePage.value - 1) * attirePageSize.value
@@ -257,7 +265,7 @@ const softlensSelectOptions = computed(() => [
 ])
 
 const fittingBookingSelectOptions = computed(() =>
-  fittingBookingOptions.value.map((b) => ({
+  sortAlpha(fittingBookingOptions.value, (b) => store.customerFor(b.customerId)?.name ?? b.poNumber).map((b) => ({
     value: b.id,
     label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
     sublabel: formatDate(b.eventDate),
@@ -272,8 +280,8 @@ const fittingBookingOptions = computed(() =>
   ),
 )
 
-const brideCatalog = computed(() => store.weddingAttire.filter((item) => item.category === 'Bride'))
-const groomCatalog = computed(() => store.weddingAttire.filter((item) => item.category === 'Groom'))
+const brideCatalog = computed(() => sortAlpha(store.weddingAttire.filter((item) => item.category === 'Bride'), (i) => i.name))
+const groomCatalog = computed(() => sortAlpha(store.weddingAttire.filter((item) => item.category === 'Groom'), (i) => i.name))
 const selectedBooking = computed(() => store.bookingFor(fittingForm.bookingId))
 const modalEditingBooking = computed(() => store.bookingFor(editModalForm.bookingId))
 const savedFormForCurrentBooking = computed(() => store.weddingForms.find((form) => form.bookingId === fittingForm.bookingId))
@@ -766,13 +774,20 @@ const downloadSavedPdf = async (targetForm?: WeddingFittingForm) => {
   }
 }
 
-const fittingList = computed(() =>
-  store.weddingForms.map((form) => {
+const fittingCustomerSortDir = ref<'none' | 'asc' | 'desc'>('none')
+const toggleFittingCustomerSort = () => {
+  fittingCustomerSortDir.value = fittingCustomerSortDir.value === 'none' ? 'asc' : fittingCustomerSortDir.value === 'asc' ? 'desc' : 'none'
+}
+
+const fittingList = computed(() => {
+  const list = store.weddingForms.map((form) => {
     const booking = store.bookingFor(form.bookingId)
     const customer = booking ? store.customerFor(booking.customerId) : undefined
     return { form, booking, customer }
-  }),
-)
+  })
+  if (fittingCustomerSortDir.value === 'none') return list
+  return sortAlpha(list, (row) => row.customer?.name ?? '', fittingCustomerSortDir.value)
+})
 
 const paginatedFittingList = computed(() => {
   const start = (fittingPage.value - 1) * fittingPageSize.value
@@ -1259,7 +1274,12 @@ const paginatedFittingList = computed(() => {
           <thead>
             <tr>
               <th>PO Number</th>
-              <th>Customer</th>
+              <th>
+                <button type="button" class="th-sort-btn" :class="{ 'is-active': fittingCustomerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleFittingCustomerSort">
+                  <span>Customer</span>
+                  <em>{{ fittingCustomerSortDir === 'asc' ? 'A–Z ↑' : fittingCustomerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                </button>
+              </th>
               <th>Event Date &amp; Venue</th>
               <th>Sessions &amp; Assigned Wardrobe</th>
               <th>Updated</th>

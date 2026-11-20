@@ -112,3 +112,9 @@ export const displayInvoiceStatus = (status: string): string => {
   }
   return map[status] ?? status
 }
+
+export const compareAlpha = (a: string, b: string): number =>
+  a.trim().localeCompare(b.trim(), 'id', { sensitivity: 'base', numeric: true })
+
+export const sortAlpha = <T>(items: readonly T[], pick: (item: T) => string, dir: 'asc' | 'desc' = 'asc'): T[] =>
+  [...items].sort((a, b) => (dir === 'desc' ? -1 : 1) * compareAlpha(pick(a), pick(b)))

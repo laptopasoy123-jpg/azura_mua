@@ -4,8 +4,8 @@ import {
   Plus, WalletCards, CheckCircle2, ReceiptText, Search, Download, Eye, Pencil, Trash2,
 } from '@lucide/vue'
 import { useCrmStore, type Payment } from '../stores/crm'
-import { formatCurrency, formatDate } from '../utils/format'
-import { downloadPaymentReceiptPdf, formatWhatsAppPhone, resolveReceiptShareUrl, type ReceiptSharePayload } from '../utils/receiptPdf'
+import { formatCurrency, formatDate, sortAlpha } from '../utils/format'
+import { downloadPaymentReceiptPdf, formatWhatsAppPhone, resolveReceiptShareUrl, toReceiptSharePayload, type ReceiptSharePayload } from '../utils/receiptPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import CurrencyInput from '../components/CurrencyInput.vue'
@@ -51,12 +51,21 @@ const maxAllowedForForm = computed(() =>
   selected.value ? store.bookingBalance(selected.value.id) + editingOriginalAmount.value : 0,
 )
 
-const rows = computed(() => store.payments.filter((payment) => {
-  const booking = store.bookingFor(payment.bookingId)
-  const customer = booking ? store.customerFor(booking.customerId) : undefined
-  const query = search.value.toLowerCase()
-  return !query || payment.receiptNumber.toLowerCase().includes(query) || booking?.poNumber.toLowerCase().includes(query) || customer?.name.toLowerCase().includes(query)
-}))
+const customerSortDir = ref<'none' | 'asc' | 'desc'>('none')
+const toggleCustomerSort = () => {
+  customerSortDir.value = customerSortDir.value === 'none' ? 'asc' : customerSortDir.value === 'asc' ? 'desc' : 'none'
+}
+
+const rows = computed(() => {
+  const list = store.payments.filter((payment) => {
+    const booking = store.bookingFor(payment.bookingId)
+    const customer = booking ? store.customerFor(booking.customerId) : undefined
+    const query = search.value.toLowerCase()
+    return !query || payment.receiptNumber.toLowerCase().includes(query) || booking?.poNumber.toLowerCase().includes(query) || customer?.name.toLowerCase().includes(query)
+  })
+  if (customerSortDir.value === 'none') return list
+  return sortAlpha(list, (p) => store.customerFor(store.bookingFor(p.bookingId)?.customerId ?? '')?.name ?? '', customerSortDir.value)
+})
 
 const paginatedRows = computed(() => {
   const start = (page.value - 1) * pageSize.value
@@ -70,17 +79,18 @@ watch(search, () => {
 const methodLabel = (method: Payment['method']) => (method === 'Cash' ? 'Cash' : method === 'Tunai' ? 'Cash' : method)
 
 const bookingSelectOptions = computed(() =>
-  store.bookings
-    .filter((b) => (editingId.value ? b.id === form.bookingId : store.bookingBalance(b.id) > 0))
-    .map((b) => ({
-      value: b.id,
-      label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
-      sublabel: `Balance ${formatCurrency(store.bookingBalance(b.id))}`,
-    })),
+  sortAlpha(
+    store.bookings.filter((b) => (editingId.value ? b.id === form.bookingId : store.bookingBalance(b.id) > 0)),
+    (b) => store.customerFor(b.customerId)?.name ?? b.poNumber,
+  ).map((b) => ({
+    value: b.id,
+    label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
+    sublabel: `Balance ${formatCurrency(store.bookingBalance(b.id))}`,
+  })),
 )
 
 const methodSelectOptions = computed(() =>
-  store.paymentMethods.map((m) => ({ value: m, label: methodLabel(m) })),
+  sortAlpha(store.paymentMethods, (m) => m).map((m) => ({ value: m, label: methodLabel(m) })),
 )
 
 const openCreate = () => {
@@ -130,9 +140,8 @@ const receiptParamsFor = (payment: Payment) => {
   }
 }
 
-const openDetail = async (payment: Payment) => {
+const openDetail = (payment: Payment) => {
   detailPayment.value = payment
-  const { toReceiptSharePayload } = await import('../utils/receiptPdf')
   detailReceiptPayload.value = toReceiptSharePayload(receiptParamsFor(payment))
   showDetail.value = true
 }
@@ -293,7 +302,12 @@ const onSendWhatsApp = async (payment: Payment) => {
           <thead>
             <tr>
               <th>Receipt</th>
-              <th>Customer &amp; PO</th>
+              <th>
+                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleCustomerSort">
+                  <span>Customer &amp; PO</span>
+                  <em>{{ customerSortDir === 'asc' ? 'A–Z ↑' : customerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                </button>
+              </th>
               <th>Payment Date</th>
               <th>Method</th>
               <th>Amount Paid</th>

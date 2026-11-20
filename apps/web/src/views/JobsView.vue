@@ -5,7 +5,7 @@ import {
   SlidersHorizontal, Users, Plus, ChevronRight, Save,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type EmployeeRecord } from '../stores/crm'
-import { displayBookingStatus, formatDate } from '../utils/format'
+import { displayBookingStatus, formatDate, sortAlpha } from '../utils/format'
 import { downloadJobReportPdf, type JobReportRow } from '../utils/jobReportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -56,8 +56,15 @@ const bookingServicesText = (bookingId: string) => {
   return allItems.map((it) => `${it.name} (${it.quantity})`).join(', ')
 }
 
-const filteredBookings = computed(() =>
-  activeBookings.value.filter((booking) => {
+const customerSortDir = ref<'none' | 'asc' | 'desc'>('none')
+const toggleCustomerSort = () => {
+  customerSortDir.value = customerSortDir.value === 'none' ? 'asc' : customerSortDir.value === 'asc' ? 'desc' : 'none'
+}
+
+const sortedEmployees = computed(() => sortAlpha(store.employees, (e) => e.name))
+
+const filteredBookings = computed(() => {
+  const list = activeBookings.value.filter((booking) => {
     if (poFilter.value && booking.id !== poFilter.value) return false
     if (fromDate.value && booking.eventDate < fromDate.value) return false
     if (toDate.value && booking.eventDate > toDate.value) return false
@@ -68,8 +75,10 @@ const filteredBookings = computed(() =>
       return false
     }
     return true
-  }),
-)
+  })
+  if (customerSortDir.value === 'none') return list
+  return sortAlpha(list, (b) => store.customerFor(b.customerId)?.name ?? '', customerSortDir.value)
+})
 
 const paginatedBookings = computed(() => {
   const start = (page.value - 1) * pageSize.value
@@ -83,7 +92,7 @@ watch([fromDate, toDate, employeeFilter, poFilter], () => {
 const staffFilterOptions = computed(() => [
   { value: '', label: 'All Employees' },
   { value: '__unassigned__', label: 'Unassigned Only' },
-  ...store.activeEmployees.map((emp) => ({
+  ...sortAlpha(store.activeEmployees, (emp) => emp.name).map((emp) => ({
     value: emp.id,
     label: emp.name,
     sublabel: emp.role,
@@ -330,7 +339,12 @@ const exportPdf = async () => {
             <tr>
               <th>PO Number</th>
               <th>Event Date</th>
-              <th>Customer &amp; Venue</th>
+              <th>
+                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleCustomerSort">
+                  <span>Customer &amp; Venue</span>
+                  <em>{{ customerSortDir === 'asc' ? 'A–Z ↑' : customerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                </button>
+              </th>
               <th>Assigned Crew</th>
               <th>Details &amp; Crew</th>
             </tr>
@@ -524,7 +538,7 @@ const exportPdf = async () => {
               <tr><th>Name</th><th>Role</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              <tr v-for="emp in store.employees" :key="emp.id" :class="{ 'is-editing-row': editingStaffId === emp.id }">
+              <tr v-for="emp in sortedEmployees" :key="emp.id" :class="{ 'is-editing-row': editingStaffId === emp.id }">
                 <td><strong>{{ emp.name }}</strong><span v-if="emp.phone" class="subtle-line">{{ emp.phone }}</span></td>
                 <td>{{ emp.role }}</td>
                 <td><StatusBadge :label="emp.active ? 'Active' : 'Inactive'" /></td>

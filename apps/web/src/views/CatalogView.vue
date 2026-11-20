@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { Plus, Search, Image as ImageIcon, Pencil, Check, UploadCloud, LoaderCircle } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 import { useCrmStore, type CatalogItem, type CatalogType } from '../stores/crm'
-import { formatCurrency } from '../utils/format'
+import { formatCurrency, sortAlpha } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -26,10 +26,14 @@ const uploadError = ref('')
 const imagePreview = ref('')
 const form = reactive({ name: '', type: 'Inti' as CatalogType, description: '', price: 0, unit: 'paket', imageUrl: '' })
 
-const items = computed(() => store.catalog.filter((item) => {
-  const matchesTab = activeTab.value === 'All' || item.type === activeTab.value
-  return matchesTab && item.name.toLowerCase().includes(search.value.toLowerCase())
-}))
+const nameSortDir = ref<'asc' | 'desc'>('asc')
+const items = computed(() => {
+  const filtered = store.catalog.filter((item) => {
+    const matchesTab = activeTab.value === 'All' || item.type === activeTab.value
+    return matchesTab && item.name.toLowerCase().includes(search.value.toLowerCase())
+  })
+  return sortAlpha(filtered, (i) => i.name, nameSortDir.value)
+})
 
 const paginatedItems = computed(() => {
   const start = (page.value - 1) * pageSize.value
@@ -118,7 +122,17 @@ const submit = () => {
           {{ tab === 'All' ? 'All Services' : tab === 'Inti' ? 'Core Services' : 'Add-on Services' }}
         </button>
       </div>
-      <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search services" /></label>
+      <div class="filter-row">
+        <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search services" /></label>
+        <button
+          type="button"
+          class="soft-button"
+          title="Sort services A-Z / Z-A"
+          @click="nameSortDir = nameSortDir === 'asc' ? 'desc' : 'asc'"
+        >
+          {{ nameSortDir === 'asc' ? 'Name A–Z ↑' : 'Name Z–A ↓' }}
+        </button>
+      </div>
     </section>
     <section class="catalog-grid">
       <article v-for="item in paginatedItems" :key="item.id" class="service-card">

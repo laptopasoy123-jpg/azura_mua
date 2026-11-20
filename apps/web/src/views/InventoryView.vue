@@ -5,7 +5,7 @@ import {
   History, ClipboardCheck, Trash2, UploadCloud, LoaderCircle, Eye, Image as ImageIcon, Pencil, Download,
 } from '@lucide/vue'
 import { useCrmStore, type InventoryItem, type StockMovement, type StockOpnameRecord } from '../stores/crm'
-import { displayStockStatus, formatDate } from '../utils/format'
+import { displayStockStatus, formatDate, sortAlpha } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import { downloadSelectedReportsPdf } from '../utils/reportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -130,8 +130,19 @@ const itemForm = reactive({
   imageUrl: '',
 })
 
-const items = computed(() =>
-  store.inventory.filter((item) => {
+const itemSortDir = ref<'asc' | 'desc'>('asc')
+const movSortDir = ref<'none' | 'asc' | 'desc'>('none')
+
+const toggleItemSort = () => {
+  itemSortDir.value = itemSortDir.value === 'asc' ? 'desc' : 'asc'
+}
+
+const toggleMovSort = () => {
+  movSortDir.value = movSortDir.value === 'none' ? 'asc' : movSortDir.value === 'asc' ? 'desc' : 'none'
+}
+
+const items = computed(() => {
+  const filtered = store.inventory.filter((item) => {
     const q = search.value.trim().toLowerCase()
     const matchesSearch = !q || item.name.toLowerCase().includes(q) || item.code.toLowerCase().includes(q)
     if (!matchesSearch) return false
@@ -139,8 +150,9 @@ const items = computed(() =>
       return store.stockStatus(item) === monitorStatusFilter.value
     }
     return true
-  }),
-)
+  })
+  return sortAlpha(filtered, (item) => item.name, itemSortDir.value)
+})
 
 const paginatedItems = computed(() => {
   const start = (masterPage.value - 1) * masterPageSize.value
@@ -151,7 +163,10 @@ const inMovements = computed(() => store.movements.filter((m) => m.type === 'Mas
 const outMovements = computed(() => store.movements.filter((m) => m.type === 'Keluar'))
 
 const paginatedMovements = computed(() => {
-  const list = tab.value === 'in' ? inMovements.value : outMovements.value
+  const rawList = tab.value === 'in' ? inMovements.value : outMovements.value
+  const list = movSortDir.value === 'none'
+    ? rawList
+    : sortAlpha(rawList, (m) => store.inventory.find((i) => i.id === m.itemId)?.name ?? '', movSortDir.value)
   const page = tab.value === 'in' ? inPage.value : outPage.value
   const size = tab.value === 'in' ? inPageSize.value : outPageSize.value
   const start = (page - 1) * size
@@ -175,7 +190,7 @@ const monitorStatusOptions = [
 ]
 
 const staffPicOptions = computed(() => {
-  const opts = store.activeEmployees.map((emp) => ({
+  const opts = sortAlpha(store.activeEmployees, (emp) => emp.name).map((emp) => ({
     value: emp.name,
     label: emp.name,
     sublabel: emp.role,
@@ -188,7 +203,7 @@ const staffPicOptions = computed(() => {
 })
 
 const inventoryItemOptions = computed(() =>
-  store.inventory.map((item) => ({
+  sortAlpha(store.inventory, (item) => item.name).map((item) => ({
     value: item.id,
     label: item.name,
     sublabel: `Avail: ${store.stockAvailable(item)} ${item.unit}`,
@@ -196,7 +211,7 @@ const inventoryItemOptions = computed(() =>
 )
 
 const invCategorySelectOptions = computed(() => {
-  const list = store.inventoryCategories.map((c) => ({ value: c, label: c }))
+  const list = sortAlpha(store.inventoryCategories, (c) => c).map((c) => ({ value: c, label: c }))
   if (itemForm.category && !store.inventoryCategories.includes(itemForm.category)) {
     list.push({ value: itemForm.category, label: itemForm.category })
   }
@@ -204,7 +219,7 @@ const invCategorySelectOptions = computed(() => {
 })
 
 const invUnitSelectOptions = computed(() => {
-  const list = store.units.map((u) => ({ value: u, label: u }))
+  const list = sortAlpha(store.units, (u) => u).map((u) => ({ value: u, label: u }))
   if (itemForm.unit && !store.units.includes(itemForm.unit)) {
     list.push({ value: itemForm.unit, label: itemForm.unit })
   }
@@ -287,7 +302,7 @@ const openOpnameModal = () => {
   opnameForm.date = new Date().toISOString().slice(0, 10)
   opnameForm.pic = ''
   opnameForm.notes = ''
-  opnameForm.rows = store.inventory.map((item) => {
+  opnameForm.rows = sortAlpha(store.inventory, (i) => i.name).map((item) => {
     const sys = store.stockAvailable(item)
     return {
       itemId: item.id,
@@ -309,7 +324,7 @@ const openEditOpnameModal = (record: StockOpnameRecord) => {
   opnameForm.date = record.date
   opnameForm.pic = record.pic
   opnameForm.notes = record.notes ?? ''
-  opnameForm.rows = store.inventory.map((item) => {
+  opnameForm.rows = sortAlpha(store.inventory, (i) => i.name).map((item) => {
     const existingLine = record.items.find((l) => l.itemId === item.id)
     const priorDiff = existingLine?.diff ?? 0
     const sysBefore = store.stockAvailable(item) - priorDiff
@@ -601,7 +616,12 @@ const exportInventoryPdf = async () => {
           <table class="data-table">
             <thead>
               <tr>
-                <th>Item &amp; Photo</th>
+                <th>
+                  <button type="button" class="th-sort-btn is-active" title="Sort items A-Z / Z-A" @click="toggleItemSort">
+                    <span>Item &amp; Photo</span>
+                    <em>{{ itemSortDir === 'asc' ? 'A–Z ↑' : 'Z–A ↓' }}</em>
+                  </button>
+                </th>
                 <th>Category</th>
                 <th>Initial</th>
                 <th>In</th>
@@ -733,7 +753,18 @@ const exportInventoryPdf = async () => {
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
-            <thead><tr><th>Date</th><th>Item Name</th><th>Qty</th><th>PIC</th><th>Photo Proof</th><th>Notes</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>
+                  <button type="button" class="th-sort-btn" :class="{ 'is-active': movSortDir !== 'none' }" title="Sort item name A-Z / Z-A" @click="toggleMovSort">
+                    <span>Item Name</span>
+                    <em>{{ movSortDir === 'asc' ? 'A–Z ↑' : movSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                  </button>
+                </th>
+                <th>Qty</th><th>PIC</th><th>Photo Proof</th><th>Notes</th><th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="row in paginatedMovements" :key="row.id">
                 <td>{{ formatDate(row.date) }}</td>

@@ -5112,13 +5112,24 @@ label.is-optional > span {
   }
   .dp-footer {
     flex-direction: column;
-    align-items: stretch;
-    padding: 12px 14px;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 12px;
   }
-  .dp-meta,
-  .dp-pages {
+  .dp-meta {
     justify-content: space-between;
     width: 100%;
+    gap: 8px;
+  }
+  .dp-pages {
+    justify-content: center !important;
+    gap: 6px;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .dp-btn {
+    min-width: 34px;
+    height: 34px;
   }
 }
 
@@ -5783,6 +5794,201 @@ tr.is-editing-row td {
 .calendar-status-pill.is-completed {
   background: #e5f5ec;
   color: #1f6642;
+}
+
+/* Sortable Table Header Button */
+.th-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.th-sort-btn:hover {
+  background: rgba(182, 138, 86, 0.14);
+  color: #211d1a;
+}
+.th-sort-btn.is-active {
+  background: rgba(182, 138, 86, 0.18);
+  color: #211d1a;
+}
+.th-sort-btn em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+  color: #8c6d45;
+}
+
+/* Dropdown Settings: Clean Scrollable List + Footer Note (No Cluttered Pagination) */
+.dropdown-option-list.is-scrollable {
+  max-height: 295px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.dropdown-settings-note {
+  margin-top: auto;
+  padding-top: 9px;
+  border-top: 1px dashed #e6dfd4;
+  font-size: 11px;
+  color: #776a5c;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Modal Form Containment & Mobile Stock In/Out + Stock Opname Audit Cards */
+.form-grid > *,
+.order-lines,
+.order-lines-head,
+.stock-batch-row,
+.stock-batch-row > *,
+.opname-sheet-wrap,
+.qty-unit-input {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.stock-batch-row .ss-root,
+.form-grid .ss-root,
+.form-grid input,
+.form-grid textarea,
+.form-grid select {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 720px) {
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+  }
+  .order-lines {
+    padding: 12px !important;
+    gap: 10px !important;
+  }
+  .order-lines-head {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+  .order-lines-head .add-group-add-trigger {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    width: 100%;
+  }
+  .order-lines-head .add-group-add-trigger > button,
+  .order-lines-head > .soft-button {
+    width: 100% !important;
+    justify-content: center;
+  }
+  .stock-batch-row {
+    grid-template-columns: minmax(0, 1fr) 40px !important;
+    gap: 8px !important;
+    padding: 10px !important;
+    align-items: end !important;
+  }
+  .stock-batch-row > label:first-child {
+    grid-column: 1 / -1;
+  }
+  .stock-batch-row .qty-unit-input {
+    width: 100% !important;
+  }
+  .stock-batch-row .order-line-remove {
+    height: 41px !important;
+    width: 40px !important;
+  }
+
+  /* Stock Opname Audit: Mobile Card Rows (Zero Clipping) */
+  .opname-sheet-wrap {
+    border: 0 !important;
+    overflow-x: visible !important;
+  }
+  .opname-sheet-table,
+  .opname-sheet-table thead,
+  .opname-sheet-table tbody,
+  .opname-sheet-table th,
+  .opname-sheet-table td,
+  .opname-sheet-table tr {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+  .opname-sheet-table thead {
+    display: none !important;
+  }
+  .opname-sheet-table tbody {
+    display: flex !important;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .opname-sheet-table tr {
+    display: grid !important;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px 10px;
+    padding: 12px !important;
+    border: 1px solid #e1dcd3;
+    border-radius: 13px;
+    background: #fcfaf7;
+    align-items: center;
+  }
+  .opname-sheet-table td {
+    padding: 0 !important;
+    border: 0 !important;
+    text-align: left !important;
+  }
+  .opname-sheet-table td:nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .opname-sheet-table td:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .opname-sheet-table td:nth-child(3),
+  .opname-sheet-table td:nth-child(4),
+  .opname-sheet-table td:nth-child(5),
+  .opname-sheet-table td:nth-child(6) {
+    grid-column: 1 / -1;
+  }
+  .opname-sheet-table td:nth-child(3)::before {
+    content: "System Stock: ";
+    font-size: 11px;
+    color: #6b5f53;
+    font-weight: 600;
+  }
+  .opname-sheet-table td:nth-child(4)::before {
+    content: "Physical Count:";
+    display: block;
+    font-size: 11px;
+    color: #6b5f53;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .opname-sheet-table .qty-unit-input--compact {
+    width: 100% !important;
+  }
+  .opname-sheet-table input[type="number"] {
+    width: 100% !important;
+    flex: 1;
+    min-width: 0;
+  }
+  .opname-sheet-table td:nth-child(6) input {
+    width: 100% !important;
+  }
 }
 
 
