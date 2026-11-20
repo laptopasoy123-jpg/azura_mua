@@ -45,6 +45,11 @@ const lastSavedBookingId = ref('')
 const formError = ref('')
 const downloadingPdf = ref(false)
 const downloadingSchedulePdf = ref(false)
+const brokenImgIds = ref<Record<string, boolean>>({})
+
+const markImgBroken = (id: string) => {
+  brokenImgIds.value = { ...brokenImgIds.value, [id]: true }
+}
 
 // Calendar modal state per attire
 const showCalendarModal = ref(false)
@@ -1025,13 +1030,19 @@ const paginatedFittingList = computed(() => {
 
                 <div class="selected-outfit couple-span-2" :class="{ empty: !event.bride.attireId }">
                   <button
-                    v-if="selectedAttire(event.bride.attireId)?.imageUrl"
+                    v-if="selectedAttire(event.bride.attireId)?.imageUrl && !brokenImgIds[event.bride.attireId]"
                     type="button"
                     class="selected-outfit-thumb"
                     title="Zoom attire photo"
                     @click="openZoom(selectedAttire(event.bride.attireId)!)"
                   >
-                    <img :src="selectedAttire(event.bride.attireId)?.imageUrl" :alt="selectedAttire(event.bride.attireId)?.name" loading="lazy" decoding="async" />
+                    <img
+                      :src="selectedAttire(event.bride.attireId)?.imageUrl"
+                      :alt="selectedAttire(event.bride.attireId)?.name"
+                      loading="lazy"
+                      decoding="async"
+                      @error="markImgBroken(event.bride.attireId)"
+                    />
                   </button>
                   <span v-else class="selected-outfit-placeholder"><Shirt :size="20" /></span>
                   <div>
@@ -1063,13 +1074,19 @@ const paginatedFittingList = computed(() => {
 
                 <div class="selected-outfit couple-span-2" :class="{ empty: !event.groom.attireId }">
                   <button
-                    v-if="selectedAttire(event.groom.attireId)?.imageUrl"
+                    v-if="selectedAttire(event.groom.attireId)?.imageUrl && !brokenImgIds[event.groom.attireId]"
                     type="button"
                     class="selected-outfit-thumb"
                     title="Zoom attire photo"
                     @click="openZoom(selectedAttire(event.groom.attireId)!)"
                   >
-                    <img :src="selectedAttire(event.groom.attireId)?.imageUrl" :alt="selectedAttire(event.groom.attireId)?.name" loading="lazy" decoding="async" />
+                    <img
+                      :src="selectedAttire(event.groom.attireId)?.imageUrl"
+                      :alt="selectedAttire(event.groom.attireId)?.name"
+                      loading="lazy"
+                      decoding="async"
+                      @error="markImgBroken(event.groom.attireId)"
+                    />
                   </button>
                   <span v-else class="selected-outfit-placeholder"><Shirt :size="20" /></span>
                   <div>
@@ -1449,11 +1466,18 @@ const paginatedFittingList = computed(() => {
       @close="showEditFittingModal = false"
     >
       <div class="fitting-modal-body">
-        <div class="fitting-modal-section">
-          <div class="fitting-modal-section-head">
-            <Ruler :size="17" />
-            <strong>Body Measurements (cm)</strong>
-          </div>
+        <section class="panel fitting-panel">
+          <header class="wedding-section-head">
+            <div>
+              <span class="section-number">01</span>
+              <div>
+                <span class="eyebrow">Size chart</span>
+                <h3>Body Measurements <small>cm</small></h3>
+                <p>Enter measurements recorded during fitting. Fields marked * are required.</p>
+              </div>
+            </div>
+            <Ruler :size="21" />
+          </header>
           <div class="measurement-grid">
             <article v-for="group in measurementGroups" :key="group.key" class="measurement-card">
               <h4>{{ group.label }}</h4>
@@ -1465,13 +1489,20 @@ const paginatedFittingList = computed(() => {
               </div>
             </article>
           </div>
-        </div>
+        </section>
 
-        <div class="fitting-modal-section">
-          <div class="fitting-modal-section-head">
-            <Shirt :size="17" />
-            <strong>Event Sessions &amp; Attire Selection</strong>
-          </div>
+        <section class="panel event-details-panel">
+          <header class="wedding-section-head">
+            <div>
+              <span class="section-number">02</span>
+              <div>
+                <span class="eyebrow">Sessions &amp; wardrobe</span>
+                <h3>Event Sessions &amp; Attire Selection</h3>
+                <p>Assign Bride &amp; Groom wardrobe pieces directly from the catalog per wedding session.</p>
+              </div>
+            </div>
+            <Shirt :size="21" />
+          </header>
           <div class="event-detail-list">
             <article v-for="(event, index) in editModalForm.events" :key="event.number" class="event-detail-card">
               <header>
@@ -1516,6 +1547,28 @@ const paginatedFittingList = computed(() => {
                       placeholder="Select Bride attire from catalog"
                     />
                   </div>
+                  <div class="selected-outfit couple-span-2" :class="{ empty: !event.bride.attireId }">
+                    <button
+                      v-if="selectedAttire(event.bride.attireId)?.imageUrl && !brokenImgIds[event.bride.attireId]"
+                      type="button"
+                      class="selected-outfit-thumb"
+                      title="Zoom attire photo"
+                      @click="openZoom(selectedAttire(event.bride.attireId)!)"
+                    >
+                      <img
+                        :src="selectedAttire(event.bride.attireId)?.imageUrl"
+                        :alt="selectedAttire(event.bride.attireId)?.name"
+                        loading="lazy"
+                        decoding="async"
+                        @error="markImgBroken(event.bride.attireId)"
+                      />
+                    </button>
+                    <span v-else class="selected-outfit-placeholder"><Shirt :size="20" /></span>
+                    <div>
+                      <strong>{{ selectedAttire(event.bride.attireId)?.name ?? 'No attire selected' }}</strong>
+                      <small>{{ selectedAttire(event.bride.attireId) ? `${selectedAttire(event.bride.attireId)?.code} · Size ${selectedAttire(event.bride.attireId)?.size}` : 'Attire name and preview photo appear automatically once selected' }}</small>
+                    </div>
+                  </div>
                   <div v-if="attireSelectionAlert(event.bride.attireId, modalEditingBooking)" class="attire-inline-alert couple-span-2">
                     <AlertTriangle :size="14" />
                     <span>{{ attireSelectionAlert(event.bride.attireId, modalEditingBooking) }}</span>
@@ -1535,6 +1588,28 @@ const paginatedFittingList = computed(() => {
                       placeholder="Select Groom attire from catalog"
                     />
                   </div>
+                  <div class="selected-outfit couple-span-2" :class="{ empty: !event.groom.attireId }">
+                    <button
+                      v-if="selectedAttire(event.groom.attireId)?.imageUrl && !brokenImgIds[event.groom.attireId]"
+                      type="button"
+                      class="selected-outfit-thumb"
+                      title="Zoom attire photo"
+                      @click="openZoom(selectedAttire(event.groom.attireId)!)"
+                    >
+                      <img
+                        :src="selectedAttire(event.groom.attireId)?.imageUrl"
+                        :alt="selectedAttire(event.groom.attireId)?.name"
+                        loading="lazy"
+                        decoding="async"
+                        @error="markImgBroken(event.groom.attireId)"
+                      />
+                    </button>
+                    <span v-else class="selected-outfit-placeholder"><Shirt :size="20" /></span>
+                    <div>
+                      <strong>{{ selectedAttire(event.groom.attireId)?.name ?? 'No attire selected' }}</strong>
+                      <small>{{ selectedAttire(event.groom.attireId) ? `${selectedAttire(event.groom.attireId)?.code} · Size ${selectedAttire(event.groom.attireId)?.size}` : 'Attire name and preview photo appear automatically once selected' }}</small>
+                    </div>
+                  </div>
                   <div v-if="attireSelectionAlert(event.groom.attireId, modalEditingBooking)" class="attire-inline-alert couple-span-2">
                     <AlertTriangle :size="14" />
                     <span>{{ attireSelectionAlert(event.groom.attireId, modalEditingBooking) }}</span>
@@ -1552,13 +1627,20 @@ const paginatedFittingList = computed(() => {
               </button>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div class="fitting-modal-section">
-          <div class="fitting-modal-section-head">
-            <UsersRound :size="17" />
-            <strong>Uniforms &amp; Extras</strong>
-          </div>
+        <section class="panel wedding-mini-form">
+          <header class="wedding-section-head">
+            <div>
+              <span class="section-number">03</span>
+              <div>
+                <span class="eyebrow">Family &amp; extras</span>
+                <h3>Uniforms &amp; Details</h3>
+                <p>Domas, Manggolo, Softlens, family attire, and add-on floral/henna requests.</p>
+              </div>
+            </div>
+            <UsersRound :size="21" />
+          </header>
           <div class="uniform-sections">
             <div class="uniform-group-box">
               <h4>Domas &amp; Manggolo</h4>
@@ -1592,24 +1674,31 @@ const paginatedFittingList = computed(() => {
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div class="fitting-modal-section">
-          <div class="fitting-modal-section-head">
-            <Store :size="17" />
-            <strong>Partner Wedding Vendors</strong>
-          </div>
+        <section class="panel wedding-mini-form">
+          <header class="wedding-section-head">
+            <div>
+              <span class="section-number">04</span>
+              <div>
+                <span class="eyebrow">Vendor directory</span>
+                <h3>Partner Wedding Vendors</h3>
+                <p>Track all supporting vendors for this wedding day.</p>
+              </div>
+            </div>
+            <Store :size="21" />
+          </header>
           <div class="mini-field-grid">
             <label v-for="([key, label]) in vendorFields" :key="key">
               <span>{{ label }}</span>
               <input v-model="editModalForm.vendors[key]" placeholder="Vendor name / contact / notes" />
             </label>
           </div>
-        </div>
+        </section>
       </div>
 
       <p v-if="modalFormError" class="form-error" role="alert">{{ modalFormError }}</p>
-      <div class="modal-actions">
+      <div class="modal-actions fitting-modal-actions">
         <button
           type="button"
           class="secondary-button"

@@ -5423,4 +5423,228 @@ label.is-optional > span {
   }
 }
 
+/* Wedding Portal: Unified Modern Fitting Form (Tab 2 & Saved Fitting Modal) */
+.fitting-modal-body,
+.fitting-modal-body * {
+  box-sizing: border-box;
+}
+.fitting-modal-body {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+  overflow-x: hidden !important;
+  padding: 2px 2px 4px;
+}
+.fitting-modal-body > .panel {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow: visible;
+}
+.fitting-modal-body .wedding-section-head {
+  padding: 15px 18px;
+}
+
+.measurement-grid,
+.measurement-card,
+.measurement-card > div,
+.measurement-card label,
+.event-detail-list,
+.event-detail-card,
+.event-basic-fields,
+.event-basic-fields label,
+.couple-detail-grid,
+.couple-detail-card,
+.couple-detail-card label,
+.uniform-sections,
+.uniform-group-box,
+.uniform-group-fields,
+.uniform-group-fields label,
+.mini-field-grid,
+.mini-field-grid label,
+.fitting-modal-body .attire-picker {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.measurement-card label > span,
+.event-basic-fields label > span,
+.couple-detail-card label > span,
+.uniform-group-fields label > span,
+.mini-field-grid label > span,
+.attire-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #5c4f42;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .015em;
+}
+.measurement-card label b {
+  color: #b84a3c;
+  margin-left: 1px;
+}
+
+.measurement-card input,
+.event-details-panel input,
+.event-details-panel select,
+.wedding-mini-form input,
+.wedding-mini-form select,
+.fitting-modal-body input,
+.fitting-modal-body select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1.5px solid #dfd7cc;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #211d1a;
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.measurement-card input:focus,
+.event-details-panel input:focus,
+.event-details-panel select:focus,
+.wedding-mini-form input:focus,
+.wedding-mini-form select:focus,
+.fitting-modal-body input:focus,
+.fitting-modal-body select:focus {
+  border-color: #b68a56;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(182, 138, 86, 0.14);
+}
+.measurement-card input::placeholder,
+.event-details-panel input::placeholder,
+.wedding-mini-form input::placeholder,
+.fitting-modal-body input::placeholder {
+  color: #9b8f82;
+}
+
+.event-remove-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  background: rgba(255, 255, 255, .12);
+  color: #f9f4ec;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.event-remove-button:hover {
+  background: rgba(255, 255, 255, .22);
+}
+
+.add-event-button {
+  width: auto;
+  min-width: 170px;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 999px !important;
+  border: 1.5px dashed #b68a56 !important;
+  background: #faf7f2 !important;
+  color: #3a3028 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+.add-event-button:hover {
+  background: #f2eadc !important;
+  border-color: #8f6b3e !important;
+}
+
+.fitting-modal-body .uniform-group-box {
+  background: #faf8f4;
+  border-color: #e6dfd5;
+}
+.fitting-modal-body .uniform-group-box h4 {
+  color: #5c4631;
+}
+.fitting-modal-body .attire-picker-trigger {
+  min-height: 44px;
+  border-radius: 12px;
+}
+
+@media (max-width: 820px) {
+  .modal-body {
+    overflow-x: hidden !important;
+    min-width: 0;
+  }
+  .fitting-modal-body {
+    max-height: calc(100dvh - 190px);
+    padding: 0;
+    gap: 12px;
+  }
+  .fitting-modal-body .wedding-section-head {
+    padding: 13px 14px;
+  }
+  .fitting-modal-body .measurement-grid,
+  .fitting-modal-body .event-detail-list,
+  .fitting-modal-body .uniform-sections,
+  .fitting-modal-body .mini-field-grid {
+    padding: 12px !important;
+  }
+  .measurement-card > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 9px !important;
+  }
+  .event-basic-fields,
+  .event-basic-fields--three,
+  .couple-detail-grid,
+  .couple-detail-card,
+  .uniform-group-fields,
+  .uniform-group-fields--two,
+  .uniform-group-fields--three,
+  .mini-field-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+  .couple-detail-card > *,
+  .couple-span-2 {
+    grid-column: 1 / -1 !important;
+  }
+  .event-basic-fields {
+    padding: 12px 12px 0 !important;
+  }
+  .couple-detail-grid {
+    padding: 12px !important;
+  }
+  .add-event-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 680px) {
+  .fitting-modal-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    width: 100%;
+  }
+  .fitting-modal-actions > button {
+    width: 100% !important;
+    min-height: 44px;
+    padding: 8px 10px !important;
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
+    font-size: 12px !important;
+  }
+  .fitting-modal-actions > button:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
 

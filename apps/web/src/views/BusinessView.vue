@@ -323,49 +323,97 @@ const invoiceWaPhone = (invoice: Invoice) => {
   return digits
 }
 
-const sendInvoiceWhatsApp = (invoice: Invoice) => {
+const sendingWaInvoiceId = ref('')
+
+const sendInvoiceWhatsApp = async (invoice: Invoice) => {
   const waPhone = invoiceWaPhone(invoice)
   if (!waPhone) {
     store.showActionToast('WhatsApp Unavailable', 'Customer phone number is missing for this PO.', 'amber')
     return
   }
-  const booking = store.bookingFor(invoice.bookingId)
-  const customer = booking ? store.customerFor(booking.customerId) : undefined
-  const total = store.bookingTotal(invoice.bookingId)
-  const paid = store.bookingPaid(invoice.bookingId)
-  const balance = Math.max(0, store.bookingBalance(invoice.bookingId))
-  const status = paymentStatus(invoice.bookingId)
-  const brandTitle = [store.businessProfile.name || 'Azura', store.businessProfile.tagline || 'Makeup Artist'].filter(Boolean).join(' ')
+  const waTab = window.open('about:blank', '_blank')
+  sendingWaInvoiceId.value = invoice.id
+  try {
+    const booking = store.bookingFor(invoice.bookingId)
+    const customer = booking ? store.customerFor(booking.customerId) : undefined
+    const sortedGroups = store.sortedOrderGroups(invoice)
+    const payments = store.bookingPayments(invoice.bookingId)
+    const total = store.bookingTotal(invoice.bookingId)
+    const paid = store.bookingPaid(invoice.bookingId)
+    const balance = Math.max(0, store.bookingBalance(invoice.bookingId))
+    const status = paymentStatus(invoice.bookingId)
+    const brandTitle = [store.businessProfile.name || 'Azura', store.businessProfile.tagline || 'Makeup Artist'].filter(Boolean).join(' ')
 
-  const itemLines: string[] = []
-  for (const group of store.sortedOrderGroups(invoice)) {
-    for (const item of store.sortInvoiceItemsIntiFirst(group.items)) {
-      itemLines.push(`  • ${item.name} (${item.quantity}${item.unit ? ` ${item.unit}` : ''}) = ${formatCurrency(item.quantity * item.unitPrice)}`)
+    const { resolveInvoiceShareUrl } = await import('../utils/invoicePdf')
+    const shareResult = await resolveInvoiceShareUrl({
+      invoice,
+      booking,
+      customer,
+      sortedGroups,
+      payments,
+      totalBilling: total,
+      totalPaid: paid,
+      balance,
+      businessProfile: store.businessProfile,
+      sortItemsIntiFirst: store.sortInvoiceItemsIntiFirst,
+    })
+
+    const itemLines: string[] = []
+    sortedGroups.forEach((group, gIdx) => {
+      const groupTitle = group.kind === 'Awal'
+        ? `Initial Order (${formatDate(group.orderDate)})`
+        : `Add-on Batch #${gIdx} (${formatDate(group.orderDate)})`
+      itemLines.push(`*${groupTitle}*`)
+      const { intiItems, additionalItems } = splitItemsByType(group.items)
+      if (intiItems.length) {
+        itemLines.push(`  _Core Services (Inti):_`)
+        for (const item of intiItems) {
+          itemLines.push(`    • ${item.name} (${item.quantity}${item.unit ? ` ${item.unit}` : ''}) = ${formatCurrency(item.quantity * item.unitPrice)}`)
+        }
+      }
+      if (additionalItems.length) {
+        itemLines.push(`  _Add-on Services (Additional):_`)
+        for (const item of additionalItems) {
+          itemLines.push(`    • ${item.name} (${item.quantity}${item.unit ? ` ${item.unit}` : ''}) = ${formatCurrency(item.quantity * item.unitPrice)}`)
+        }
+      }
+    })
+
+    const lines = [
+      `Halo ${customer?.name ?? 'Kak'},`,
+      `Berikut rincian *Official Invoice* dari *${brandTitle}*:`,
+      ``,
+      `• Invoice No: ${invoice.invoiceNumber}`,
+      `• PO Number: ${booking?.poNumber ?? '-'}`,
+      `• Issued Date: ${formatDate(invoice.issuedAt)}`,
+      `• Event Date: ${booking?.eventDate ? formatDate(booking.eventDate) : '-'}${booking?.location ? ` · ${booking.location}` : ''}`,
+      ``,
+      `Rincian Layanan:`,
+      ...(itemLines.length ? itemLines : ['  • (Belum ada item)']),
+      ``,
+      `• Total Invoice: *${formatCurrency(total)}*`,
+      `• Total Paid: ${formatCurrency(paid)}`,
+      `• Balance Due: *${formatCurrency(balance)}* (${status})`,
+      ``,
+      `📄 *Lihat & Download Invoice PDF (${invoice.invoiceNumber}):*`,
+      shareResult.url,
+      ``,
+      store.businessProfile.invoiceNote || `Terima kasih telah mempercayakan momen spesial Anda kepada ${brandTitle}.`,
+    ]
+
+    const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(lines.join('\n'))}`
+    if (waTab) {
+      waTab.location.href = waUrl
+    } else {
+      window.open(waUrl, '_blank', 'noopener,noreferrer')
     }
+    store.showActionToast('WhatsApp Ready', `Opening WhatsApp invoice & PDF link for ${customer?.name ?? waPhone}.`, 'green')
+  } catch (err) {
+    if (waTab) waTab.close()
+    store.showActionToast('WhatsApp Failed', err instanceof Error ? err.message : 'Could not prepare invoice share link.', 'rose')
+  } finally {
+    sendingWaInvoiceId.value = ''
   }
-
-  const lines = [
-    `Halo ${customer?.name ?? 'Kak'},`,
-    `Berikut rincian *Official Invoice* dari *${brandTitle}*:`,
-    ``,
-    `• Invoice No: ${invoice.invoiceNumber}`,
-    `• PO Number: ${booking?.poNumber ?? '-'}`,
-    `• Issued Date: ${formatDate(invoice.issuedAt)}`,
-    `• Event Date: ${booking?.eventDate ? formatDate(booking.eventDate) : '-'}${booking?.location ? ` · ${booking.location}` : ''}`,
-    ``,
-    `Rincian Layanan:`,
-    ...(itemLines.length ? itemLines : ['  • (Belum ada item)']),
-    ``,
-    `• Total Invoice: *${formatCurrency(total)}*`,
-    `• Total Paid: ${formatCurrency(paid)}`,
-    `• Balance Due: *${formatCurrency(balance)}* (${status})`,
-    ``,
-    store.businessProfile.invoiceNote || `Terima kasih telah mempercayakan momen spesial Anda kepada ${brandTitle}.`,
-  ]
-
-  const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(lines.join('\n'))}`
-  window.open(waUrl, '_blank', 'noopener,noreferrer')
-  store.showActionToast('WhatsApp Ready', `Opening WhatsApp invoice message for ${customer?.name ?? waPhone}.`, 'green')
 }
 
 const eligibleBookingOptions = computed(() =>
@@ -1096,8 +1144,9 @@ watch(() => route.query.catalog, (catalog) => {
               v-if="invoiceWaPhone(invoice)"
               type="button"
               class="wa-icon-button"
-              title="Share invoice details via WhatsApp"
+              title="Share invoice details & PDF link via WhatsApp"
               aria-label="Send invoice via WhatsApp"
+              :disabled="sendingWaInvoiceId === invoice.id"
               @click="sendInvoiceWhatsApp(invoice)"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
@@ -2119,9 +2168,10 @@ watch(() => route.query.catalog, (catalog) => {
           v-if="selectedInvoice && invoiceWaPhone(selectedInvoice)"
           type="button"
           class="secondary-button wa-share-btn"
+          :disabled="sendingWaInvoiceId === selectedInvoice.id"
           @click="sendInvoiceWhatsApp(selectedInvoice)"
         >
-          Send WhatsApp
+          {{ sendingWaInvoiceId === selectedInvoice.id ? 'Preparing Link…' : 'Send WhatsApp' }}
         </button>
         <button v-if="selectedInvoice" type="button" class="primary-button" @click="downloadInvoice(selectedInvoice)"><Download :size="17" />Download Invoice PDF</button>
       </div>

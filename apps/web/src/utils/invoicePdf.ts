@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import type { Booking, BusinessProfile, Customer, Invoice, OrderGroup, Payment } from '../stores/crm'
+import type { Booking, BusinessProfile, Customer, Invoice, InvoiceItem, OrderGroup, Payment } from '../stores/crm'
 import { formatCurrency, formatDate } from './format'
 import { drawEditorialBanner, drawEditorialFooter, PDF_PALETTE } from './pdfTheme'
 
@@ -17,7 +17,83 @@ export interface InvoicePdfInput {
   sortItemsIntiFirst?: (items: Invoice['items']) => Invoice['items']
 }
 
-export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
+export interface InvoiceShareItem {
+  name: string
+  serviceType: 'Inti' | 'Additional'
+  quantity: number
+  unit?: string
+  unitPrice: number
+}
+
+export interface InvoiceShareGroup {
+  id: string
+  kind: OrderGroup['kind']
+  orderDate: string
+  items: InvoiceShareItem[]
+}
+
+export interface InvoiceSharePayment {
+  receiptNumber: string
+  paidAt: string
+  method: string
+  amount: number
+}
+
+export interface InvoiceSharePayload {
+  invoiceNumber: string
+  issuedAt: string
+  poNumber: string
+  customerName: string
+  customerPhone: string
+  eventDate: string
+  eventLocation: string
+  groups: InvoiceShareGroup[]
+  payments: InvoiceSharePayment[]
+  totalBilling: number
+  totalPaid: number
+  balance: number
+  businessName?: string
+  businessTagline?: string
+  businessPhone?: string
+  businessEmail?: string
+  businessAddress?: string
+  invoiceNote?: string
+  logoUrl?: string
+}
+
+const toBase64Url = (text: string): string => {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+const fromBase64Url = (token: string): string => {
+  const padded = token.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((token.length + 3) % 4)
+  const binary = atob(padded)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new TextDecoder().decode(bytes)
+}
+
+export const encodeInvoiceShareToken = (payload: InvoiceSharePayload): string =>
+  toBase64Url(JSON.stringify(payload))
+
+export const decodeInvoiceShareToken = (token: string): InvoiceSharePayload | null => {
+  try {
+    const parsed = JSON.parse(fromBase64Url(token)) as InvoiceSharePayload
+    if (!parsed || !parsed.invoiceNumber) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export const toInvoiceSharePayload = (input: InvoicePdfInput): InvoiceSharePayload => {
   const {
     invoice,
     booking,
@@ -31,24 +107,83 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
     sortItemsIntiFirst,
   } = input
 
+  const groups: InvoiceShareGroup[] = sortedGroups.map((group) => {
+    const items = sortItemsIntiFirst ? sortItemsIntiFirst(group.items) : group.items
+    return {
+      id: group.id,
+      kind: group.kind,
+      orderDate: group.orderDate,
+      items: items.map((item: InvoiceItem) => ({
+        name: item.name,
+        serviceType: item.serviceType === 'Inti' ? 'Inti' : 'Additional',
+        quantity: item.quantity,
+        unit: item.unit,
+        unitPrice: item.unitPrice,
+      })),
+    }
+  })
+
+  return {
+    invoiceNumber: invoice.invoiceNumber,
+    issuedAt: invoice.issuedAt,
+    poNumber: booking?.poNumber ?? '-',
+    customerName: customer?.name ?? '-',
+    customerPhone: customer?.phone ?? '-',
+    eventDate: booking?.eventDate ?? '',
+    eventLocation: booking?.location ?? '',
+    groups,
+    payments: payments.map((p) => ({
+      receiptNumber: p.receiptNumber,
+      paidAt: p.paidAt,
+      method: p.method,
+      amount: p.amount,
+    })),
+    totalBilling,
+    totalPaid,
+    balance,
+    businessName: businessProfile?.name,
+    businessTagline: businessProfile?.tagline,
+    businessPhone: businessProfile?.phone,
+    businessEmail: businessProfile?.email,
+    businessAddress: businessProfile?.address,
+    invoiceNote: businessProfile?.invoiceNote,
+    logoUrl: businessProfile?.logoUrl,
+  }
+}
+
+const renderInvoicePdfFromNormalized = (payload: InvoiceSharePayload, businessProfile?: BusinessProfile) => {
+  const effectiveProfile: BusinessProfile | undefined = businessProfile ?? (
+    payload.businessName || payload.businessPhone || payload.businessEmail || payload.businessAddress || payload.logoUrl
+      ? {
+          name: payload.businessName || 'Azura',
+          tagline: payload.businessTagline || 'Makeup Artist',
+          phone: payload.businessPhone || '',
+          email: payload.businessEmail || '',
+          address: payload.businessAddress || '',
+          invoiceNote: payload.invoiceNote || '',
+          logoUrl: payload.logoUrl,
+        }
+      : undefined
+  )
+
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
   const marginX = 16
   const contentWidth = pageWidth - marginX * 2
 
-  const brandEmail = businessProfile?.email || 'hello@azuramakeup.id'
-  const brandPhone = businessProfile?.phone || '0812 9000 2026'
-  const brandAddress = businessProfile?.address || 'South Jakarta, Indonesia'
-  const invoiceNote = businessProfile?.invoiceNote || 'Thank you for trusting us with your special celebration.'
+  const brandEmail = effectiveProfile?.email || payload.businessEmail || 'hello@azuramakeup.id'
+  const brandPhone = effectiveProfile?.phone || payload.businessPhone || '0812 9000 2026'
+  const brandAddress = effectiveProfile?.address || payload.businessAddress || 'South Jakarta, Indonesia'
+  const invoiceNote = effectiveProfile?.invoiceNote || payload.invoiceNote || 'Thank you for trusting us with your special celebration.'
 
   const cardTop = drawEditorialBanner(doc, {
     marginX,
     docTitle: 'OFFICIAL INVOICE',
-    docSubtitle: booking?.poNumber ? `PURCHASE ORDER · ${booking.poNumber}` : 'CLIENT BILLING STATEMENT',
-    rightMetaTop: invoice.invoiceNumber,
-    rightMetaBottom: `Issued ${formatDate(invoice.issuedAt)}`,
-    businessProfile,
+    docSubtitle: payload.poNumber && payload.poNumber !== '-' ? `PURCHASE ORDER · ${payload.poNumber}` : 'CLIENT BILLING STATEMENT',
+    rightMetaTop: payload.invoiceNumber,
+    rightMetaBottom: `Issued ${formatDate(payload.issuedAt)}`,
+    businessProfile: effectiveProfile,
   })
 
   // Two clean info cards side by side
@@ -71,36 +206,35 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   doc.setTextColor(...PDF_PALETTE.ink)
-  doc.text(customer?.name || '-', marginX + 5, cardTop + 13)
+  doc.text(payload.customerName || '-', marginX + 5, cardTop + 13)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8.5)
   doc.setTextColor(78, 70, 62)
-  doc.text(`Phone / WhatsApp: ${customer?.phone || '-'}`, marginX + 5, cardTop + 19)
-  doc.text(`Invoice Date: ${formatDate(invoice.issuedAt)}`, marginX + 5, cardTop + 24.4)
+  doc.text(`Phone / WhatsApp: ${payload.customerPhone || '-'}`, marginX + 5, cardTop + 19)
+  doc.text(`Invoice Date: ${formatDate(payload.issuedAt)}`, marginX + 5, cardTop + 24.4)
 
   const rightX = marginX + infoW + colGap + 5
-  const firstOrderDate = sortedGroups[0]?.orderDate ?? invoice.issuedAt
+  const firstOrderDate = payload.groups[0]?.orderDate ?? payload.issuedAt
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10.5)
   doc.setTextColor(...PDF_PALETTE.ink)
-  doc.text(booking?.poNumber || '-', rightX, cardTop + 13)
+  doc.text(payload.poNumber || '-', rightX, cardTop + 13)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8.5)
   doc.setTextColor(78, 70, 62)
-  const eventStr = `Event: ${booking?.eventDate ? formatDate(booking.eventDate) : '-'}${booking?.location ? ` · ${booking.location}` : ''}`
+  const eventStr = `Event: ${payload.eventDate ? formatDate(payload.eventDate) : '-'}${payload.eventLocation ? ` · ${payload.eventLocation}` : ''}`
   doc.text(doc.splitTextToSize(eventStr, infoW - 10)[0] ?? eventStr, rightX, cardTop + 19)
   doc.text(`Initial Order: ${formatDate(firstOrderDate)}`, rightX, cardTop + 24.4)
 
   // Services table (grouped chronologically, Core first per group)
   const tableRows: Array<[string, string, string, string, string]> = []
-  sortedGroups.forEach((group, gIdx) => {
-    const items = sortItemsIntiFirst ? sortItemsIntiFirst(group.items) : group.items
+  payload.groups.forEach((group, gIdx) => {
     const groupTitle = group.kind === 'Awal'
       ? `Initial Order (${formatDate(group.orderDate)})`
       : `Add-on #${gIdx} (${formatDate(group.orderDate)})`
-    for (const item of items) {
+    for (const item of group.items) {
       const kindLabel = item.serviceType === 'Inti' ? 'Core Service' : 'Add-on'
       const qtyUnit = item.unit ? `${item.quantity} ${item.unit}` : String(item.quantity)
       tableRows.push([
@@ -162,7 +296,7 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
   const rightBoxW = contentWidth * 0.40
   const rightBoxX = marginX + contentWidth - rightBoxW
 
-  const shownPayments = payments.slice(0, 4)
+  const shownPayments = payload.payments.slice(0, 4)
   const historyHeight = Math.max(41, 22 + shownPayments.length * 6.8)
   doc.setFillColor(...PDF_PALETTE.ivory)
   doc.setDrawColor(...PDF_PALETTE.gold)
@@ -174,9 +308,9 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
   doc.setTextColor(...PDF_PALETTE.goldDark)
   doc.text('PAYMENT STATUS & HISTORY', marginX + 5, cursorY + 6.5)
 
-  const statusText = balance <= 0 ? 'PAID IN FULL' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID'
-  const statusBg = balance <= 0 ? PDF_PALETTE.successBg : totalPaid > 0 ? PDF_PALETTE.warningBg : PDF_PALETTE.dangerBg
-  const statusFg = balance <= 0 ? PDF_PALETTE.successFg : totalPaid > 0 ? PDF_PALETTE.warningFg : PDF_PALETTE.dangerFg
+  const statusText = payload.balance <= 0 ? 'PAID IN FULL' : payload.totalPaid > 0 ? 'PARTIAL' : 'UNPAID'
+  const statusBg = payload.balance <= 0 ? PDF_PALETTE.successBg : payload.totalPaid > 0 ? PDF_PALETTE.warningBg : PDF_PALETTE.dangerBg
+  const statusFg = payload.balance <= 0 ? PDF_PALETTE.successFg : payload.totalPaid > 0 ? PDF_PALETTE.warningFg : PDF_PALETTE.dangerFg
   doc.setFillColor(...statusBg)
   doc.roundedRect(marginX + 5, cursorY + 9.2, 30, 5.8, 2.9, 2.9, 'F')
   doc.setFont('helvetica', 'bold')
@@ -238,15 +372,15 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
     doc.text(val, rightBoxX + rightBoxW - 6, cursorY + yOff, { align: 'right' })
   }
 
-  drawTotalRow(10, 'Invoice Total', formatCurrency(totalBilling))
+  drawTotalRow(10, 'Invoice Total', formatCurrency(payload.totalBilling))
   doc.setDrawColor(78, 67, 57)
   doc.setLineWidth(0.25)
   doc.line(rightBoxX + 6, cursorY + 14.5, rightBoxX + rightBoxW - 6, cursorY + 14.5)
 
-  drawTotalRow(21.5, 'Total Paid', formatCurrency(totalPaid))
+  drawTotalRow(21.5, 'Total Paid', formatCurrency(payload.totalPaid))
   doc.line(rightBoxX + 6, cursorY + 26, rightBoxX + rightBoxW - 6, cursorY + 26)
 
-  drawTotalRow(33.8, 'Balance Due', formatCurrency(Math.max(0, balance)), true)
+  drawTotalRow(33.8, 'Balance Due', formatCurrency(Math.max(0, payload.balance)), true)
 
   drawEditorialFooter(doc, {
     marginX,
@@ -259,7 +393,56 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
   return doc
 }
 
+export const buildInvoicePdfFromPayload = (payload: InvoiceSharePayload) =>
+  renderInvoicePdfFromNormalized(payload)
+
+export const buildInvoicePdfDoc = (input: InvoicePdfInput) =>
+  renderInvoicePdfFromNormalized(toInvoiceSharePayload(input), input.businessProfile)
+
 export const downloadInvoicePdf = (input: InvoicePdfInput) => {
   const doc = buildInvoicePdfDoc(input)
   doc.save(`${input.invoice.invoiceNumber}.pdf`)
+}
+
+export const resolveInvoiceShareUrl = async (input: InvoicePdfInput): Promise<{ url: string; mode: 'r2' | 'viewer' }> => {
+  const payload = toInvoiceSharePayload(input)
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const doc = renderInvoicePdfFromNormalized(payload, input.businessProfile)
+
+  try {
+    const blob = doc.output('blob')
+    const file = new File([blob], `${payload.invoiceNumber}.pdf`, { type: 'application/pdf' })
+    const body = new FormData()
+    body.append('file', file)
+    body.append('purpose', 'invoice-pdf')
+    body.append('visibility', 'public')
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 1800)
+    const response = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/files`, {
+      method: 'POST',
+      body,
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (response.ok) {
+      const json = await response.json() as { ok: boolean; data?: { url: string } }
+      if (json.ok && json.data?.url) {
+        const absolute = json.data.url.startsWith('http') ? json.data.url : `${origin}${json.data.url}`
+        return { url: absolute, mode: 'r2' }
+      }
+    }
+  } catch {
+    // Fall back to self-contained digital invoice & PDF download link
+  }
+
+  const shareablePayload: InvoiceSharePayload =
+    payload.logoUrl && payload.logoUrl.startsWith('data:') && payload.logoUrl.length > 24000
+      ? { ...payload, logoUrl: undefined }
+      : payload
+  const token = encodeInvoiceShareToken(shareablePayload)
+  return {
+    url: `${origin}/invoice?d=${token}`,
+    mode: 'viewer',
+  }
 }

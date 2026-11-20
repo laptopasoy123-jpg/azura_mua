@@ -25,6 +25,11 @@ const emit = defineEmits<{
 const open = ref(false)
 const query = ref('')
 const rootRef = ref<HTMLElement | null>(null)
+const brokenImgs = ref<Record<string, boolean>>({})
+
+const markImgBroken = (id: string) => {
+  brokenImgs.value = { ...brokenImgs.value, [id]: true }
+}
 
 const selectedOption = computed(() =>
   props.options.find((opt) => opt.item.id === props.modelValue) ?? null,
@@ -96,7 +101,13 @@ onBeforeUnmount(() => {
     >
       <div class="attire-picker-value">
         <template v-if="selectedOption">
-          <img v-if="selectedOption.item.imageUrl" :src="selectedOption.item.imageUrl" :alt="selectedOption.item.name" class="attire-picker-thumb" />
+          <img
+            v-if="selectedOption.item.imageUrl && !brokenImgs[selectedOption.item.id]"
+            :src="selectedOption.item.imageUrl"
+            :alt="selectedOption.item.name"
+            class="attire-picker-thumb"
+            @error="markImgBroken(selectedOption.item.id)"
+          />
           <span v-else class="attire-picker-thumb attire-picker-thumb--empty"><Shirt :size="14" /></span>
           <span class="attire-picker-text">
             <strong>{{ selectedOption.item.name }} · Size {{ selectedOption.item.size }}</strong>
@@ -150,7 +161,13 @@ onBeforeUnmount(() => {
         :disabled="opt.locked"
         @click="choose(opt)"
       >
-        <img v-if="opt.item.imageUrl" :src="opt.item.imageUrl" :alt="opt.item.name" class="attire-picker-thumb" />
+        <img
+          v-if="opt.item.imageUrl && !brokenImgs[opt.item.id]"
+          :src="opt.item.imageUrl"
+          :alt="opt.item.name"
+          class="attire-picker-thumb"
+          @error="markImgBroken(opt.item.id)"
+        />
         <span v-else class="attire-picker-thumb attire-picker-thumb--empty"><Shirt :size="14" /></span>
         <div class="attire-picker-opt-body">
           <strong>{{ opt.item.name }}</strong>

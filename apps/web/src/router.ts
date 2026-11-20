@@ -10,6 +10,7 @@ const loadSettingsView = () => import('./views/SettingsView.vue')
 const loadWeddingPortalView = () => import('./views/WeddingPortalView.vue')
 const loadJobsView = () => import('./views/JobsView.vue')
 const loadReceiptPublicView = () => import('./views/ReceiptPublicView.vue')
+const loadInvoicePublicView = () => import('./views/InvoicePublicView.vue')
 
 let prefetched = false
 export const prefetchAllRoutes = () => {
@@ -56,6 +57,7 @@ const router = createRouter({
     { path: '/settings', name: 'settings', component: loadSettingsView, props: { section: 'dropdown' }, meta: { title: 'Dropdown Settings' } },
     { path: '/users', redirect: '/jobs' },
     { path: '/kwitansi', name: 'public-receipt', component: loadReceiptPublicView, meta: { title: 'Payment Receipt', standalone: true } },
+    { path: '/invoice', name: 'public-invoice', component: loadInvoicePublicView, meta: { title: 'Official Invoice', standalone: true } },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
 })
