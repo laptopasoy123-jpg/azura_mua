@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCrmStore } from '../stores/crm'
 import { displayBookingStatus, displayStockStatus, formatCurrency, formatDate, initials } from '../utils/format'
+import { downloadSelectedReportsPdf } from '../utils/reportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import {
@@ -203,7 +204,6 @@ const exportCashflowRangePdf = async () => {
       ? `${cashflowFrom.value || 'Start'} to ${cashflowTo.value || 'Present'}`
       : 'All Recorded Dates'
     await store.runWithPdfLoader('Monthly Cashflow Report', periodLabel, async () => {
-      const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
       await downloadSelectedReportsPdf({
         selectedKeys: ['cashflow', 'payments', 'expenses'],
         fromDate: cashflowFrom.value,

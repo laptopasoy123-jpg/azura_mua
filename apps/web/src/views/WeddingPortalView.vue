@@ -22,6 +22,7 @@ import {
 } from '../stores/crm'
 import { displayAttireStatus, formatDate, uid } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
+import { downloadWeddingAttireReportPdf, generateWeddingFittingPdf } from '../utils/weddingPdf'
 
 const store = useCrmStore()
 const portalTab = ref<'inventory' | 'form' | 'database'>('inventory')
@@ -84,7 +85,6 @@ const downloadScheduleReport = async () => {
       ? `${scheduleReportFrom.value || 'Start'} to ${scheduleReportTo.value || 'End'}`
       : 'All Scheduled Dates'
     await store.runWithPdfLoader('Wardrobe Allocation Schedule Report', periodLabel, async () => {
-      const { downloadWeddingAttireReportPdf } = await import('../utils/weddingPdf')
       await downloadWeddingAttireReportPdf({
         fromDate: scheduleReportFrom.value,
         toDate: scheduleReportTo.value,
@@ -183,10 +183,11 @@ const cardTodayStatus = (item: WeddingAttire): AttireStatus => {
 
 // Cached per-attire schedules so wardrobe cards don't recompute on every render pass
 const scheduleMapByAttire = computed(() => {
-  const map = new Map<string, { active: AttireScheduleEntry[]; all: AttireScheduleEntry[]; status: AttireStatus }>()
+  const map = new Map<string, { active: AttireScheduleEntry[]; urgent: AttireScheduleEntry[]; all: AttireScheduleEntry[]; status: AttireStatus }>()
   for (const item of store.weddingAttire) {
     map.set(item.id, {
       active: store.attireSchedule(item.id),
+      urgent: store.urgentAttireSchedules(item.id, undefined, 2),
       all: store.attireSchedule(item.id, { includePast: true, includeCancelled: false }),
       status: cardTodayStatus(item),
     })
@@ -577,12 +578,12 @@ const calendarEntryStatus = (entry: AttireScheduleEntry): 'Cancelled' | 'Complet
 
 const openAttireCalendar = (item: WeddingAttire) => {
   calendarAttire.value = item
-  const schedule = store.attireSchedule(item.id, { includePast: true, includeCancelled: false })
-  if (schedule.length) {
-    const firstDate = new Date(`${schedule[0]!.eventDate}T00:00:00`)
+  const upcoming = store.attireSchedule(item.id, { includePast: false, includeCancelled: false })
+  if (upcoming.length) {
+    const firstDate = new Date(`${upcoming[0]!.eventDate}T00:00:00`)
     calendarYear.value = firstDate.getFullYear()
     calendarMonth.value = firstDate.getMonth()
-    selectedCalendarDate.value = schedule[0]!.eventDate
+    selectedCalendarDate.value = upcoming[0]!.eventDate
   } else {
     const now = new Date()
     calendarYear.value = now.getFullYear()
@@ -603,23 +604,26 @@ const shiftCalendarMonth = (delta: number) => {
 }
 
 const calendarScheduleMap = computed(() => {
-  const map = new Map<string, ReturnType<typeof store.attireSchedule>>()
-  if (!calendarAttire.value) return map
+  const activeMap = new Map<string, AttireScheduleEntry[]>()
+  const completedMap = new Map<string, AttireScheduleEntry[]>()
+  if (!calendarAttire.value) return { activeMap, completedMap }
+  const today = localTodayIso()
   for (const entry of store.attireSchedule(calendarAttire.value.id, { includePast: true, includeCancelled: false })) {
-    const list = map.get(entry.eventDate) ?? []
+    const targetMap = entry.eventDate < today ? completedMap : activeMap
+    const list = targetMap.get(entry.eventDate) ?? []
     list.push(entry)
-    map.set(entry.eventDate, list)
+    targetMap.set(entry.eventDate, list)
   }
-  return map
+  return { activeMap, completedMap }
 })
 
 const calendarCells = computed(() => {
   const firstOfMonth = new Date(calendarYear.value, calendarMonth.value, 1)
   const startOffset = (firstOfMonth.getDay() + 6) % 7
   const daysInMonth = new Date(calendarYear.value, calendarMonth.value + 1, 0).getDate()
-  const cells: Array<{ key: string; day: number | null; iso: string; count: number }> = []
+  const cells: Array<{ key: string; day: number | null; iso: string; count: number; completedCount: number }> = []
   for (let i = 0; i < startOffset; i += 1) {
-    cells.push({ key: `pad-${i}`, day: null, iso: '', count: 0 })
+    cells.push({ key: `pad-${i}`, day: null, iso: '', count: 0, completedCount: 0 })
   }
   for (let d = 1; d <= daysInMonth; d += 1) {
     const mm = String(calendarMonth.value + 1).padStart(2, '0')
@@ -629,7 +633,8 @@ const calendarCells = computed(() => {
       key: iso,
       day: d,
       iso,
-      count: calendarScheduleMap.value.get(iso)?.length ?? 0,
+      count: calendarScheduleMap.value.activeMap.get(iso)?.length ?? 0,
+      completedCount: calendarScheduleMap.value.completedMap.get(iso)?.length ?? 0,
     })
   }
   return cells
@@ -637,10 +642,17 @@ const calendarCells = computed(() => {
 
 const selectedDateBookings = computed(() => {
   if (!calendarAttire.value) return []
-  const all = store.attireSchedule(calendarAttire.value.id, { includePast: true, includeCancelled: false })
-  if (!selectedCalendarDate.value) return all
-  const matching = all.filter((item) => item.eventDate === selectedCalendarDate.value)
-  return matching.length ? matching : all
+  const upcoming = store.attireSchedule(calendarAttire.value.id, { includePast: false, includeCancelled: false })
+  if (!selectedCalendarDate.value) return upcoming
+  const today = localTodayIso()
+  if (selectedCalendarDate.value < today) return []
+  const matching = upcoming.filter((item) => item.eventDate === selectedCalendarDate.value)
+  return matching
+})
+
+const selectedDateIsCompleted = computed(() => {
+  if (!calendarAttire.value || !selectedCalendarDate.value) return false
+  return (calendarScheduleMap.value.completedMap.get(selectedCalendarDate.value)?.length ?? 0) > 0
 })
 
 const validateFittingTarget = (
@@ -739,7 +751,6 @@ const downloadSavedPdf = async (targetForm?: WeddingFittingForm) => {
       `Wedding Fitting Form — ${booking.poNumber}`,
       `${customer?.name ?? 'Customer'} · ${formatDate(booking.eventDate)}`,
       async () => {
-        const { generateWeddingFittingPdf } = await import('../utils/weddingPdf')
         await generateWeddingFittingPdf({
           form: formToExport,
           booking,
@@ -781,7 +792,7 @@ const paginatedFittingList = computed(() => {
     <div v-if="store.laundryUrgentAlerts.length" class="urgent-laundry-banner">
       <AlertTriangle :size="20" />
       <div class="urgent-laundry-list">
-        <strong>Urgent Wardrobe Preparation Alert (H-1 / Event Day)</strong>
+        <strong>Urgent Wardrobe Preparation Alert (H-2 / H-1 / Hari-H)</strong>
         <div v-for="alert in store.laundryUrgentAlerts" :key="`${alert.attireId}-${alert.bookingId}`" class="urgent-laundry-item">
           <span>{{ alert.message }}</span>
           <button
@@ -890,13 +901,21 @@ const paginatedFittingList = computed(() => {
 
             <div class="attire-schedule-box">
               <button type="button" class="soft-button attire-calendar-btn" @click="openAttireCalendar(item)">
-                <CalendarDays :size="14" />Calendar ({{ (scheduleMapByAttire.get(item.id)?.all ?? []).length }})
+                <CalendarDays :size="14" />Calendar ({{ (scheduleMapByAttire.get(item.id)?.active ?? []).length }})
               </button>
             </div>
 
-            <div v-if="item.status === 'Laundry' && (scheduleMapByAttire.get(item.id)?.active ?? []).length" class="attire-laundry-warning">
+            <div
+              v-if="item.status === 'Laundry' && (scheduleMapByAttire.get(item.id)?.urgent.length || scheduleMapByAttire.get(item.id)?.active.length)"
+              class="attire-laundry-warning"
+            >
               <AlertTriangle :size="13" />
-              <span>In Laundry ({{ (scheduleMapByAttire.get(item.id)?.active ?? []).length }} upcoming)</span>
+              <span v-if="scheduleMapByAttire.get(item.id)?.urgent.length">
+                {{ urgentDayBadgeLabel(scheduleMapByAttire.get(item.id)!.urgent[0]!.eventDate) }} · Will be worn by {{ scheduleMapByAttire.get(item.id)!.urgent[0]!.customerName }}
+              </span>
+              <span v-else>
+                In Laundry ({{ (scheduleMapByAttire.get(item.id)?.active ?? []).length }} upcoming)
+              </span>
             </div>
 
             <SearchSelect
@@ -1351,6 +1370,7 @@ const paginatedFittingList = computed(() => {
             :class="{
               'is-empty': !cell.day,
               'is-booked': cell.count > 0,
+              'is-completed': cell.count === 0 && cell.completedCount > 0,
               'is-selected': cell.iso && cell.iso === selectedCalendarDate,
             }"
             :disabled="!cell.day"
@@ -1359,13 +1379,18 @@ const paginatedFittingList = computed(() => {
             <template v-if="cell.day">
               <span>{{ cell.day }}</span>
               <i v-if="cell.count > 0">{{ cell.count }}</i>
+              <em v-else-if="cell.completedCount > 0">✓</em>
             </template>
           </button>
+        </div>
+        <div class="calendar-legend">
+          <span><i class="dot-cal-booked" />Booked / Upcoming</span>
+          <span><i class="dot-cal-completed" />Completed (Sudah Lewat · Tidak Masuk Antrean)</span>
         </div>
 
         <div class="attire-calendar-events">
           <h4>
-            {{ selectedCalendarDate ? `Schedule on ${formatDate(selectedCalendarDate)}` : 'All Scheduled Events for This Attire' }}
+            {{ selectedCalendarDate ? `Schedule on ${formatDate(selectedCalendarDate)}` : 'Upcoming Scheduled Events for This Attire' }}
           </h4>
           <div v-if="selectedDateBookings.length" class="calendar-event-list">
             <article v-for="entry in selectedDateBookings" :key="`${entry.bookingId}-${entry.eventNumber}`" class="calendar-event-item">
@@ -1381,7 +1406,10 @@ const paginatedFittingList = computed(() => {
               </div>
             </article>
           </div>
-          <p v-else class="calendar-empty-note">This attire has no reservations in the Fitting Database yet.</p>
+          <p v-else-if="selectedDateIsCompleted" class="calendar-empty-note" style="color: #1f6642; border-color: #6ab58d; background: #e5f5ec;">
+            Tanggal ini sudah selesai (Completed) dan sudah dilepas dari daftar booking kalender — busana siap dipakai lagi.
+          </p>
+          <p v-else class="calendar-empty-note">No upcoming reservations in the Fitting Database for this attire.</p>
         </div>
       </div>
       <div class="modal-actions"><button class="primary-button" @click="showCalendarModal = false">Close</button></div>

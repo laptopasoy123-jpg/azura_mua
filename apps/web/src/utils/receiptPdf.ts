@@ -48,8 +48,7 @@ export interface ReceiptSharePayload {
   logoUrl?: string
 }
 
-const toBase64Url = (text: string): string => {
-  const bytes = new TextEncoder().encode(text)
+const toBase64UrlBytes = (bytes: Uint8Array): string => {
   let binary = ''
   for (const byte of bytes) {
     binary += String.fromCharCode(byte)
@@ -57,27 +56,132 @@ const toBase64Url = (text: string): string => {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
-const fromBase64Url = (token: string): string => {
+const fromBase64UrlBytes = (token: string): Uint8Array => {
   const padded = token.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((token.length + 3) % 4)
   const binary = atob(padded)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i)
   }
-  return new TextDecoder().decode(bytes)
+  return bytes
+}
+
+const toBase64Url = (text: string): string => toBase64UrlBytes(new TextEncoder().encode(text))
+
+const fromBase64Url = (token: string): string => new TextDecoder().decode(fromBase64UrlBytes(token))
+
+const compactReceiptPayload = (p: ReceiptSharePayload) => [
+  2,
+  p.receiptNumber,
+  p.poNumber,
+  p.invoiceNumber || '',
+  p.customerName,
+  p.customerPhone,
+  p.eventLocation,
+  p.eventDate,
+  p.firstOrderDate || '',
+  p.paidAt,
+  p.method,
+  p.amount,
+  p.notes || '',
+  p.totalBilling,
+  p.totalPaid,
+  p.balance,
+  p.items.map((i) => [i.name, i.serviceType || '', i.groupLabel, i.quantity, i.unit || '', i.unitPrice]),
+  (p.installmentHistory ?? []).map((h) => [h.receiptNumber, h.paidAt, h.method, h.amount, h.isCurrent ? 1 : 0]),
+  p.invoiceNote || '',
+  p.businessName && p.businessName !== 'Azura' ? p.businessName : '',
+  p.businessPhone && p.businessPhone !== '0812 9000 2026' ? p.businessPhone : '',
+] as const
+
+const expandCompactReceiptPayload = (raw: unknown): ReceiptSharePayload | null => {
+  if (!Array.isArray(raw) || raw[0] !== 2) return null
+  const [, receiptNumber, poNumber, invoiceNumber, customerName, customerPhone, eventLocation, eventDate, firstOrderDate, paidAt, method, amount, notes, totalBilling, totalPaid, balance, itemsRaw, histRaw, invoiceNote, businessName, businessPhone] = raw as [
+    number, string, string, string, string, string, string, string, string, string, string, number, string, number, number, number,
+    Array<[string, string, string, number, string, number]>,
+    Array<[string, string, string, number, number]>,
+    string?, string?, string?,
+  ]
+  return {
+    receiptNumber: String(receiptNumber || ''),
+    poNumber: String(poNumber || '-'),
+    invoiceNumber: invoiceNumber || undefined,
+    customerName: String(customerName || '-'),
+    customerPhone: String(customerPhone || '-'),
+    eventLocation: String(eventLocation || ''),
+    eventDate: String(eventDate || ''),
+    firstOrderDate: firstOrderDate || undefined,
+    paidAt: String(paidAt || ''),
+    method: String(method || ''),
+    amount: Number(amount || 0),
+    notes: notes || undefined,
+    totalBilling: Number(totalBilling || 0),
+    totalPaid: Number(totalPaid || 0),
+    balance: Number(balance || 0),
+    items: (itemsRaw ?? []).map((i) => ({
+      name: String(i[0] || ''),
+      serviceType: i[1] || undefined,
+      groupLabel: String(i[2] || ''),
+      quantity: Number(i[3] || 1),
+      unit: i[4] || undefined,
+      unitPrice: Number(i[5] || 0),
+    })),
+    installmentHistory: (histRaw ?? []).map((h) => ({
+      receiptNumber: String(h[0] || ''),
+      paidAt: String(h[1] || ''),
+      method: String(h[2] || ''),
+      amount: Number(h[3] || 0),
+      isCurrent: h[4] === 1,
+    })),
+    invoiceNote: invoiceNote || undefined,
+    businessName: businessName || undefined,
+    businessPhone: businessPhone || undefined,
+  }
 }
 
 export const encodeReceiptShareToken = (payload: ReceiptSharePayload): string =>
-  toBase64Url(JSON.stringify(payload))
+  toBase64Url(JSON.stringify(compactReceiptPayload(payload)))
+
+export const encodeReceiptShareTokenAsync = async (payload: ReceiptSharePayload): Promise<string> => {
+  const compactJson = JSON.stringify(compactReceiptPayload(payload))
+  if (typeof CompressionStream !== 'undefined') {
+    try {
+      const stream = new Blob([new TextEncoder().encode(compactJson)]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+      const buf = await new Response(stream).arrayBuffer()
+      return `z${toBase64UrlBytes(new Uint8Array(buf))}`
+    } catch {
+      // Fallback to uncompressed compact tuple token
+    }
+  }
+  return toBase64Url(compactJson)
+}
 
 export const decodeReceiptShareToken = (token: string): ReceiptSharePayload | null => {
   try {
-    const parsed = JSON.parse(fromBase64Url(token)) as ReceiptSharePayload
-    if (!parsed || !parsed.receiptNumber) return null
-    return parsed
+    const parsed = JSON.parse(fromBase64Url(token))
+    if (Array.isArray(parsed)) return expandCompactReceiptPayload(parsed)
+    const obj = parsed as ReceiptSharePayload
+    if (!obj || !obj.receiptNumber) return null
+    return obj
   } catch {
     return null
   }
+}
+
+export const decodeReceiptShareTokenAsync = async (token: string): Promise<ReceiptSharePayload | null> => {
+  if (!token) return null
+  if (token.startsWith('z') && typeof DecompressionStream !== 'undefined') {
+    try {
+      const bytes = fromBase64UrlBytes(token.slice(1))
+      const stream = new Blob([bytes.buffer as ArrayBuffer]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+      const text = await new Response(stream).text()
+      const parsed = JSON.parse(text)
+      return Array.isArray(parsed) ? expandCompactReceiptPayload(parsed) : (parsed as ReceiptSharePayload)
+    } catch {
+      return null
+    }
+  }
+  return decodeReceiptShareToken(token)
 }
 
 export const toReceiptSharePayload = (params: {
@@ -540,11 +644,7 @@ export const resolveReceiptShareUrl = async (params: {
     // Fall back to self-contained digital receipt & PDF download link
   }
 
-  const shareablePayload: ReceiptSharePayload =
-    payload.logoUrl && payload.logoUrl.startsWith('data:') && payload.logoUrl.length > 24000
-      ? { ...payload, logoUrl: undefined }
-      : payload
-  const token = encodeReceiptShareToken(shareablePayload)
+  const token = await encodeReceiptShareTokenAsync({ ...payload, logoUrl: undefined })
   return {
     url: `${origin}/kwitansi?d=${token}`,
     mode: 'viewer',

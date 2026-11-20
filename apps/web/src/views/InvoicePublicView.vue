@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ChevronDown, ChevronUp, Download, FileWarning, Printer } from '@lucide/vue'
 import type { InvoiceSharePayload } from '../utils/invoicePdf'
+import { buildInvoicePdfFromPayload, decodeInvoiceShareTokenAsync } from '../utils/invoicePdf'
 import { formatCurrency, formatDate } from '../utils/format'
 import { useCrmStore } from '../stores/crm'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -15,8 +16,7 @@ const expandedGroups = ref<Record<string, boolean>>({})
 onMounted(async () => {
   const token = typeof route.query.d === 'string' ? route.query.d : ''
   if (!token) return
-  const { decodeInvoiceShareToken } = await import('../utils/invoicePdf')
-  const decoded = decodeInvoiceShareToken(token)
+  const decoded = await decodeInvoiceShareTokenAsync(token)
   payload.value = decoded
   if (decoded) {
     const map: Record<string, boolean> = {}
@@ -76,7 +76,6 @@ const printPage = () => window.print()
 
 const downloadPdf = async () => {
   if (!payload.value) return
-  const { buildInvoicePdfFromPayload } = await import('../utils/invoicePdf')
   const doc = buildInvoicePdfFromPayload({
     ...payload.value,
     logoUrl: effectiveLogoUrl.value || undefined,

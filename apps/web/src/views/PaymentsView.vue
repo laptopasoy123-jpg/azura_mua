@@ -5,7 +5,7 @@ import {
 } from '@lucide/vue'
 import { useCrmStore, type Payment } from '../stores/crm'
 import { formatCurrency, formatDate } from '../utils/format'
-import type { ReceiptSharePayload } from '../utils/receiptPdf'
+import { downloadPaymentReceiptPdf, formatWhatsAppPhone, resolveReceiptShareUrl, type ReceiptSharePayload } from '../utils/receiptPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import CurrencyInput from '../components/CurrencyInput.vue'
@@ -184,7 +184,6 @@ const downloadReceipt = async (payment: Payment) => {
     `Receipt ${payment.receiptNumber}`,
     `${booking?.poNumber ?? 'PO'} · ${customer?.name ?? 'Customer'}`,
     async () => {
-      const { downloadPaymentReceiptPdf } = await import('../utils/receiptPdf')
       downloadPaymentReceiptPdf(receiptParamsFor(payment))
     },
   )
@@ -207,7 +206,6 @@ const hasWhatsAppPhone = (payment: Payment) => {
 
 const onSendWhatsApp = async (payment: Payment) => {
   const params = receiptParamsFor(payment)
-  const { formatWhatsAppPhone, resolveReceiptShareUrl } = await import('../utils/receiptPdf')
   const waPhone = formatWhatsAppPhone(params.customer?.phone ?? '')
   if (!waPhone) return
 

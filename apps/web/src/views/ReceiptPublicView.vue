@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { FileWarning } from '@lucide/vue'
 import type { ReceiptSharePayload } from '../utils/receiptPdf'
+import { buildPaymentReceiptPdfFromPayload, decodeReceiptShareTokenAsync } from '../utils/receiptPdf'
 import { useCrmStore } from '../stores/crm'
 import ReceiptStationery from '../components/ReceiptStationery.vue'
 
@@ -13,15 +14,13 @@ const payload = ref<ReceiptSharePayload | null>(null)
 onMounted(async () => {
   const token = typeof route.query.d === 'string' ? route.query.d : ''
   if (!token) return
-  const { decodeReceiptShareToken } = await import('../utils/receiptPdf')
-  payload.value = decodeReceiptShareToken(token)
+  payload.value = await decodeReceiptShareTokenAsync(token)
 })
 
 const effectiveLogoUrl = computed(() => payload.value?.logoUrl || store.businessProfile.logoUrl || '')
 
 const downloadPdf = async () => {
   if (!payload.value) return
-  const { buildPaymentReceiptPdfFromPayload } = await import('../utils/receiptPdf')
   const doc = buildPaymentReceiptPdfFromPayload({
     ...payload.value,
     logoUrl: effectiveLogoUrl.value || undefined,

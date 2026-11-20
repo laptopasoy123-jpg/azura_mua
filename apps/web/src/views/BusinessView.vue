@@ -9,6 +9,8 @@ import {
 import { useCrmStore, type CatalogType, type Expense, type Invoice, type OrderGroup } from '../stores/crm'
 import { formatCurrency, formatDate } from '../utils/format'
 import { REPORT_CATALOG, type ReportKey } from '../utils/reportCatalog'
+import { downloadInvoicePdf, resolveInvoiceShareUrl } from '../utils/invoicePdf'
+import { downloadSelectedReportsPdf } from '../utils/reportPdf'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -108,6 +110,9 @@ interface ExpenseLine {
   category: string
   description: string
   amount: number
+  proofImageUrl: string
+  proofUploading?: boolean
+  proofUploadError?: string
 }
 
 const createExpenseLine = (category = store.poExpenseCategories[0] ?? 'Transportasi'): ExpenseLine => ({
@@ -115,6 +120,9 @@ const createExpenseLine = (category = store.poExpenseCategories[0] ?? 'Transport
   category,
   description: '',
   amount: 0,
+  proofImageUrl: '',
+  proofUploading: false,
+  proofUploadError: '',
 })
 
 const expense = reactive<{
@@ -344,7 +352,6 @@ const sendInvoiceWhatsApp = async (invoice: Invoice) => {
     const status = paymentStatus(invoice.bookingId)
     const brandTitle = [store.businessProfile.name || 'Azura', store.businessProfile.tagline || 'Makeup Artist'].filter(Boolean).join(' ')
 
-    const { resolveInvoiceShareUrl } = await import('../utils/invoicePdf')
     const shareResult = await resolveInvoiceShareUrl({
       invoice,
       booking,
@@ -869,6 +876,9 @@ const openEditExpense = (row: Expense) => {
         category: row.category,
         description: row.description,
         amount: row.amount,
+        proofImageUrl: row.proofImageUrl ?? '',
+        proofUploading: false,
+        proofUploadError: '',
       },
     ],
   })
@@ -880,19 +890,23 @@ const addExpenseLine = () => {
   expense.items.push(createExpenseLine(lastCategory))
 }
 
-const handleExpenseProofUpload = async (event: Event) => {
+const isAnyExpenseProofUploading = computed(() =>
+  expense.items.some((line) => Boolean(line.proofUploading)),
+)
+
+const handleExpenseLineProofUpload = async (line: ExpenseLine, event: Event) => {
   const inputEl = event.target as HTMLInputElement
   const file = inputEl.files?.[0]
   if (!file) return
-  expenseUploadError.value = ''
-  expenseUploading.value = true
+  line.proofUploadError = ''
+  line.proofUploading = true
   try {
     const res = await uploadImageWithFallback(file, 'expense-proof')
-    expense.proofImageUrl = res.url
+    line.proofImageUrl = res.url
   } catch (err) {
-    expenseUploadError.value = err instanceof Error ? err.message : 'Failed to upload proof image.'
+    line.proofUploadError = err instanceof Error ? err.message : 'Failed to upload proof image.'
   } finally {
-    expenseUploading.value = false
+    line.proofUploading = false
     inputEl.value = ''
   }
 }
@@ -934,7 +948,7 @@ const submitExpense = () => {
         method: expense.method,
         expenseScope: expense.expenseScope,
         bookingId: expense.expenseScope === 'Berdasarkan PO' ? expense.bookingId : undefined,
-        proofImageUrl: expense.proofImageUrl || undefined,
+        proofImageUrl: line.proofImageUrl || undefined,
       })
     } else {
       store.addBatchExpenses({
@@ -942,11 +956,11 @@ const submitExpense = () => {
         method: expense.method,
         expenseScope: expense.expenseScope,
         bookingId: expense.expenseScope === 'Berdasarkan PO' ? expense.bookingId : undefined,
-        proofImageUrl: expense.proofImageUrl || undefined,
         items: expense.items.map((line) => ({
           category: line.category,
           description: line.description,
           amount: line.amount,
+          proofImageUrl: line.proofImageUrl || undefined,
         })),
       })
     }
@@ -981,7 +995,6 @@ const downloadInvoice = async (invoice: Invoice) => {
     `Invoice ${invoice.invoiceNumber}`,
     `${booking?.poNumber ?? 'PO'} · ${customer?.name ?? 'Customer'}`,
     async () => {
-      const { downloadInvoicePdf } = await import('../utils/invoicePdf')
       downloadInvoicePdf({
         invoice,
         booking,
@@ -1027,7 +1040,6 @@ const exportSelectedReportsPdf = async (overrideKeys?: ReportKey[]) => {
       'Executive Business Report',
       `${keys.length} report section(s) exported`,
       async () => {
-        const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
         await downloadSelectedReportsPdf({
           selectedKeys: keys,
           fromDate: reportFromDate.value,
@@ -1513,7 +1525,7 @@ watch(() => route.query.catalog, (catalog) => {
             <div class="order-lines-head">
               <div>
                 <strong>Expense Line Items ({{ expense.items.length }} Row(s))</strong>
-                <span>Log multiple items together in a single batch save.</span>
+                <span>Log multiple items together and attach payment proof per line item.</span>
               </div>
               <button v-if="!editingExpenseId" type="button" class="soft-button" @click="addExpenseLine">
                 <Plus :size="15" />Add Line
@@ -1543,6 +1555,33 @@ watch(() => route.query.catalog, (catalog) => {
               >
                 <Trash2 :size="16" />
               </button>
+
+              <div class="expense-line-proof-cell">
+                <div class="expense-line-proof-meta">
+                  <img v-if="line.proofImageUrl" :src="line.proofImageUrl" alt="Line proof" class="expense-line-proof-thumb" />
+                  <span class="expense-line-proof-label">
+                    <template v-if="line.proofUploading">Uploading proof…</template>
+                    <template v-else-if="line.proofImageUrl">Proof #{{ idx + 1 }} attached</template>
+                    <template v-else>Payment Proof #{{ idx + 1 }} (Optional)</template>
+                  </span>
+                </div>
+                <div class="expense-line-proof-actions">
+                  <label class="expense-line-upload-btn">
+                    <UploadCloud :size="14" />
+                    <span>{{ line.proofImageUrl ? 'Change Proof' : 'Upload Proof' }}</span>
+                    <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleExpenseLineProofUpload(line, $event)" />
+                  </label>
+                  <button
+                    v-if="line.proofImageUrl"
+                    type="button"
+                    class="soft-button"
+                    @click="line.proofImageUrl = ''"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <p v-if="line.proofUploadError" class="form-error" style="width: 100%; margin: 2px 0 0;">{{ line.proofUploadError }}</p>
+              </div>
             </div>
           </div>
 
@@ -1552,21 +1591,21 @@ watch(() => route.query.catalog, (catalog) => {
           </div>
         </template>
 
-        <div class="span-2 attire-upload-block">
+        <div v-if="editingExpenseIsCancel && expense.items[0]" class="span-2 attire-upload-block">
           <span class="upload-field-label">Payment Receipt / Proof (Optional)</span>
           <label class="upload-zone">
-            <img v-if="expense.proofImageUrl" :src="expense.proofImageUrl" alt="Expense proof" />
+            <img v-if="expense.items[0].proofImageUrl" :src="expense.items[0].proofImageUrl" alt="Expense proof" />
             <div v-else><UploadCloud :size="24" /><strong>Upload JPG, PNG, or WebP receipt or proof</strong><span>Optional · Max 5 MB</span></div>
-            <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleExpenseProofUpload" />
+            <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleExpenseLineProofUpload(expense.items[0], $event)" />
           </label>
-          <button v-if="expense.proofImageUrl" type="button" class="soft-button remove-photo-btn" @click="expense.proofImageUrl = ''">Remove proof</button>
-          <p v-if="expenseUploading" class="upload-state"><LoaderCircle class="spin" :size="15" />Processing image…</p>
-          <p v-if="expenseUploadError" class="form-error">{{ expenseUploadError }}</p>
+          <button v-if="expense.items[0].proofImageUrl" type="button" class="soft-button remove-photo-btn" @click="expense.items[0].proofImageUrl = ''">Remove proof</button>
+          <p v-if="expense.items[0].proofUploading" class="upload-state"><LoaderCircle class="spin" :size="15" />Processing image…</p>
+          <p v-if="expense.items[0].proofUploadError" class="form-error">{{ expense.items[0].proofUploadError }}</p>
         </div>
         <p v-if="expenseError" class="form-error span-2">{{ expenseError }}</p>
         <div class="modal-actions span-2">
           <button type="button" class="secondary-button" @click="showExpense = false">Cancel</button>
-          <button class="primary-button" :disabled="expenseUploading">
+          <button class="primary-button" :disabled="isAnyExpenseProofUploading">
             {{ editingExpenseId ? 'Save Changes' : `Save Expenses (${expense.items.length} Item(s))` }}
           </button>
         </div>

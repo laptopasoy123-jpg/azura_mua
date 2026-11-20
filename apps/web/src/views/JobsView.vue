@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import {
   Briefcase, CalendarDays, Check, Download, MapPin, Pencil, Phone, RotateCcw,
-  SlidersHorizontal, Users, Plus, ChevronRight,
+  SlidersHorizontal, Users, Plus, ChevronRight, Save,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type EmployeeRecord } from '../stores/crm'
 import { displayBookingStatus, formatDate } from '../utils/format'
-import type { JobReportRow } from '../utils/jobReportPdf'
+import { downloadJobReportPdf, type JobReportRow } from '../utils/jobReportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import SearchSelect from '../components/SearchSelect.vue'
@@ -99,10 +99,6 @@ const poFilterOptions = computed(() => [
   })),
 ])
 
-const roleSelectOptions = computed(() =>
-  roleOptions.map((r) => ({ value: r, label: r })),
-)
-
 const assignedCount = computed(() =>
   filteredBookings.value.filter((b) => store.assignedEmployeesForBooking(b.id).length > 0).length,
 )
@@ -135,25 +131,47 @@ const resetFilters = () => {
   poFilter.value = ''
 }
 
-// Inline employee manager modal
-const showStaffModal = ref(false)
-const staffForm = reactive({ name: '', role: 'MUA & Hairdo', phone: '' })
-const staffError = ref('')
-const editingStaff = ref<EmployeeRecord | null>(null)
 const roleOptions = [
+  'Owner / Lead MUA',
   'Owner & Lead MUA',
   'MUA & Hairdo',
   'Hijabdo Stylist',
   'Assistant MUA',
   'Wardrobe & Inventory',
   'Runner / Logistics',
+  'Finance',
   'Admin / Finance',
 ]
 
-const openManageStaff = () => {
+// Inline employee manager modal
+const showStaffModal = ref(false)
+const staffForm = reactive({ name: '', role: 'MUA & Hairdo', phone: '' })
+const staffError = ref('')
+const editingStaffId = ref('')
+const staffFormEl = ref<HTMLFormElement | null>(null)
+const staffNameInput = ref<HTMLInputElement | null>(null)
+
+const editingStaff = computed(() =>
+  editingStaffId.value ? store.employees.find((e) => e.id === editingStaffId.value) ?? null : null,
+)
+
+const roleSelectOptions = computed(() => {
+  const merged = new Set<string>(roleOptions)
+  if (staffForm.role.trim()) merged.add(staffForm.role.trim())
+  for (const emp of store.employees) {
+    if (emp.role?.trim()) merged.add(emp.role.trim())
+  }
+  return [...merged].map((r) => ({ value: r, label: r }))
+})
+
+const resetStaffForm = () => {
+  editingStaffId.value = ''
   staffError.value = ''
-  editingStaff.value = null
   Object.assign(staffForm, { name: '', role: 'MUA & Hairdo', phone: '' })
+}
+
+const openManageStaff = () => {
+  resetStaffForm()
   showStaffModal.value = true
 }
 
@@ -161,13 +179,13 @@ const submitNewStaff = () => {
   try {
     staffError.value = ''
     if (!staffForm.name.trim()) throw new Error('Employee name is required.')
-    if (editingStaff.value) {
-      store.updateEmployee(editingStaff.value.id, {
+    if (!staffForm.role.trim()) throw new Error('Role / position is required.')
+    if (editingStaffId.value) {
+      store.updateEmployee(editingStaffId.value, {
         name: staffForm.name,
         role: staffForm.role,
         phone: staffForm.phone,
       })
-      editingStaff.value = null
     } else {
       store.addEmployee({
         name: staffForm.name,
@@ -175,15 +193,23 @@ const submitNewStaff = () => {
         phone: staffForm.phone || undefined,
       })
     }
-    Object.assign(staffForm, { name: '', role: 'MUA & Hairdo', phone: '' })
+    resetStaffForm()
   } catch (err) {
     staffError.value = err instanceof Error ? err.message : 'Failed to save employee.'
   }
 }
 
-const startEditStaff = (emp: EmployeeRecord) => {
-  editingStaff.value = emp
-  Object.assign(staffForm, { name: emp.name, role: emp.role, phone: emp.phone ?? '' })
+const startEditStaff = async (emp: EmployeeRecord) => {
+  staffError.value = ''
+  editingStaffId.value = emp.id
+  Object.assign(staffForm, {
+    name: emp.name,
+    role: emp.role || 'MUA & Hairdo',
+    phone: emp.phone ?? '',
+  })
+  await nextTick()
+  staffFormEl.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  staffNameInput.value?.focus()
 }
 
 const exportPdf = async () => {
@@ -197,7 +223,6 @@ const exportPdf = async () => {
     'Team Job Assignments PDF',
     `${filteredBookings.value.length} PO · ${empName || 'All Staff'}`,
     async () => {
-      const { downloadJobReportPdf } = await import('../utils/jobReportPdf')
       const rows: JobReportRow[] = filteredBookings.value.map((booking) => {
         const customer = store.customerFor(booking.customerId)
         const assigned = store.assignedEmployeesForBooking(booking.id)
@@ -461,19 +486,32 @@ const exportPdf = async () => {
       wide
       @close="showStaffModal = false"
     >
-      <form class="form-grid" @submit.prevent="submitNewStaff">
-        <label class="is-required"><span>Employee Name *</span><input v-model="staffForm.name" placeholder="e.g. Sinta Dewi" /></label>
-        <label class="is-required"><span>Role / Position *</span>
+      <form ref="staffFormEl" class="form-grid" @submit.prevent="submitNewStaff">
+        <div v-if="editingStaff" class="span-2 staff-editing-banner">
+          <div>
+            <strong>Editing Crew Member: {{ editingStaff.name }}</strong>
+            <span>Update name, role, or WhatsApp number below and click Save Changes.</span>
+          </div>
+          <button type="button" class="soft-button" @click="resetStaffForm">Cancel Edit</button>
+        </div>
+        <label class="is-required">
+          <span>Employee Name *</span>
+          <input ref="staffNameInput" v-model="staffForm.name" placeholder="e.g. Sinta Dewi" />
+        </label>
+        <label class="is-required">
+          <span>Role / Position *</span>
           <SearchSelect v-model="staffForm.role" :options="roleSelectOptions" required search-placeholder="Search role…" />
         </label>
         <label class="span-2 is-optional"><span>Phone / WhatsApp <em class="opt-tag">Optional</em></span><input v-model="staffForm.phone" placeholder="08xxxxxxxxxx" /></label>
         <p v-if="staffError" class="form-error span-2">{{ staffError }}</p>
         <div class="modal-actions span-2">
-          <button v-if="editingStaff" type="button" class="secondary-button" @click="editingStaff = null; Object.assign(staffForm, { name: '', role: 'MUA & Hairdo', phone: '' })">
+          <button v-if="editingStaff" type="button" class="secondary-button" @click="resetStaffForm">
             Cancel Edit
           </button>
           <button type="submit" class="primary-button">
-            <Plus :size="15" />{{ editingStaff ? 'Save Employee' : 'Add Employee' }}
+            <Save v-if="editingStaff" :size="15" />
+            <Plus v-else :size="15" />
+            {{ editingStaff ? 'Save Changes' : 'Add Employee' }}
           </button>
         </div>
       </form>
@@ -486,7 +524,7 @@ const exportPdf = async () => {
               <tr><th>Name</th><th>Role</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              <tr v-for="emp in store.employees" :key="emp.id">
+              <tr v-for="emp in store.employees" :key="emp.id" :class="{ 'is-editing-row': editingStaffId === emp.id }">
                 <td><strong>{{ emp.name }}</strong><span v-if="emp.phone" class="subtle-line">{{ emp.phone }}</span></td>
                 <td>{{ emp.role }}</td>
                 <td><StatusBadge :label="emp.active ? 'Active' : 'Inactive'" /></td>

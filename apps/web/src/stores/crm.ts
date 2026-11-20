@@ -876,7 +876,12 @@ export const useCrmStore = defineStore('crm', () => {
       const upcoming = attireSchedule(item.id, { includePast: false, referenceDate: refDate })
       for (const entry of upcoming) {
         const diff = calendarDaysDiff(refDate, entry.eventDate)
-        if (diff >= 0 && diff <= 1) {
+        if (diff >= 0 && diff <= 2) {
+          const dayPrefix = diff === 0
+            ? 'Event today'
+            : diff === 1
+              ? 'H-1 event tomorrow'
+              : 'H-2 event in 2 days'
           alerts.push({
             attireId: item.id,
             attireName: item.name,
@@ -887,9 +892,7 @@ export const useCrmStore = defineStore('crm', () => {
             eventDate: entry.eventDate,
             eventName: entry.eventName,
             daysLeft: diff,
-            message: diff === 0
-              ? `Event today for ${entry.customerName} (${entry.poNumber})! Prepare attire ${item.name} immediately (still in Laundry).`
-              : `H-1 event tomorrow for ${entry.customerName} (${entry.poNumber})! Prepare attire ${item.name} immediately (still in Laundry).`,
+            message: `${dayPrefix} for ${entry.customerName} (${entry.poNumber})! Prepare attire ${item.name} immediately (still in Laundry).`,
           })
         }
       }
@@ -1437,7 +1440,7 @@ export const useCrmStore = defineStore('crm', () => {
     expenseScope: 'Berdasarkan PO' | 'Di Luar PO'
     bookingId?: string
     proofImageUrl?: string
-    items: Array<{ category: string; description: string; amount: number }>
+    items: Array<{ category: string; description: string; amount: number; proofImageUrl?: string }>
   }) => {
     if (!input.date) throw new Error('Expense date is required.')
     if (!input.items.length) throw new Error('Add at least one expense item.')
@@ -1462,7 +1465,7 @@ export const useCrmStore = defineStore('crm', () => {
         method: input.method,
         expenseScope: input.expenseScope,
         bookingId: input.expenseScope === 'Berdasarkan PO' ? input.bookingId : undefined,
-        proofImageUrl: input.proofImageUrl || undefined,
+        proofImageUrl: row.proofImageUrl || input.proofImageUrl || undefined,
         source: 'Manual',
       }
       expenses.value.unshift(record)

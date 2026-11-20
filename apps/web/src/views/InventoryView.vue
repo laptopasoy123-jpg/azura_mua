@@ -7,6 +7,7 @@ import {
 import { useCrmStore, type InventoryItem, type StockMovement, type StockOpnameRecord } from '../stores/crm'
 import { displayStockStatus, formatDate } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
+import { downloadSelectedReportsPdf } from '../utils/reportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import SearchSelect from '../components/SearchSelect.vue'
@@ -526,7 +527,6 @@ const exportInventoryPdf = async () => {
     'Inventory Stock Report',
     `${store.inventory.length} SKU Items`,
     async () => {
-      const { downloadSelectedReportsPdf } = await import('../utils/reportPdf')
       await downloadSelectedReportsPdf({
         selectedKeys: ['inventory'],
         data: {

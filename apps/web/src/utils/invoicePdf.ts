@@ -61,8 +61,7 @@ export interface InvoiceSharePayload {
   logoUrl?: string
 }
 
-const toBase64Url = (text: string): string => {
-  const bytes = new TextEncoder().encode(text)
+const toBase64UrlBytes = (bytes: Uint8Array): string => {
   let binary = ''
   for (const byte of bytes) {
     binary += String.fromCharCode(byte)
@@ -70,27 +69,129 @@ const toBase64Url = (text: string): string => {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
-const fromBase64Url = (token: string): string => {
+const fromBase64UrlBytes = (token: string): Uint8Array => {
   const padded = token.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((token.length + 3) % 4)
   const binary = atob(padded)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i)
   }
-  return new TextDecoder().decode(bytes)
+  return bytes
+}
+
+const toBase64Url = (text: string): string => toBase64UrlBytes(new TextEncoder().encode(text))
+
+const fromBase64Url = (token: string): string => new TextDecoder().decode(fromBase64UrlBytes(token))
+
+const compactInvoicePayload = (p: InvoiceSharePayload) => [
+  2,
+  p.invoiceNumber,
+  p.issuedAt,
+  p.poNumber,
+  p.customerName,
+  p.customerPhone,
+  p.eventDate,
+  p.eventLocation,
+  p.totalBilling,
+  p.totalPaid,
+  p.balance,
+  p.groups.map((g) => [
+    g.kind === 'Awal' ? 0 : 1,
+    g.orderDate,
+    g.items.map((i) => [i.name, i.serviceType === 'Inti' ? 1 : 0, i.quantity, i.unit || '', i.unitPrice]),
+  ]),
+  p.payments.map((pay) => [pay.receiptNumber, pay.paidAt, pay.method, pay.amount]),
+  p.invoiceNote || '',
+  p.businessName && p.businessName !== 'Azura' ? p.businessName : '',
+  p.businessPhone && p.businessPhone !== '0812 9000 2026' ? p.businessPhone : '',
+] as const
+
+const expandCompactInvoicePayload = (raw: unknown): InvoiceSharePayload | null => {
+  if (!Array.isArray(raw) || raw[0] !== 2) return null
+  const [, invoiceNumber, issuedAt, poNumber, customerName, customerPhone, eventDate, eventLocation, totalBilling, totalPaid, balance, groupsRaw, paysRaw, invoiceNote, businessName, businessPhone] = raw as [
+    number, string, string, string, string, string, string, string, number, number, number,
+    Array<[number, string, Array<[string, number, number, string, number]>]>,
+    Array<[string, string, string, number]>,
+    string?, string?, string?,
+  ]
+  return {
+    invoiceNumber: String(invoiceNumber || ''),
+    issuedAt: String(issuedAt || ''),
+    poNumber: String(poNumber || '-'),
+    customerName: String(customerName || '-'),
+    customerPhone: String(customerPhone || '-'),
+    eventDate: String(eventDate || ''),
+    eventLocation: String(eventLocation || ''),
+    totalBilling: Number(totalBilling || 0),
+    totalPaid: Number(totalPaid || 0),
+    balance: Number(balance || 0),
+    groups: (groupsRaw ?? []).map((g, gIdx) => ({
+      id: `g-${gIdx}`,
+      kind: g[0] === 0 ? 'Awal' : 'Tambahan',
+      orderDate: String(g[1] || ''),
+      items: (g[2] ?? []).map((it) => ({
+        name: String(it[0] || ''),
+        serviceType: it[1] === 1 ? 'Inti' : 'Additional',
+        quantity: Number(it[2] || 1),
+        unit: it[3] || undefined,
+        unitPrice: Number(it[4] || 0),
+      })),
+    })),
+    payments: (paysRaw ?? []).map((pay) => ({
+      receiptNumber: String(pay[0] || ''),
+      paidAt: String(pay[1] || ''),
+      method: String(pay[2] || ''),
+      amount: Number(pay[3] || 0),
+    })),
+    invoiceNote: invoiceNote || undefined,
+    businessName: businessName || undefined,
+    businessPhone: businessPhone || undefined,
+  }
 }
 
 export const encodeInvoiceShareToken = (payload: InvoiceSharePayload): string =>
-  toBase64Url(JSON.stringify(payload))
+  toBase64Url(JSON.stringify(compactInvoicePayload(payload)))
+
+export const encodeInvoiceShareTokenAsync = async (payload: InvoiceSharePayload): Promise<string> => {
+  const compactJson = JSON.stringify(compactInvoicePayload(payload))
+  if (typeof CompressionStream !== 'undefined') {
+    try {
+      const stream = new Blob([new TextEncoder().encode(compactJson)]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+      const buf = await new Response(stream).arrayBuffer()
+      return `z${toBase64UrlBytes(new Uint8Array(buf))}`
+    } catch {
+      // Fallback to uncompressed compact tuple token
+    }
+  }
+  return toBase64Url(compactJson)
+}
 
 export const decodeInvoiceShareToken = (token: string): InvoiceSharePayload | null => {
   try {
-    const parsed = JSON.parse(fromBase64Url(token)) as InvoiceSharePayload
-    if (!parsed || !parsed.invoiceNumber) return null
-    return parsed
+    const parsed = JSON.parse(fromBase64Url(token))
+    if (Array.isArray(parsed)) return expandCompactInvoicePayload(parsed)
+    const obj = parsed as InvoiceSharePayload
+    if (!obj || !obj.invoiceNumber) return null
+    return obj
   } catch {
     return null
   }
+}
+
+export const decodeInvoiceShareTokenAsync = async (token: string): Promise<InvoiceSharePayload | null> => {
+  if (!token) return null
+  if (token.startsWith('z') && typeof DecompressionStream !== 'undefined') {
+    try {
+      const bytes = fromBase64UrlBytes(token.slice(1))
+      const stream = new Blob([bytes.buffer as ArrayBuffer]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+      const text = await new Response(stream).text()
+      const parsed = JSON.parse(text)
+      return Array.isArray(parsed) ? expandCompactInvoicePayload(parsed) : (parsed as InvoiceSharePayload)
+    } catch {
+      return null
+    }
+  }
+  return decodeInvoiceShareToken(token)
 }
 
 export const toInvoiceSharePayload = (input: InvoicePdfInput): InvoiceSharePayload => {
@@ -436,11 +537,7 @@ export const resolveInvoiceShareUrl = async (input: InvoicePdfInput): Promise<{ 
     // Fall back to self-contained digital invoice & PDF download link
   }
 
-  const shareablePayload: InvoiceSharePayload =
-    payload.logoUrl && payload.logoUrl.startsWith('data:') && payload.logoUrl.length > 24000
-      ? { ...payload, logoUrl: undefined }
-      : payload
-  const token = encodeInvoiceShareToken(shareablePayload)
+  const token = await encodeInvoiceShareTokenAsync({ ...payload, logoUrl: undefined })
   return {
     url: `${origin}/invoice?d=${token}`,
     mode: 'viewer',
