@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, Download, Printer, Search, ReceiptText, ShoppingBag,
   Sparkles, CircleDollarSign, BarChart3, Trash2, CalendarDays, Eye, Check, X, Pencil, CheckSquare, Square,
-  UploadCloud, LoaderCircle, Image as ImageIcon,
+  UploadCloud, LoaderCircle, Image as ImageIcon, RotateCcw,
 } from '@lucide/vue'
 import { useCrmStore, type CatalogType, type Expense, type Invoice, type OrderGroup } from '../stores/crm'
 import { formatCurrency, formatDate } from '../utils/format'
@@ -13,6 +13,8 @@ import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import CurrencyInput from '../components/CurrencyInput.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import DataPagination from '../components/DataPagination.vue'
 
 const props = defineProps<{ module: 'orders' | 'additional' | 'invoices' | 'expenses' | 'reports' }>()
 const store = useCrmStore()
@@ -26,8 +28,17 @@ const showInvoice = ref(false)
 const selectedInvoiceId = ref('')
 const selectedOrderBookingId = ref('')
 const orderSearch = ref('')
+const orderStatusFilter = ref<'All' | 'Paid' | 'Partial' | 'Unpaid'>('All')
+const orderPage = ref(1)
+const orderPageSize = ref(10)
+const additionalPage = ref(1)
+const additionalPageSize = ref(10)
 const invoiceSearch = ref('')
 const invoiceStatusFilter = ref<'All' | 'Paid' | 'Partial' | 'Unpaid'>('All')
+const invoiceFromDate = ref('')
+const invoiceToDate = ref('')
+const invoicePage = ref(1)
+const invoicePageSize = ref(10)
 const expenseError = ref('')
 const orderError = ref('')
 const exportingReports = ref(false)
@@ -70,6 +81,13 @@ const reportToDate = ref('')
 const reportError = ref('')
 
 const expenseScopeFilter = ref<'All' | 'Berdasarkan PO' | 'Di Luar PO' | 'Cancel'>('All')
+const expenseFromDate = ref('')
+const expenseToDate = ref('')
+const expenseSearch = ref('')
+const expenseCategoryFilter = ref('All')
+const expensePoFilter = ref('All')
+const expensePage = ref(1)
+const expensePageSize = ref(10)
 const editingExpenseId = ref('')
 const expenseUploading = ref(false)
 const expenseUploadError = ref('')
@@ -123,14 +141,69 @@ const expenseCategoryOptions = computed(() =>
 const expenseBatchTotal = computed(() =>
   expense.items.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0),
 )
-const filteredExpenses = computed(() =>
-  store.expenses.filter((e) => {
-    if (expenseScopeFilter.value === 'Cancel') return e.source === 'Bayar Cancel'
-    if (expenseScopeFilter.value === 'Berdasarkan PO') return Boolean(e.bookingId)
-    if (expenseScopeFilter.value === 'Di Luar PO') return !e.bookingId
-    return true
-  }),
-)
+const filteredExpenses = computed(() => {
+  const q = expenseSearch.value.trim().toLowerCase()
+  return store.expenses.filter((e) => {
+    if (expenseScopeFilter.value === 'Cancel' && e.source !== 'Bayar Cancel') return false
+    if (expenseScopeFilter.value === 'Berdasarkan PO' && !e.bookingId) return false
+    if (expenseScopeFilter.value === 'Di Luar PO' && e.bookingId) return false
+    if (expenseFromDate.value && e.date < expenseFromDate.value) return false
+    if (expenseToDate.value && e.date > expenseToDate.value) return false
+    if (expenseCategoryFilter.value !== 'All' && e.category !== expenseCategoryFilter.value) return false
+    if (expensePoFilter.value === '__overhead__') {
+      if (e.bookingId) return false
+    } else if (expensePoFilter.value !== 'All' && e.bookingId !== expensePoFilter.value) {
+      return false
+    }
+    if (!q) return true
+    const po = e.bookingId ? store.bookingFor(e.bookingId)?.poNumber.toLowerCase() ?? '' : 'studio overhead'
+    return (
+      e.description.toLowerCase().includes(q)
+      || e.category.toLowerCase().includes(q)
+      || po.includes(q)
+    )
+  })
+})
+
+const paginatedExpenses = computed(() => {
+  const start = (expensePage.value - 1) * expensePageSize.value
+  return filteredExpenses.value.slice(start, start + expensePageSize.value)
+})
+
+watch([expenseScopeFilter, expenseFromDate, expenseToDate, expenseSearch, expenseCategoryFilter, expensePoFilter], () => {
+  expensePage.value = 1
+})
+
+const expenseFilterCategoryOptions = computed(() => {
+  const unique = new Set<string>([
+    ...store.poExpenseCategories,
+    ...store.generalExpenseCategories,
+    ...store.expenses.map((e) => e.category),
+  ])
+  return [
+    { value: 'All', label: 'All Categories' },
+    ...[...unique].filter(Boolean).map((c) => ({ value: c, label: c })),
+  ]
+})
+
+const expenseFilterPoOptions = computed(() => [
+  { value: 'All', label: 'All PO References' },
+  { value: '__overhead__', label: 'Studio Overhead (Outside PO)' },
+  ...store.bookings.map((b) => ({
+    value: b.id,
+    label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
+    sublabel: formatDate(b.eventDate),
+  })),
+])
+
+const resetExpenseFilters = () => {
+  expenseScopeFilter.value = 'All'
+  expenseFromDate.value = ''
+  expenseToDate.value = ''
+  expenseSearch.value = ''
+  expenseCategoryFilter.value = 'All'
+  expensePoFilter.value = 'All'
+}
 const editingExpenseRecord = computed(() =>
   editingExpenseId.value ? store.expenses.find((e) => e.id === editingExpenseId.value) ?? null : null,
 )
@@ -174,6 +247,8 @@ const eligibleCatalog = computed(() =>
 const filteredOrderInvoices = computed(() => {
   const query = orderSearch.value.trim().toLowerCase()
   return store.invoices.filter((inv) => {
+    const status = paymentStatus(inv.bookingId)
+    if (orderStatusFilter.value !== 'All' && status !== orderStatusFilter.value) return false
     if (!query) return true
     const booking = store.bookingFor(inv.bookingId)
     const customer = booking ? store.customerFor(booking.customerId) : undefined
@@ -185,9 +260,28 @@ const filteredOrderInvoices = computed(() => {
   })
 })
 
+const paginatedOrderInvoices = computed(() => {
+  const start = (orderPage.value - 1) * orderPageSize.value
+  return filteredOrderInvoices.value.slice(start, start + orderPageSize.value)
+})
+
+watch([orderSearch, orderStatusFilter], () => {
+  orderPage.value = 1
+  additionalPage.value = 1
+})
+
+const orderStatusSelectOptions = [
+  { value: 'All', label: 'All Payment Statuses' },
+  { value: 'Paid', label: 'Paid' },
+  { value: 'Partial', label: 'Partial' },
+  { value: 'Unpaid', label: 'Unpaid' },
+]
+
 const filteredInvoices = computed(() => {
   const query = invoiceSearch.value.trim().toLowerCase()
   return store.invoices.filter((inv) => {
+    if (invoiceFromDate.value && inv.issuedAt < invoiceFromDate.value) return false
+    if (invoiceToDate.value && inv.issuedAt > invoiceToDate.value) return false
     const status = paymentStatus(inv.bookingId)
     if (invoiceStatusFilter.value !== 'All' && status !== invoiceStatusFilter.value) return false
     if (!query) return true
@@ -201,6 +295,143 @@ const filteredInvoices = computed(() => {
     )
   })
 })
+
+const paginatedInvoices = computed(() => {
+  const start = (invoicePage.value - 1) * invoicePageSize.value
+  return filteredInvoices.value.slice(start, start + invoicePageSize.value)
+})
+
+watch([invoiceSearch, invoiceStatusFilter, invoiceFromDate, invoiceToDate], () => {
+  invoicePage.value = 1
+})
+
+const resetInvoiceFilters = () => {
+  invoiceSearch.value = ''
+  invoiceStatusFilter.value = 'All'
+  invoiceFromDate.value = ''
+  invoiceToDate.value = ''
+}
+
+const invoiceWaPhone = (invoice: Invoice) => {
+  const booking = store.bookingFor(invoice.bookingId)
+  const customer = booking ? store.customerFor(booking.customerId) : undefined
+  const digits = (customer?.phone ?? '').replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.startsWith('0')) return `62${digits.slice(1)}`
+  if (digits.startsWith('62')) return digits
+  if (digits.startsWith('8')) return `62${digits}`
+  return digits
+}
+
+const sendInvoiceWhatsApp = (invoice: Invoice) => {
+  const waPhone = invoiceWaPhone(invoice)
+  if (!waPhone) {
+    store.showActionToast('WhatsApp Unavailable', 'Customer phone number is missing for this PO.', 'amber')
+    return
+  }
+  const booking = store.bookingFor(invoice.bookingId)
+  const customer = booking ? store.customerFor(booking.customerId) : undefined
+  const total = store.bookingTotal(invoice.bookingId)
+  const paid = store.bookingPaid(invoice.bookingId)
+  const balance = Math.max(0, store.bookingBalance(invoice.bookingId))
+  const status = paymentStatus(invoice.bookingId)
+  const brandTitle = [store.businessProfile.name || 'Azura', store.businessProfile.tagline || 'Makeup Artist'].filter(Boolean).join(' ')
+
+  const itemLines: string[] = []
+  for (const group of store.sortedOrderGroups(invoice)) {
+    for (const item of store.sortInvoiceItemsIntiFirst(group.items)) {
+      itemLines.push(`  • ${item.name} (${item.quantity}${item.unit ? ` ${item.unit}` : ''}) = ${formatCurrency(item.quantity * item.unitPrice)}`)
+    }
+  }
+
+  const lines = [
+    `Halo ${customer?.name ?? 'Kak'},`,
+    `Berikut rincian *Official Invoice* dari *${brandTitle}*:`,
+    ``,
+    `• Invoice No: ${invoice.invoiceNumber}`,
+    `• PO Number: ${booking?.poNumber ?? '-'}`,
+    `• Issued Date: ${formatDate(invoice.issuedAt)}`,
+    `• Event Date: ${booking?.eventDate ? formatDate(booking.eventDate) : '-'}${booking?.location ? ` · ${booking.location}` : ''}`,
+    ``,
+    `Rincian Layanan:`,
+    ...(itemLines.length ? itemLines : ['  • (Belum ada item)']),
+    ``,
+    `• Total Invoice: *${formatCurrency(total)}*`,
+    `• Total Paid: ${formatCurrency(paid)}`,
+    `• Balance Due: *${formatCurrency(balance)}* (${status})`,
+    ``,
+    store.businessProfile.invoiceNote || `Terima kasih telah mempercayakan momen spesial Anda kepada ${brandTitle}.`,
+  ]
+
+  const waUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(lines.join('\n'))}`
+  window.open(waUrl, '_blank', 'noopener,noreferrer')
+  store.showActionToast('WhatsApp Ready', `Opening WhatsApp invoice message for ${customer?.name ?? waPhone}.`, 'green')
+}
+
+const eligibleBookingOptions = computed(() =>
+  eligibleBookings.value.map((b) => ({
+    value: b.id,
+    label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
+    sublabel: formatDate(b.eventDate),
+  })),
+)
+
+const expenseMethodOptions = computed(() =>
+  store.paymentMethods.map((m) => ({ value: m, label: m === 'Cash' || m === 'Tunai' ? 'Cash' : m })),
+)
+
+const expenseBookingOptions = computed(() =>
+  store.bookings
+    .filter((b) => b.status !== 'Dibatalkan')
+    .map((b) => ({
+      value: b.id,
+      label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
+      sublabel: formatDate(b.eventDate),
+    })),
+)
+
+const expenseCategorySelectOptions = computed(() =>
+  expenseCategoryOptions.value.map((c) => ({ value: c, label: c })),
+)
+
+const catalogSearchOptionsForLine = (line: OrderLine) => {
+  const options: Array<{ value: string; label: string; sublabel?: string; group?: string }> = []
+  if (line.catalogItemId && !store.catalog.some((c) => c.id === line.catalogItemId)) {
+    options.push({
+      value: line.catalogItemId,
+      label: `${line.serviceName || 'Saved service'} (Archived)`,
+    })
+  }
+  const source = line.filterType === 'Inti'
+    ? coreCatalog.value
+    : line.filterType === 'Additional'
+      ? additionalCatalog.value
+      : eligibleCatalog.value
+  for (const item of source) {
+    options.push({
+      value: item.id,
+      label: item.name,
+      sublabel: `${formatCurrency(item.price)} / ${item.unit}`,
+      group: line.filterType !== 'Inti' && line.filterType !== 'Additional'
+        ? (item.type === 'Inti' ? 'Core Services' : 'Add-on Services')
+        : undefined,
+    })
+  }
+  return options
+}
+
+const reportCategoryMeta = (key: ReportKey) => {
+  if (key === 'bookings' || key === 'orders') {
+    return { group: 'CRM & Bookings', accent: 'cat-crm' }
+  }
+  if (key === 'invoices' || key === 'payments' || key === 'receivables') {
+    return { group: 'Billing & Revenue', accent: 'cat-billing' }
+  }
+  if (key === 'expenses' || key === 'cashflow') {
+    return { group: 'Cashflow & Expenses', accent: 'cat-cashflow' }
+  }
+  return { group: 'Inventory & Stock', accent: 'cat-inventory' }
+}
 
 const additionalGroupRows = computed(() => {
   const query = orderSearch.value.trim().toLowerCase()
@@ -237,6 +468,11 @@ const additionalGroupRows = computed(() => {
     }
   }
   return rows.sort((a, b) => b.orderDate.localeCompare(a.orderDate))
+})
+
+const paginatedAdditionalRows = computed(() => {
+  const start = (additionalPage.value - 1) * additionalPageSize.value
+  return additionalGroupRows.value.slice(start, start + additionalPageSize.value)
 })
 
 watch(
@@ -758,10 +994,25 @@ watch(() => route.query.catalog, (catalog) => {
       </section>
 
       <section class="panel invoice-filter-bar">
-        <label class="table-search">
-          <Search :size="17" />
-          <input v-model="invoiceSearch" placeholder="Search customer name, PO number, or invoice no..." />
-        </label>
+        <div class="invoice-filter-top">
+          <label class="table-search">
+            <Search :size="17" />
+            <input v-model="invoiceSearch" placeholder="Search customer name, PO number, or invoice no..." />
+          </label>
+          <div class="invoice-date-range">
+            <label class="job-filter-field">
+              <span>Issued From</span>
+              <input v-model="invoiceFromDate" type="date" aria-label="Invoice issued from date" />
+            </label>
+            <label class="job-filter-field">
+              <span>Issued To</span>
+              <input v-model="invoiceToDate" type="date" aria-label="Invoice issued to date" />
+            </label>
+            <button v-if="invoiceSearch || invoiceFromDate || invoiceToDate || invoiceStatusFilter !== 'All'" type="button" class="soft-button" @click="resetInvoiceFilters">
+              <RotateCcw :size="14" />Reset
+            </button>
+          </div>
+        </div>
         <div class="segmented-tabs">
           <button type="button" :class="{ active: invoiceStatusFilter === 'All' }" @click="invoiceStatusFilter = 'All'">All ({{ store.invoices.length }})</button>
           <button type="button" :class="{ active: invoiceStatusFilter === 'Paid' }" @click="invoiceStatusFilter = 'Paid'">Paid</button>
@@ -771,7 +1022,7 @@ watch(() => route.query.catalog, (catalog) => {
       </section>
 
       <section class="invoice-card-list">
-        <article v-for="invoice in filteredInvoices" :key="invoice.id" class="invoice-row-card">
+        <article v-for="invoice in paginatedInvoices" :key="invoice.id" class="invoice-row-card">
           <span class="document-icon"><ReceiptText :size="22" /></span>
           <div class="invoice-main">
             <span>Issued {{ formatDate(invoice.issuedAt) }} · {{ store.sortedOrderGroups(invoice).length }} order group(s)</span>
@@ -787,13 +1038,28 @@ watch(() => route.query.catalog, (catalog) => {
             <button class="icon-button" title="Preview official invoice" @click="previewInvoice(invoice)"><Eye :size="16" /></button>
             <button class="icon-button" title="Print invoice" @click="previewInvoice(invoice)"><Printer :size="16" /></button>
             <button class="icon-button" title="Download Invoice PDF" @click="downloadInvoice(invoice)"><Download :size="16" /></button>
+            <button
+              v-if="invoiceWaPhone(invoice)"
+              type="button"
+              class="wa-icon-button"
+              title="Share invoice details via WhatsApp"
+              aria-label="Send invoice via WhatsApp"
+              @click="sendInvoiceWhatsApp(invoice)"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91C21.95 6.45 17.5 2 12.04 2zm5.82 14.08c-.24.68-1.41 1.3-1.95 1.38-.5.07-1.13.1-1.82-.12-.42-.13-.96-.31-1.65-.61-2.9-1.25-4.79-4.18-4.94-4.38-.14-.2-1.18-1.57-1.18-3 0-1.43.75-2.13 1.02-2.42.27-.29.59-.36.79-.36.2 0 .4 0 .57.01.18.01.43-.07.67.51.24.59.83 2.03.9 2.18.07.15.12.33.02.53-.1.2-.15.33-.3.5-.15.17-.31.38-.44.51-.15.15-.3.31-.13.61.17.3.76 1.25 1.63 2.02 1.12.99 2.06 1.3 2.36 1.45.3.15.47.12.64-.07.17-.2.74-.86.94-1.16.2-.3.4-.25.67-.15.27.1 1.73.82 2.03.97.3.15.5.22.57.34.07.12.07.7-.17 1.38z"/>
+              </svg>
+            </button>
           </div>
         </article>
         <div v-if="!filteredInvoices.length" class="panel empty-state">
           <ReceiptText :size="26" />
           <strong>No matching invoices found</strong>
-          <span>Try clearing the search query or switching the payment status filter.</span>
+          <span>Try clearing the search query or adjusting the issued date &amp; status filters.</span>
         </div>
+      </section>
+      <section class="panel" style="padding: 4px;">
+        <DataPagination v-model:current-page="invoicePage" v-model:page-size="invoicePageSize" :total-items="filteredInvoices.length" />
       </section>
     </template>
 
@@ -808,6 +1074,9 @@ watch(() => route.query.catalog, (catalog) => {
       <section class="panel table-panel">
         <div class="table-toolbar">
           <label class="table-search"><Search :size="17" /><input v-model="orderSearch" placeholder="Search PO number, invoice, or customer" /></label>
+          <div class="filter-row">
+            <SearchSelect v-model="orderStatusFilter" :options="orderStatusSelectOptions" search-placeholder="Filter status…" aria-label="Filter order payment status" />
+          </div>
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
@@ -825,7 +1094,7 @@ watch(() => route.query.catalog, (catalog) => {
             </thead>
             <tbody>
               <tr
-                v-for="invoice in filteredOrderInvoices"
+                v-for="invoice in paginatedOrderInvoices"
                 :key="invoice.id"
                 class="order-row-selectable"
                 :class="{ 'is-selected': invoice.bookingId === selectedOrderBookingId }"
@@ -858,6 +1127,7 @@ watch(() => route.query.catalog, (catalog) => {
             </tbody>
           </table>
         </div>
+        <DataPagination v-model:current-page="orderPage" v-model:page-size="orderPageSize" :total-items="filteredOrderInvoices.length" />
       </section>
     </template>
 
@@ -880,7 +1150,7 @@ watch(() => route.query.catalog, (catalog) => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in additionalGroupRows" :key="row.id">
+              <tr v-for="row in paginatedAdditionalRows" :key="row.id">
                 <td><strong class="mono-code">{{ row.poNumber }}</strong></td>
                 <td><strong>{{ row.customerName }}</strong></td>
                 <td>{{ formatDate(row.orderDate) }}</td>
@@ -917,6 +1187,7 @@ watch(() => route.query.catalog, (catalog) => {
             </tbody>
           </table>
         </div>
+        <DataPagination v-model:current-page="additionalPage" v-model:page-size="additionalPageSize" :total-items="additionalGroupRows.length" />
       </section>
     </template>
 
@@ -928,19 +1199,49 @@ watch(() => route.query.catalog, (catalog) => {
         <div><span>Cancel Payouts</span><strong>{{ formatCurrency(store.expenses.filter((e) => e.source === 'Bayar Cancel').reduce((s, e) => s + e.amount, 0)) }}</strong></div>
       </section>
       <section class="panel table-panel">
-        <div class="table-toolbar">
+        <div class="table-toolbar expense-filter-toolbar">
           <div class="segmented-tabs">
             <button :class="{ active: expenseScopeFilter === 'All' }" @click="expenseScopeFilter = 'All'">All</button>
             <button :class="{ active: expenseScopeFilter === 'Berdasarkan PO' }" @click="expenseScopeFilter = 'Berdasarkan PO'">PO Linked</button>
             <button :class="{ active: expenseScopeFilter === 'Di Luar PO' }" @click="expenseScopeFilter = 'Di Luar PO'">Studio Overhead</button>
             <button :class="{ active: expenseScopeFilter === 'Cancel' }" @click="expenseScopeFilter = 'Cancel'">Cancel Payment</button>
           </div>
+          <div class="expense-advanced-filters">
+            <label class="table-search">
+              <Search :size="16" />
+              <input v-model="expenseSearch" type="search" placeholder="Search expense description…" />
+            </label>
+            <label class="job-filter-field">
+              <span>From Date</span>
+              <input v-model="expenseFromDate" type="date" aria-label="Expense from date" />
+            </label>
+            <label class="job-filter-field">
+              <span>To Date</span>
+              <input v-model="expenseToDate" type="date" aria-label="Expense to date" />
+            </label>
+            <div class="job-filter-field">
+              <span>Category</span>
+              <SearchSelect v-model="expenseCategoryFilter" :options="expenseFilterCategoryOptions" search-placeholder="Search category…" aria-label="Filter expense category" />
+            </div>
+            <div class="job-filter-field">
+              <span>PO Reference</span>
+              <SearchSelect v-model="expensePoFilter" :options="expenseFilterPoOptions" search-placeholder="Search PO reference…" aria-label="Filter expense PO" />
+            </div>
+            <button
+              v-if="expenseFromDate || expenseToDate || expenseSearch || expenseCategoryFilter !== 'All' || expensePoFilter !== 'All' || expenseScopeFilter !== 'All'"
+              type="button"
+              class="soft-button"
+              @click="resetExpenseFilters"
+            >
+              <RotateCcw :size="14" />Reset
+            </button>
+          </div>
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
             <thead><tr><th>Date</th><th>Source</th><th>Description</th><th>Category</th><th>PO Ref</th><th>Method</th><th>Amount</th><th>Proof</th><th>Actions</th></tr></thead>
             <tbody>
-              <tr v-for="row in filteredExpenses" :key="row.id">
+              <tr v-for="row in paginatedExpenses" :key="row.id">
                 <td>{{ formatDate(row.date) }}</td>
                 <td>
                   <div class="badge-stack">
@@ -992,6 +1293,7 @@ watch(() => route.query.catalog, (catalog) => {
             </tbody>
           </table>
         </div>
+        <DataPagination v-model:current-page="expensePage" v-model:page-size="expensePageSize" :total-items="filteredExpenses.length" />
       </section>
     </template>
 
@@ -1014,8 +1316,8 @@ watch(() => route.query.catalog, (catalog) => {
         <article
           v-for="(report, index) in REPORT_CATALOG"
           :key="report.key"
-          class="report-card report-card--selectable"
-          :class="{ 'is-checked': selectedReportKeys.includes(report.key) }"
+          class="report-card report-card--selectable report-card--categorized"
+          :class="[reportCategoryMeta(report.key).accent, { 'is-checked': selectedReportKeys.includes(report.key) }]"
           @click="toggleReportKey(report.key)"
         >
           <label class="report-checkbox-wrap" @click.stop>
@@ -1025,7 +1327,10 @@ watch(() => route.query.catalog, (catalog) => {
               @change="toggleReportKey(report.key)"
             />
           </label>
-          <div>
+          <div class="report-card-body">
+            <span class="report-category-badge" :class="reportCategoryMeta(report.key).accent">
+              {{ reportCategoryMeta(report.key).group }}
+            </span>
             <strong>{{ report.title }}</strong>
             <p>{{ report.description }}</p>
           </div>
@@ -1091,24 +1396,14 @@ watch(() => route.query.catalog, (catalog) => {
               </button>
             </div>
           </div>
-          <label><span>Date *</span><input v-model="expense.date" type="date" /></label>
-          <label>
+          <label class="is-required"><span>Date *</span><input v-model="expense.date" type="date" /></label>
+          <label class="is-required">
             <span>Payment Method *</span>
-            <select v-model="expense.method">
-              <option v-for="m in store.paymentMethods" :key="m" :value="m">{{ m }}</option>
-              <option v-if="expense.method && !store.paymentMethods.includes(expense.method)" :value="expense.method">
-                {{ expense.method === 'Cash' || expense.method === 'Tunai' ? 'Cash' : expense.method }}
-              </option>
-            </select>
+            <SearchSelect v-model="expense.method" :options="expenseMethodOptions" required search-placeholder="Search method…" />
           </label>
-          <label v-if="expense.expenseScope === 'Berdasarkan PO'" class="span-2">
+          <label v-if="expense.expenseScope === 'Berdasarkan PO'" class="span-2 is-required">
             <span>Select PO Number *</span>
-            <select v-model="expense.bookingId">
-              <option value="">Select linked PO</option>
-              <option v-for="booking in store.bookings.filter((b) => b.status !== 'Dibatalkan')" :key="booking.id" :value="booking.id">
-                {{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }}
-              </option>
-            </select>
+            <SearchSelect v-model="expense.bookingId" :options="expenseBookingOptions" required placeholder="Select linked PO" search-placeholder="Search PO or customer…" />
           </label>
 
           <div class="order-lines span-2">
@@ -1123,20 +1418,15 @@ watch(() => route.query.catalog, (catalog) => {
             </div>
 
             <div v-for="(line, idx) in expense.items" :key="line.key" class="expense-batch-row">
-              <label>
+              <label class="is-required">
                 <span>Category {{ idx + 1 }} *</span>
-                <select v-model="line.category">
-                  <option v-for="cat in expenseCategoryOptions" :key="cat" :value="cat">{{ cat }}</option>
-                  <option v-if="line.category && !expenseCategoryOptions.includes(line.category)" :value="line.category">
-                    {{ line.category }}
-                  </option>
-                </select>
+                <SearchSelect v-model="line.category" :options="expenseCategorySelectOptions" required search-placeholder="Search category…" />
               </label>
-              <label>
+              <label class="is-required">
                 <span>Description *</span>
                 <input v-model="line.description" placeholder="e.g. Crew transport to venue / supplies" />
               </label>
-              <label>
+              <label class="is-required">
                 <span>Amount *</span>
                 <CurrencyInput v-model="line.amount" aria-label="Expense amount" />
               </label>
@@ -1239,19 +1529,17 @@ watch(() => route.query.catalog, (catalog) => {
 
     <UiModal :open="showOrder" :title="module === 'additional' ? 'Add Service Batch' : 'Create Order'" :description="module === 'additional' ? 'Append an add-on batch to an existing PO without altering the original invoice issue date.' : 'Record initial customer services and issue a PO invoice.'" wide @close="showOrder = false">
       <form class="form-grid" @submit.prevent="submitOrder">
-        <label class="span-2">
+        <label class="span-2 is-required">
           <span>PO Number *</span>
-          <select v-model="order.bookingId">
-            <option v-for="booking in eligibleBookings" :key="booking.id" :value="booking.id">{{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }} — {{ formatDate(booking.eventDate) }}</option>
-          </select>
+          <SearchSelect v-model="order.bookingId" :options="eligibleBookingOptions" required search-placeholder="Search PO or customer…" />
         </label>
         <template v-if="module === 'orders'">
-          <label><span>Invoice Issue Date *</span><input v-model="order.issuedAt" type="date" /></label>
-          <label><span>Order Date *</span><input v-model="order.orderDate" type="date" /></label>
-          <label class="span-2"><span>Due Date (optional)</span><input v-model="order.dueDate" type="date" /></label>
+          <label class="is-required"><span>Invoice Issue Date *</span><input v-model="order.issuedAt" type="date" /></label>
+          <label class="is-required"><span>Order Date *</span><input v-model="order.orderDate" type="date" /></label>
+          <label class="span-2 is-optional"><span>Due Date <em class="opt-tag">Optional</em></span><input v-model="order.dueDate" type="date" /></label>
         </template>
         <template v-else>
-          <label class="span-2"><span>Add-on Order Date *</span><input v-model="order.orderDate" type="date" /></label>
+          <label class="span-2 is-required"><span>Add-on Order Date *</span><input v-model="order.orderDate" type="date" /></label>
         </template>
 
         <div class="order-lines span-2">
@@ -1297,11 +1585,13 @@ watch(() => route.query.catalog, (catalog) => {
                   >
                     {{ line.filterType === 'Inti' ? 'Core' : line.filterType === 'Additional' ? 'Add-on' : (line.serviceKind === 'Inti' ? 'Core' : 'Add-on') }}
                   </span>
-                  <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                    <option v-for="item in (line.filterType === 'Inti' ? coreCatalog : line.filterType === 'Additional' ? additionalCatalog : eligibleCatalog)" :key="item.id" :value="item.id">
-                      {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
-                    </option>
-                  </select>
+                  <SearchSelect
+                    v-model="line.catalogItemId"
+                    :options="catalogSearchOptionsForLine(line)"
+                    required
+                    search-placeholder="Search service…"
+                    @change="onCatalogChange(line)"
+                  />
                 </div>
                 <small v-if="line.catalogItemId">
                   Unit: {{ store.catalog.find((item) => item.id === line.catalogItemId)?.unit ?? 'unit' }} · Catalog rate: {{ formatCurrency(store.catalog.find((item) => item.id === line.catalogItemId)?.price ?? 0) }}
@@ -1407,31 +1697,13 @@ watch(() => route.query.catalog, (catalog) => {
 
                 <div v-for="(line, idx) in editGroupForm.items" :key="line.key" class="order-line-row">
                   <div class="order-line-service">
-                    <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                      <option
-                        v-if="line.catalogItemId && !store.catalog.some((c) => c.id === line.catalogItemId)"
-                        :value="line.catalogItemId"
-                      >
-                        {{ line.serviceName || 'Saved service' }} (Archived)
-                      </option>
-                      <template v-if="line.filterType === 'Inti' || line.filterType === 'Additional'">
-                        <option v-for="item in catalogOptionsForLine(line)" :key="item.id" :value="item.id">
-                          {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
-                        </option>
-                      </template>
-                      <template v-else>
-                        <optgroup label="Core Services">
-                          <option v-for="item in coreCatalog" :key="item.id" :value="item.id">
-                            {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
-                          </option>
-                        </optgroup>
-                        <optgroup label="Add-on Services">
-                          <option v-for="item in additionalCatalog" :key="item.id" :value="item.id">
-                            {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
-                          </option>
-                        </optgroup>
-                      </template>
-                    </select>
+                    <SearchSelect
+                      v-model="line.catalogItemId"
+                      :options="catalogSearchOptionsForLine(line)"
+                      required
+                      search-placeholder="Search service…"
+                      @change="onCatalogChange(line)"
+                    />
                     <small v-if="line.catalogItemId">
                       {{ store.catalog.find((c) => c.id === line.catalogItemId)?.type === 'Inti' ? 'Core' : 'Add-on' }} · Unit: {{ store.catalog.find((c) => c.id === line.catalogItemId)?.unit ?? 'unit' }} · Catalog {{ formatCurrency(store.catalog.find((c) => c.id === line.catalogItemId)?.price ?? 0) }}
                     </small>
@@ -1539,25 +1811,13 @@ watch(() => route.query.catalog, (catalog) => {
                     >
                       {{ line.filterType === 'Inti' ? 'Core' : line.filterType === 'Additional' ? 'Add-on' : (line.serviceKind === 'Inti' ? 'Core' : 'Add-on') }}
                     </span>
-                    <select v-model="line.catalogItemId" @change="onCatalogChange(line)">
-                      <template v-if="line.filterType === 'Inti' || line.filterType === 'Additional'">
-                        <option v-for="item in catalogOptionsForLine(line)" :key="item.id" :value="item.id">
-                          {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
-                        </option>
-                      </template>
-                      <template v-else>
-                        <optgroup label="Core Services">
-                          <option v-for="item in coreCatalog" :key="item.id" :value="item.id">
-                            {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
-                          </option>
-                        </optgroup>
-                        <optgroup label="Add-on Services">
-                          <option v-for="item in additionalCatalog" :key="item.id" :value="item.id">
-                            {{ item.name }} ({{ formatCurrency(item.price) }}/{{ item.unit }})
-                          </option>
-                        </optgroup>
-                      </template>
-                    </select>
+                    <SearchSelect
+                      v-model="line.catalogItemId"
+                      :options="catalogSearchOptionsForLine(line)"
+                      required
+                      search-placeholder="Search service…"
+                      @change="onCatalogChange(line)"
+                    />
                   </div>
                   <small v-if="line.catalogItemId">
                     {{ store.catalog.find((c) => c.id === line.catalogItemId)?.type === 'Inti' ? 'Core' : 'Add-on' }} · Unit: {{ store.catalog.find((c) => c.id === line.catalogItemId)?.unit }} · Catalog {{ formatCurrency(store.catalog.find((c) => c.id === line.catalogItemId)?.price ?? 0) }}
@@ -1733,6 +1993,14 @@ watch(() => route.query.catalog, (catalog) => {
       <div class="modal-actions no-print" style="margin-top: 14px;">
         <button class="secondary-button" @click="showInvoice = false">Close</button>
         <button type="button" class="secondary-button" @click="printInvoice"><Printer :size="16" />Print</button>
+        <button
+          v-if="selectedInvoice && invoiceWaPhone(selectedInvoice)"
+          type="button"
+          class="secondary-button wa-share-btn"
+          @click="sendInvoiceWhatsApp(selectedInvoice)"
+        >
+          Send WhatsApp
+        </button>
         <button v-if="selectedInvoice" type="button" class="primary-button" @click="downloadInvoice(selectedInvoice)"><Download :size="17" />Download Invoice PDF</button>
       </div>
     </UiModal>

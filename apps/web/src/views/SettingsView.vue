@@ -21,6 +21,8 @@ import {
 import { useCrmStore, type DropdownOptionGroup, type EmployeeRecord, type InventoryItem } from '../stores/crm'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import UiModal from '../components/UiModal.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import DataPagination from '../components/DataPagination.vue'
 
 const props = withDefaults(defineProps<{ section?: 'profile' | 'dropdown' }>(), {
   section: 'profile',
@@ -320,6 +322,46 @@ const handleDeleteInvItem = (item: InventoryItem) => {
     dropdownFeedback.value = err instanceof Error ? err.message : 'Failed to delete inventory item.'
   }
 }
+
+type SettingCardKey = 'employees' | DropdownOptionGroup | 'inventoryItems'
+
+const cardPages = reactive<Record<SettingCardKey, number>>({
+  employees: 1,
+  paymentMethods: 1,
+  poExpenseCategories: 1,
+  generalExpenseCategories: 1,
+  stylingTypes: 1,
+  inventoryCategories: 1,
+  units: 1,
+  inventoryItems: 1,
+})
+
+const cardSizes = reactive<Record<SettingCardKey, number>>({
+  employees: 10,
+  paymentMethods: 10,
+  poExpenseCategories: 10,
+  generalExpenseCategories: 10,
+  stylingTypes: 10,
+  inventoryCategories: 10,
+  units: 10,
+  inventoryItems: 10,
+})
+
+const sliceCardList = <T,>(key: SettingCardKey, items: T[]): T[] => {
+  const size = cardSizes[key]
+  const totalPages = Math.max(1, Math.ceil(items.length / size))
+  if (cardPages[key] > totalPages) cardPages[key] = totalPages
+  const start = (cardPages[key] - 1) * size
+  return items.slice(start, start + size)
+}
+
+const invCategoryOptions = computed(() =>
+  store.inventoryCategories.map((c) => ({ value: c, label: c })),
+)
+
+const invUnitOptions = computed(() =>
+  store.units.map((u) => ({ value: u, label: u })),
+)
 </script>
 
 <template>
@@ -378,12 +420,12 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             <p v-if="uploadError" class="form-error">{{ uploadError }}</p>
           </div>
 
-          <label><span>Brand / Business Name *</span><input v-model="profileForm.name" placeholder="e.g. AZURA" /></label>
-          <label><span>Subtitle / Tagline</span><input v-model="profileForm.tagline" placeholder="e.g. MAKEUP ARTIST" /></label>
-          <label><span>Phone / WhatsApp</span><input v-model="profileForm.phone" placeholder="08xxxxxxxxxx" /></label>
-          <label><span>Email Address</span><input v-model="profileForm.email" type="email" placeholder="hello@azuramakeup.id" /></label>
-          <label class="span-2"><span>Studio Address</span><textarea v-model="profileForm.address" rows="2" /></label>
-          <label class="span-2"><span>Invoice &amp; Receipt Footer Note</span><textarea v-model="profileForm.invoiceNote" rows="2" /></label>
+          <label class="is-required"><span>Brand / Business Name *</span><input v-model="profileForm.name" placeholder="e.g. AZURA" /></label>
+          <label class="is-optional"><span>Subtitle / Tagline <em class="opt-tag">Optional</em></span><input v-model="profileForm.tagline" placeholder="e.g. MAKEUP ARTIST" /></label>
+          <label class="is-optional"><span>Phone / WhatsApp <em class="opt-tag">Optional</em></span><input v-model="profileForm.phone" placeholder="08xxxxxxxxxx" /></label>
+          <label class="is-optional"><span>Email Address <em class="opt-tag">Optional</em></span><input v-model="profileForm.email" type="email" placeholder="hello@azuramakeup.id" /></label>
+          <label class="span-2 is-optional"><span>Studio Address <em class="opt-tag">Optional</em></span><textarea v-model="profileForm.address" rows="2" /></label>
+          <label class="span-2 is-optional"><span>Invoice &amp; Receipt Footer Note <em class="opt-tag">Optional</em></span><textarea v-model="profileForm.invoiceNote" rows="2" /></label>
         </div>
       </article>
 
@@ -422,7 +464,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
         </form>
 
         <ul class="dropdown-option-list">
-          <li v-for="emp in store.employees" :key="emp.id" class="dropdown-option-row" :class="{ 'is-inactive': !emp.active }">
+          <li v-for="emp in sliceCardList('employees', store.employees)" :key="emp.id" class="dropdown-option-row" :class="{ 'is-inactive': !emp.active }">
             <template v-if="editingEmpId === emp.id">
               <div class="dropdown-edit-inline">
                 <input v-model="editEmpDraft.name" placeholder="Employee name" />
@@ -449,6 +491,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             </template>
           </li>
         </ul>
+        <DataPagination v-model:current-page="cardPages.employees" v-model:page-size="cardSizes.employees" :total-items="store.employees.length" compact />
       </article>
 
       <!-- Card 2: Payment Methods -->
@@ -468,7 +511,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
         </form>
 
         <ul class="dropdown-option-list">
-          <li v-for="item in store.paymentMethods" :key="item" class="dropdown-option-row">
+          <li v-for="item in sliceCardList('paymentMethods', store.paymentMethods)" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'paymentMethods' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="Method name" />
@@ -487,6 +530,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             </template>
           </li>
         </ul>
+        <DataPagination v-model:current-page="cardPages.paymentMethods" v-model:page-size="cardSizes.paymentMethods" :total-items="store.paymentMethods.length" compact />
       </article>
 
       <!-- Card 3: PO Expense Categories -->
@@ -506,7 +550,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
         </form>
 
         <ul class="dropdown-option-list">
-          <li v-for="item in store.poExpenseCategories" :key="item" class="dropdown-option-row">
+          <li v-for="item in sliceCardList('poExpenseCategories', store.poExpenseCategories)" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'poExpenseCategories' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="PO category name" />
@@ -525,6 +569,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             </template>
           </li>
         </ul>
+        <DataPagination v-model:current-page="cardPages.poExpenseCategories" v-model:page-size="cardSizes.poExpenseCategories" :total-items="store.poExpenseCategories.length" compact />
       </article>
 
       <!-- Card 4: General Expense Categories -->
@@ -544,7 +589,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
         </form>
 
         <ul class="dropdown-option-list">
-          <li v-for="item in store.generalExpenseCategories" :key="item" class="dropdown-option-row">
+          <li v-for="item in sliceCardList('generalExpenseCategories', store.generalExpenseCategories)" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'generalExpenseCategories' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="General category name" />
@@ -563,6 +608,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             </template>
           </li>
         </ul>
+        <DataPagination v-model:current-page="cardPages.generalExpenseCategories" v-model:page-size="cardSizes.generalExpenseCategories" :total-items="store.generalExpenseCategories.length" compact />
       </article>
 
       <!-- Card 5: Styling Types -->
@@ -582,7 +628,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
         </form>
 
         <ul class="dropdown-option-list">
-          <li v-for="item in store.stylingTypes" :key="item" class="dropdown-option-row">
+          <li v-for="item in sliceCardList('stylingTypes', store.stylingTypes)" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'stylingTypes' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="Styling type" />
@@ -601,6 +647,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             </template>
           </li>
         </ul>
+        <DataPagination v-model:current-page="cardPages.stylingTypes" v-model:page-size="cardSizes.stylingTypes" :total-items="store.stylingTypes.length" compact />
       </article>
 
       <!-- Card 6: Inventory Categories -->
@@ -620,7 +667,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
         </form>
 
         <ul class="dropdown-option-list">
-          <li v-for="item in store.inventoryCategories" :key="item" class="dropdown-option-row">
+          <li v-for="item in sliceCardList('inventoryCategories', store.inventoryCategories)" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'inventoryCategories' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="Category name" />
@@ -639,6 +686,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             </template>
           </li>
         </ul>
+        <DataPagination v-model:current-page="cardPages.inventoryCategories" v-model:page-size="cardSizes.inventoryCategories" :total-items="store.inventoryCategories.length" compact />
       </article>
 
       <!-- Card 7: Measurement Units -->
@@ -658,7 +706,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
         </form>
 
         <ul class="dropdown-option-list">
-          <li v-for="item in store.units" :key="item" class="dropdown-option-row">
+          <li v-for="item in sliceCardList('units', store.units)" :key="item" class="dropdown-option-row">
             <template v-if="editingOption.group === 'units' && editingOption.oldLabel === item">
               <div class="dropdown-edit-inline">
                 <input v-model="editingOption.draft" placeholder="Unit label" />
@@ -677,6 +725,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             </template>
           </li>
         </ul>
+        <DataPagination v-model:current-page="cardPages.units" v-model:page-size="cardSizes.units" :total-items="store.units.length" compact />
       </article>
 
       <!-- Card 8: Inventory Item Names & Product Photos -->
@@ -698,14 +747,12 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleNewInvPhoto" />
           </label>
           <input v-model="newInvItem.name" placeholder="Item name *" />
-          <select v-model="newInvItem.category">
-            <option v-for="c in store.inventoryCategories" :key="c" :value="c">{{ c }}</option>
-          </select>
+          <SearchSelect v-model="newInvItem.category" :options="invCategoryOptions" size="sm" search-placeholder="Category…" />
           <button type="submit" class="primary-button" :disabled="uploadingNewInvPhoto"><Plus :size="15" />Add</button>
         </form>
 
         <ul class="dropdown-option-list">
-          <li v-for="item in store.inventory" :key="item.id" class="dropdown-option-row">
+          <li v-for="item in sliceCardList('inventoryItems', store.inventory)" :key="item.id" class="dropdown-option-row">
             <template v-if="editingInvId === item.id">
               <label class="inv-photo-pick-btn" title="Upload product photo">
                 <img v-if="editInvDraft.imageUrl" :src="editInvDraft.imageUrl" :alt="item.name" />
@@ -715,12 +762,8 @@ const handleDeleteInvItem = (item: InventoryItem) => {
               </label>
               <div class="dropdown-edit-inline">
                 <input v-model="editInvDraft.name" placeholder="Item name" />
-                <select v-model="editInvDraft.category">
-                  <option v-for="c in store.inventoryCategories" :key="c" :value="c">{{ c }}</option>
-                </select>
-                <select v-model="editInvDraft.unit">
-                  <option v-for="u in store.units" :key="u" :value="u">{{ u }}</option>
-                </select>
+                <SearchSelect v-model="editInvDraft.category" :options="invCategoryOptions" size="sm" search-placeholder="Category…" />
+                <SearchSelect v-model="editInvDraft.unit" :options="invUnitOptions" size="sm" search-placeholder="Unit…" />
               </div>
               <div class="action-row">
                 <button type="button" class="icon-button" title="Save" @click="saveEditInvItem(item)"><Check :size="15" /></button>
@@ -752,6 +795,7 @@ const handleDeleteInvItem = (item: InventoryItem) => {
             </template>
           </li>
         </ul>
+        <DataPagination v-model:current-page="cardPages.inventoryItems" v-model:page-size="cardSizes.inventoryItems" :total-items="store.inventory.length" compact />
       </article>
     </section>
 

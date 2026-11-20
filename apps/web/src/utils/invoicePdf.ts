@@ -57,10 +57,10 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
   const cardH = 30
 
   doc.setFillColor(...PDF_PALETTE.ivory)
-  doc.setDrawColor(...PDF_PALETTE.goldDark)
-  doc.setLineWidth(0.4)
-  doc.roundedRect(marginX, cardTop, infoW, cardH, 2.2, 2.2, 'FD')
-  doc.roundedRect(marginX + infoW + colGap, cardTop, infoW, cardH, 2.2, 2.2, 'FD')
+  doc.setDrawColor(...PDF_PALETTE.gold)
+  doc.setLineWidth(0.28)
+  doc.roundedRect(marginX, cardTop, infoW, cardH, 3.2, 3.2, 'FD')
+  doc.roundedRect(marginX + infoW + colGap, cardTop, infoW, cardH, 3.2, 3.2, 'FD')
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(7.5)
@@ -165,9 +165,9 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
   const shownPayments = payments.slice(0, 4)
   const historyHeight = Math.max(41, 22 + shownPayments.length * 6.8)
   doc.setFillColor(...PDF_PALETTE.ivory)
-  doc.setDrawColor(...PDF_PALETTE.goldDark)
-  doc.setLineWidth(0.4)
-  doc.roundedRect(marginX, cursorY, leftW, historyHeight, 2.2, 2.2, 'FD')
+  doc.setDrawColor(...PDF_PALETTE.gold)
+  doc.setLineWidth(0.28)
+  doc.roundedRect(marginX, cursorY, leftW, historyHeight, 3.2, 3.2, 'FD')
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(7.4)
@@ -220,9 +220,9 @@ export const buildInvoicePdfDoc = (input: InvoicePdfInput) => {
 
   // Right Espresso Totals Card
   doc.setFillColor(...PDF_PALETTE.espresso)
-  doc.setDrawColor(...PDF_PALETTE.goldDark)
-  doc.setLineWidth(0.45)
-  doc.roundedRect(rightBoxX, cursorY, rightBoxW, 41, 2.5, 2.5, 'FD')
+  doc.setDrawColor(...PDF_PALETTE.gold)
+  doc.setLineWidth(0.3)
+  doc.roundedRect(rightBoxX, cursorY, rightBoxW, 41, 3.4, 3.4, 'FD')
   doc.setFillColor(...PDF_PALETTE.gold)
   doc.rect(rightBoxX + 4, cursorY, rightBoxW - 8, 0.8, 'F')
 

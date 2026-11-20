@@ -10,8 +10,12 @@ import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import CurrencyInput from '../components/CurrencyInput.vue'
 import ReceiptStationery from '../components/ReceiptStationery.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import DataPagination from '../components/DataPagination.vue'
 
 const store = useCrmStore()
+const page = ref(1)
+const pageSize = ref(10)
 const showForm = ref(false)
 const editingId = ref('')
 const showDetail = ref(false)
@@ -54,7 +58,30 @@ const rows = computed(() => store.payments.filter((payment) => {
   return !query || payment.receiptNumber.toLowerCase().includes(query) || booking?.poNumber.toLowerCase().includes(query) || customer?.name.toLowerCase().includes(query)
 }))
 
+const paginatedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return rows.value.slice(start, start + pageSize.value)
+})
+
+watch(search, () => {
+  page.value = 1
+})
+
 const methodLabel = (method: Payment['method']) => (method === 'Cash' ? 'Cash' : method === 'Tunai' ? 'Cash' : method)
+
+const bookingSelectOptions = computed(() =>
+  store.bookings
+    .filter((b) => (editingId.value ? b.id === form.bookingId : store.bookingBalance(b.id) > 0))
+    .map((b) => ({
+      value: b.id,
+      label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
+      sublabel: `Balance ${formatCurrency(store.bookingBalance(b.id))}`,
+    })),
+)
+
+const methodSelectOptions = computed(() =>
+  store.paymentMethods.map((m) => ({ value: m, label: methodLabel(m) })),
+)
 
 const openCreate = () => {
   editingId.value = ''
@@ -277,7 +304,7 @@ const onSendWhatsApp = async (payment: Payment) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="payment in rows" :key="payment.id">
+            <tr v-for="payment in paginatedRows" :key="payment.id">
               <td><strong class="mono-code">{{ payment.receiptNumber }}</strong><span class="subtle-line">ID {{ payment.id.slice(0, 8) }}</span></td>
               <td>
                 <strong>{{ store.customerFor(store.bookingFor(payment.bookingId)?.customerId ?? '')?.name }}</strong>
@@ -329,6 +356,7 @@ const onSendWhatsApp = async (payment: Payment) => {
           </tbody>
         </table>
       </div>
+      <DataPagination v-model:current-page="page" v-model:page-size="pageSize" :total-items="rows.length" />
     </section>
 
     <UiModal
@@ -339,39 +367,26 @@ const onSendWhatsApp = async (payment: Payment) => {
       @close="showForm = false"
     >
       <form class="form-grid" @submit.prevent="submit">
-        <label class="span-2">
+        <label class="span-2 is-required">
           <span>PO Number *</span>
-          <select v-model="form.bookingId" :disabled="Boolean(editingId)">
-            <option
-              v-for="booking in store.bookings.filter((b) => Boolean(editingId) ? b.id === form.bookingId : store.bookingBalance(b.id) > 0)"
-              :key="booking.id"
-              :value="booking.id"
-            >
-              {{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }}
-            </option>
-          </select>
+          <SearchSelect v-model="form.bookingId" :options="bookingSelectOptions" :disabled="Boolean(editingId)" required search-placeholder="Search PO or customer…" />
         </label>
         <div v-if="selected" class="payment-preview span-2">
           <div><span>Total Billing</span><strong>{{ formatCurrency(store.bookingTotal(selected.id)) }}</strong></div>
           <div><span>Paid to Date</span><strong>{{ formatCurrency(store.bookingPaid(selected.id)) }}</strong></div>
           <div><span>Max Allowed Input</span><strong>{{ formatCurrency(maxAllowedForForm) }}</strong></div>
         </div>
-        <label><span>Payment Date *</span><input v-model="form.paidAt" type="date" /></label>
-        <label>
+        <label class="is-required"><span>Payment Date *</span><input v-model="form.paidAt" type="date" /></label>
+        <label class="is-required">
           <span>Payment Method *</span>
-          <select v-model="form.method">
-            <option v-for="m in store.paymentMethods" :key="m" :value="m">{{ m }}</option>
-            <option v-if="form.method && !store.paymentMethods.includes(form.method)" :value="form.method">
-              {{ methodLabel(form.method) }}
-            </option>
-          </select>
+          <SearchSelect v-model="form.method" :options="methodSelectOptions" required search-placeholder="Search method…" />
         </label>
-        <label class="span-2">
+        <label class="span-2 is-required">
           <span>Amount Paid *</span>
           <CurrencyInput v-model="form.amount" placeholder="0" aria-label="Payment amount" />
           <small v-if="selected">Remaining balance after saving: {{ formatCurrency(Math.max(0, maxAllowedForForm - form.amount)) }}</small>
         </label>
-        <label class="span-2"><span>Notes</span><textarea v-model="form.notes" rows="2" placeholder="e.g. First booking deposit (DP)" /></label>
+        <label class="span-2 is-optional"><span>Notes <em class="opt-tag">Optional</em></span><textarea v-model="form.notes" rows="2" placeholder="e.g. First booking deposit (DP)" /></label>
         <div class="flow-note span-2"><ReceiptText :size="18" /><div><strong>Automatic Receipt PDF &amp; Share Link</strong><span>After saving, you can preview the editorial stationery receipt, download the PDF, or send via WhatsApp.</span></div><CheckCircle2 :size="19" /></div>
         <p v-if="error" class="form-error span-2">{{ error }}</p>
         <div class="modal-actions span-2">

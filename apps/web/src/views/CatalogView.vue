@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { Plus, Search, Image as ImageIcon, Pencil, Check, UploadCloud, LoaderCircle } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 import { useCrmStore, type CatalogItem, type CatalogType } from '../stores/crm'
@@ -8,11 +8,15 @@ import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import CurrencyInput from '../components/CurrencyInput.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import DataPagination from '../components/DataPagination.vue'
 
 const store = useCrmStore()
 const router = useRouter()
 const activeTab = ref<'All' | CatalogType>('All')
 const search = ref('')
+const page = ref(1)
+const pageSize = ref(10)
 const showForm = ref(false)
 const showChoice = ref(false)
 const editingId = ref('')
@@ -26,6 +30,28 @@ const items = computed(() => store.catalog.filter((item) => {
   const matchesTab = activeTab.value === 'All' || item.type === activeTab.value
   return matchesTab && item.name.toLowerCase().includes(search.value.toLowerCase())
 }))
+
+const paginatedItems = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return items.value.slice(start, start + pageSize.value)
+})
+
+watch([activeTab, search], () => {
+  page.value = 1
+})
+
+const typeSelectOptions = [
+  { value: 'Inti', label: 'Core Service' },
+  { value: 'Additional', label: 'Add-on Service' },
+]
+
+const unitSelectOptions = computed(() => {
+  const list = store.units.map((u) => ({ value: u, label: u }))
+  if (form.unit && !store.units.includes(form.unit)) {
+    list.push({ value: form.unit, label: form.unit })
+  }
+  return list
+})
 
 const resetForm = () => {
   Object.assign(form, { name: '', type: 'Inti', description: '', price: 0, unit: store.units[0] ?? 'paket', imageUrl: '' })
@@ -95,7 +121,7 @@ const submit = () => {
       <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search services" /></label>
     </section>
     <section class="catalog-grid">
-      <article v-for="item in items" :key="item.id" class="service-card">
+      <article v-for="item in paginatedItems" :key="item.id" class="service-card">
         <div class="service-image" :class="`service-${item.type.toLowerCase()}`">
           <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.name" loading="lazy" decoding="async" />
           <div v-else><ImageIcon :size="27" /><span>{{ item.type === 'Inti' ? 'Core' : 'Add-on' }}</span></div>
@@ -113,20 +139,21 @@ const submit = () => {
       </article>
     </section>
 
+    <section class="panel" style="padding: 4px;">
+      <DataPagination v-model:current-page="page" v-model:page-size="pageSize" :total-items="items.length" />
+    </section>
+
     <UiModal :open="showForm" :title="editingId ? 'Edit Service' : 'Add Service'" description="Catalog details act as quick presets when building customer orders." wide @close="showForm = false">
       <form class="form-grid" @submit.prevent="submit">
-        <label><span>Service Name *</span><input v-model="form.name" placeholder="e.g. Bridesmaid Makeup" required /></label>
-        <label><span>Catalog Type *</span><select v-model="form.type"><option value="Inti">Core Service</option><option value="Additional">Add-on Service</option></select></label>
-        <label class="span-2"><span>Description *</span><textarea v-model="form.description" rows="3" required /></label>
-        <label><span>Catalog Price *</span><CurrencyInput v-model="form.price" placeholder="250.000" aria-label="Catalog price" /></label>
-        <label>
+        <label class="is-required"><span>Service Name *</span><input v-model="form.name" placeholder="e.g. Bridesmaid Makeup" required /></label>
+        <label class="is-required"><span>Catalog Type *</span><SearchSelect v-model="form.type" :options="typeSelectOptions" required search-placeholder="Search type…" /></label>
+        <label class="span-2 is-required"><span>Description *</span><textarea v-model="form.description" rows="3" required /></label>
+        <label class="is-required"><span>Catalog Price *</span><CurrencyInput v-model="form.price" placeholder="250.000" aria-label="Catalog price" /></label>
+        <label class="is-required">
           <span>Unit *</span>
-          <select v-model="form.unit">
-            <option v-for="u in store.units" :key="u" :value="u">{{ u }}</option>
-            <option v-if="form.unit && !store.units.includes(form.unit)" :value="form.unit">{{ form.unit }}</option>
-          </select>
+          <SearchSelect v-model="form.unit" :options="unitSelectOptions" required search-placeholder="Search unit…" />
         </label>
-        <label class="span-2"><span>Service Image</span><div class="upload-zone"><img v-if="imagePreview" :src="imagePreview" alt="Preview" /><div v-else><UploadCloud :size="25" /><strong>Upload JPG, PNG, or WebP</strong><span>Max 5 MB</span></div><input type="file" accept="image/jpeg,image/png,image/webp" @change="handleFile" /></div></label>
+        <label class="span-2 is-optional"><span>Service Image <em class="opt-tag">Optional</em></span><div class="upload-zone"><img v-if="imagePreview" :src="imagePreview" alt="Preview" /><div v-else><UploadCloud :size="25" /><strong>Upload JPG, PNG, or WebP</strong><span>Max 5 MB</span></div><input type="file" accept="image/jpeg,image/png,image/webp" @change="handleFile" /></div></label>
         <p v-if="uploading" class="upload-state span-2"><LoaderCircle class="spin" :size="16" />Uploading image…</p>
         <p v-if="uploadError" class="form-error span-2">{{ uploadError }}</p>
         <div class="modal-actions span-2"><button type="button" class="secondary-button" @click="showForm = false">Cancel</button><button class="primary-button" :disabled="uploading">{{ editingId ? 'Save Changes' : 'Save Service' }}</button></div>

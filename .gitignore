@@ -10,7 +10,8 @@ dist-worker/
 *.local
 coverage/
 .qa/
-.DS_Store
+*.DS_Store
 Thumbs.db
 *.log
+*.tsbuildinfo
 

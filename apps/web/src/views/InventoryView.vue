@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import {
   Plus, Search, ArrowDownToLine, ArrowUpFromLine, Boxes, TriangleAlert, PackageCheck,
   History, ClipboardCheck, Trash2, UploadCloud, LoaderCircle, Eye, Image as ImageIcon, Pencil, Download,
@@ -9,10 +9,21 @@ import { displayStockStatus, formatDate } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import DataPagination from '../components/DataPagination.vue'
 
 const store = useCrmStore()
 const tab = ref<'master' | 'in' | 'out' | 'opname' | 'monitor'>('master')
 const search = ref('')
+const monitorStatusFilter = ref<'All' | 'Aman' | 'Menipis' | 'Habis'>('All')
+const masterPage = ref(1)
+const masterPageSize = ref(10)
+const inPage = ref(1)
+const inPageSize = ref(10)
+const outPage = ref(1)
+const outPageSize = ref(10)
+const opnamePage = ref(1)
+const opnamePageSize = ref(10)
 const showMovement = ref(false)
 const showItemForm = ref(false)
 const showOpnameForm = ref(false)
@@ -118,7 +129,87 @@ const itemForm = reactive({
   imageUrl: '',
 })
 
-const items = computed(() => store.inventory.filter((item) => item.name.toLowerCase().includes(search.value.toLowerCase()) || item.code.toLowerCase().includes(search.value.toLowerCase())))
+const items = computed(() =>
+  store.inventory.filter((item) => {
+    const q = search.value.trim().toLowerCase()
+    const matchesSearch = !q || item.name.toLowerCase().includes(q) || item.code.toLowerCase().includes(q)
+    if (!matchesSearch) return false
+    if (tab.value === 'monitor' && monitorStatusFilter.value !== 'All') {
+      return store.stockStatus(item) === monitorStatusFilter.value
+    }
+    return true
+  }),
+)
+
+const paginatedItems = computed(() => {
+  const start = (masterPage.value - 1) * masterPageSize.value
+  return items.value.slice(start, start + masterPageSize.value)
+})
+
+const inMovements = computed(() => store.movements.filter((m) => m.type === 'Masuk'))
+const outMovements = computed(() => store.movements.filter((m) => m.type === 'Keluar'))
+
+const paginatedMovements = computed(() => {
+  const list = tab.value === 'in' ? inMovements.value : outMovements.value
+  const page = tab.value === 'in' ? inPage.value : outPage.value
+  const size = tab.value === 'in' ? inPageSize.value : outPageSize.value
+  const start = (page - 1) * size
+  return list.slice(start, start + size)
+})
+
+const paginatedOpnames = computed(() => {
+  const start = (opnamePage.value - 1) * opnamePageSize.value
+  return store.stockOpnames.slice(start, start + opnamePageSize.value)
+})
+
+watch([search, monitorStatusFilter, tab], () => {
+  masterPage.value = 1
+})
+
+const monitorStatusOptions = [
+  { value: 'All', label: 'All Stock Statuses' },
+  { value: 'Aman', label: 'In Stock (Aman)' },
+  { value: 'Menipis', label: 'Low Stock' },
+  { value: 'Habis', label: 'Out of Stock' },
+]
+
+const staffPicOptions = computed(() => {
+  const opts = store.activeEmployees.map((emp) => ({
+    value: emp.name,
+    label: emp.name,
+    sublabel: emp.role,
+  }))
+  const extraPic = movement.pic || opnameForm.pic || editMovementForm.pic
+  if (extraPic && !opts.some((o) => o.value === extraPic)) {
+    opts.push({ value: extraPic, label: extraPic, sublabel: 'Staff' })
+  }
+  return opts
+})
+
+const inventoryItemOptions = computed(() =>
+  store.inventory.map((item) => ({
+    value: item.id,
+    label: item.name,
+    sublabel: `Avail: ${store.stockAvailable(item)} ${item.unit}`,
+  })),
+)
+
+const invCategorySelectOptions = computed(() => {
+  const list = store.inventoryCategories.map((c) => ({ value: c, label: c }))
+  if (itemForm.category && !store.inventoryCategories.includes(itemForm.category)) {
+    list.push({ value: itemForm.category, label: itemForm.category })
+  }
+  return list
+})
+
+const invUnitSelectOptions = computed(() => {
+  const list = store.units.map((u) => ({ value: u, label: u }))
+  if (itemForm.unit && !store.units.includes(itemForm.unit)) {
+    list.push({ value: itemForm.unit, label: itemForm.unit })
+  }
+  return list
+})
+
 const safeCount = computed(() => store.inventory.filter((item) => store.stockStatus(item) === 'Aman').length)
 const lowCount = computed(() => store.inventory.filter((item) => store.stockStatus(item) === 'Menipis').length)
 const emptyCount = computed(() => store.inventory.filter((item) => store.stockStatus(item) === 'Habis').length)
@@ -468,11 +559,11 @@ const exportInventoryPdf = async () => {
   <div class="page-stack">
     <section class="page-heading">
       <div><span class="eyebrow">Business</span><h2>Inventory Management</h2><p>Track real-time stock balances, upload item images, record batch stock-in/out with proofs, and run physical opname audits.</p></div>
-      <div class="heading-actions">
-        <button class="secondary-button" @click="exportInventoryPdf"><Download :size="17" />Download Stock PDF</button>
-        <button class="secondary-button" @click="openOpnameModal"><ClipboardCheck :size="17" />Stock Opname</button>
-        <button class="secondary-button" @click="openMovement('Keluar')"><ArrowUpFromLine :size="17" />Stock Out</button>
-        <button class="primary-button" @click="openMovement('Masuk')"><ArrowDownToLine :size="17" />Stock In</button>
+      <div class="heading-actions inv-heading-actions">
+        <button class="secondary-button inv-action-btn" @click="exportInventoryPdf"><Download :size="16" /><span>Download Stock PDF</span></button>
+        <button class="secondary-button inv-action-btn" @click="openOpnameModal"><ClipboardCheck :size="16" /><span>Stock Opname</span></button>
+        <button class="secondary-button inv-action-btn is-out" @click="openMovement('Keluar')"><ArrowUpFromLine :size="16" /><span>Stock Out</span></button>
+        <button class="primary-button inv-action-btn is-in" @click="openMovement('Masuk')"><ArrowDownToLine :size="16" /><span>Stock In</span></button>
       </div>
     </section>
 
@@ -495,7 +586,16 @@ const exportInventoryPdf = async () => {
       <template v-if="tab === 'master' || tab === 'monitor'">
         <div class="table-toolbar">
           <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search item name or code" /></label>
-          <button v-if="tab === 'master'" class="soft-button" @click="openItemForm(false)"><Plus :size="16" />Add Inventory Item</button>
+          <div class="filter-row">
+            <SearchSelect
+              v-if="tab === 'monitor'"
+              v-model="monitorStatusFilter"
+              :options="monitorStatusOptions"
+              search-placeholder="Filter status…"
+              aria-label="Filter monitor stock status"
+            />
+            <button v-if="tab === 'master'" class="soft-button" @click="openItemForm(false)"><Plus :size="16" />Add Inventory Item</button>
+          </div>
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
@@ -513,7 +613,7 @@ const exportInventoryPdf = async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in items" :key="item.id">
+              <tr v-for="item in paginatedItems" :key="item.id">
                 <td>
                   <div class="inventory-name">
                     <button v-if="item.imageUrl" type="button" class="proof-thumb-btn" style="width: 38px; height: 38px; padding: 0; border-radius: 9px;" title="Zoom product photo" @click="openProofModal(item.imageUrl)">
@@ -544,12 +644,13 @@ const exportInventoryPdf = async () => {
             </tbody>
           </table>
         </div>
+        <DataPagination v-model:current-page="masterPage" v-model:page-size="masterPageSize" :total-items="items.length" />
       </template>
 
       <template v-else-if="tab === 'opname'">
         <div class="movement-head movement-head--between">
-          <div>
-            <ClipboardCheck :size="20" />
+          <div class="movement-head-left">
+            <span class="movement-head-icon"><ClipboardCheck :size="20" /></span>
             <div>
               <h3>Stock Opname History</h3>
               <p>Physical stock reconciliation audits showing system vs physical variances (+) and (-).</p>
@@ -570,7 +671,7 @@ const exportInventoryPdf = async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="record in store.stockOpnames" :key="record.id">
+              <tr v-for="record in paginatedOpnames" :key="record.id">
                 <td><strong class="mono-code">{{ record.opnameNumber }}</strong></td>
                 <td>{{ formatDate(record.date) }}</td>
                 <td><strong>{{ record.pic }}</strong></td>
@@ -614,15 +715,27 @@ const exportInventoryPdf = async () => {
             </tbody>
           </table>
         </div>
+        <DataPagination v-model:current-page="opnamePage" v-model:page-size="opnamePageSize" :total-items="store.stockOpnames.length" />
       </template>
 
       <template v-else>
-        <div class="movement-head"><div><History :size="20" /><div><h3>{{ tab === 'in' ? 'Stock In' : 'Stock Out' }} History</h3><p>Transactions saved with staff PIC, uploaded photo proof, and full edit/delete support.</p></div></div></div>
+        <div class="movement-head movement-head--between">
+          <div class="movement-head-left">
+            <span class="movement-head-icon"><History :size="20" /></span>
+            <div>
+              <h3>{{ tab === 'in' ? 'Stock In' : 'Stock Out' }} History</h3>
+              <p>Transactions saved with staff PIC, uploaded photo proof, and full edit/delete support.</p>
+            </div>
+          </div>
+          <button type="button" class="soft-button" @click="openMovement(tab === 'in' ? 'Masuk' : 'Keluar')">
+            <Plus :size="15" />Record Stock {{ tab === 'in' ? 'In' : 'Out' }}
+          </button>
+        </div>
         <div class="data-table-wrap">
           <table class="data-table">
             <thead><tr><th>Date</th><th>Item Name</th><th>Qty</th><th>PIC</th><th>Photo Proof</th><th>Notes</th><th>Actions</th></tr></thead>
             <tbody>
-              <tr v-for="row in store.movements.filter((m) => m.type === (tab === 'in' ? 'Masuk' : 'Keluar'))" :key="row.id">
+              <tr v-for="row in paginatedMovements" :key="row.id">
                 <td>{{ formatDate(row.date) }}</td>
                 <td><strong>{{ store.inventory.find((item) => item.id === row.itemId)?.name }}</strong></td>
                 <td><strong :class="row.type === 'Masuk' ? 'positive-number' : 'negative-number'">{{ row.type === 'Masuk' ? '+' : '−' }}{{ row.quantity }}</strong> <small class="unit-tag">{{ store.inventory.find((item) => item.id === row.itemId)?.unit ?? '' }}</small></td>
@@ -653,19 +766,27 @@ const exportInventoryPdf = async () => {
             </tbody>
           </table>
         </div>
+        <DataPagination
+          v-if="tab === 'in'"
+          v-model:current-page="inPage"
+          v-model:page-size="inPageSize"
+          :total-items="inMovements.length"
+        />
+        <DataPagination
+          v-else
+          v-model:current-page="outPage"
+          v-model:page-size="outPageSize"
+          :total-items="outMovements.length"
+        />
       </template>
     </section>
 
     <UiModal :open="showMovement" :title="`Record Stock ${movement.type === 'Masuk' ? 'In' : 'Out'}`" :description="`Log multiple inventory ${movement.type === 'Masuk' ? 'restock' : 'usage'} lines with photo proof.`" wide @close="showMovement = false">
       <form class="form-grid" @submit.prevent="submitMovement">
-        <label><span>Date *</span><input v-model="movement.date" type="date" /></label>
-        <label>
+        <label class="is-required"><span>Date *</span><input v-model="movement.date" type="date" /></label>
+        <label class="is-required">
           <span>PIC / Staff Member *</span>
-          <select v-model="movement.pic">
-            <option value="">Select staff PIC</option>
-            <option v-for="emp in store.activeEmployees" :key="emp.id" :value="emp.name">{{ emp.name }} ({{ emp.role }})</option>
-            <option v-if="movement.pic && !store.activeEmployees.some((e) => e.name === movement.pic)" :value="movement.pic">{{ movement.pic }}</option>
-          </select>
+          <SearchSelect v-model="movement.pic" :options="staffPicOptions" required placeholder="Select staff PIC" search-placeholder="Search staff…" />
         </label>
 
         <div class="order-lines span-2">
@@ -681,14 +802,9 @@ const exportInventoryPdf = async () => {
           </div>
 
           <div v-for="(line, idx) in movement.items" :key="line.key" class="stock-batch-row">
-            <label>
+            <label class="is-required">
               <span>Item {{ idx + 1 }} *</span>
-              <select v-model="line.itemId">
-                <option value="">Select inventory item</option>
-                <option v-for="item in store.inventory" :key="item.id" :value="item.id">
-                  {{ item.name }} (Avail: {{ store.stockAvailable(item) }} {{ item.unit }})
-                </option>
-              </select>
+              <SearchSelect v-model="line.itemId" :options="inventoryItemOptions" required placeholder="Select inventory item" search-placeholder="Search item…" />
             </label>
             <label>
               <span>Qty &amp; Unit *</span>
@@ -740,14 +856,10 @@ const exportInventoryPdf = async () => {
 
     <UiModal :open="showOpnameForm" :title="editingOpnameId ? 'Edit Stock Opname Audit' : 'Stock Opname Audit'" description="Enter physical counts to reconcile against system stock and preview variances." wide @close="showOpnameForm = false">
       <form class="form-grid" @submit.prevent="submitOpname">
-        <label><span>Audit Date *</span><input v-model="opnameForm.date" type="date" /></label>
-        <label>
+        <label class="is-required"><span>Audit Date *</span><input v-model="opnameForm.date" type="date" /></label>
+        <label class="is-required">
           <span>PIC / Auditor *</span>
-          <select v-model="opnameForm.pic">
-            <option value="">Select staff PIC</option>
-            <option v-for="emp in store.activeEmployees" :key="emp.id" :value="emp.name">{{ emp.name }} ({{ emp.role }})</option>
-            <option v-if="opnameForm.pic && !store.activeEmployees.some((e) => e.name === opnameForm.pic)" :value="opnameForm.pic">{{ opnameForm.pic }}</option>
-          </select>
+          <SearchSelect v-model="opnameForm.pic" :options="staffPicOptions" required placeholder="Select staff PIC" search-placeholder="Search staff…" />
         </label>
 
         <div class="span-2 opname-sheet-wrap">
@@ -848,23 +960,17 @@ const exportInventoryPdf = async () => {
     <!-- Add / Edit Inventory Item WITH Photo Upload & Dropdown Settings synced Category/Unit -->
     <UiModal :open="showItemForm" :title="editingItemId ? 'Edit Inventory Item' : 'Add Inventory Item'" :description="editingItemId ? 'Update item name, photo, category, unit, or minimum threshold.' : 'Item code is generated automatically and synced with Dropdown Settings.'" wide @close="showItemForm = false">
       <form class="form-grid" @submit.prevent="submitItem">
-        <label class="span-2"><span>Item Name *</span><input v-model="itemForm.name" placeholder="e.g. Lip Tint Velvet" /></label>
-        <label>
+        <label class="span-2 is-required"><span>Item Name *</span><input v-model="itemForm.name" placeholder="e.g. Lip Tint Velvet" /></label>
+        <label class="is-required">
           <span>Category *</span>
-          <select v-model="itemForm.category">
-            <option v-for="cat in store.inventoryCategories" :key="cat" :value="cat">{{ cat }}</option>
-            <option v-if="itemForm.category && !store.inventoryCategories.includes(itemForm.category)" :value="itemForm.category">{{ itemForm.category }}</option>
-          </select>
+          <SearchSelect v-model="itemForm.category" :options="invCategorySelectOptions" required search-placeholder="Search category…" />
         </label>
-        <label>
+        <label class="is-required">
           <span>Unit *</span>
-          <select v-model="itemForm.unit">
-            <option v-for="u in store.units" :key="u" :value="u">{{ u }}</option>
-            <option v-if="itemForm.unit && !store.units.includes(itemForm.unit)" :value="itemForm.unit">{{ itemForm.unit }}</option>
-          </select>
+          <SearchSelect v-model="itemForm.unit" :options="invUnitSelectOptions" required search-placeholder="Search unit…" />
         </label>
-        <label><span>Initial Stock</span><input v-model.number="itemForm.initialStock" type="number" min="0" /></label>
-        <label><span>Minimum Stock Alert</span><input v-model.number="itemForm.minimumStock" type="number" min="0" /></label>
+        <label class="is-optional"><span>Initial Stock <em class="opt-tag">Optional</em></span><input v-model.number="itemForm.initialStock" type="number" min="0" /></label>
+        <label class="is-optional"><span>Minimum Stock Alert <em class="opt-tag">Optional</em></span><input v-model.number="itemForm.minimumStock" type="number" min="0" /></label>
         <div class="span-2 attire-upload-block">
           <span class="upload-field-label">Upload Product Image (Displayed in Catalog &amp; Stock PDF)</span>
           <label class="upload-zone">
@@ -897,31 +1003,23 @@ const exportInventoryPdf = async () => {
 
     <UiModal :open="showEditMovement" :title="`Edit Stock ${editMovementForm.type === 'Masuk' ? 'In' : 'Out'}`" description="Update item, quantity, date, staff PIC, or photo proof." wide @close="showEditMovement = false">
       <form class="form-grid" @submit.prevent="submitEditMovement">
-        <label><span>Date *</span><input v-model="editMovementForm.date" type="date" /></label>
-        <label>
+        <label class="is-required"><span>Date *</span><input v-model="editMovementForm.date" type="date" /></label>
+        <label class="is-required">
           <span>PIC / Staff *</span>
-          <select v-model="editMovementForm.pic">
-            <option value="">Select staff PIC</option>
-            <option v-for="emp in store.activeEmployees" :key="emp.id" :value="emp.name">{{ emp.name }} ({{ emp.role }})</option>
-            <option v-if="editMovementForm.pic && !store.activeEmployees.some((e) => e.name === editMovementForm.pic)" :value="editMovementForm.pic">{{ editMovementForm.pic }}</option>
-          </select>
+          <SearchSelect v-model="editMovementForm.pic" :options="staffPicOptions" required placeholder="Select staff PIC" search-placeholder="Search staff…" />
         </label>
-        <label>
+        <label class="is-required">
           <span>Item Name *</span>
-          <select v-model="editMovementForm.itemId">
-            <option v-for="item in store.inventory" :key="item.id" :value="item.id">
-              {{ item.name }} (Stock: {{ store.stockAvailable(item) }} {{ item.unit }})
-            </option>
-          </select>
+          <SearchSelect v-model="editMovementForm.itemId" :options="inventoryItemOptions" required search-placeholder="Search item…" />
         </label>
-        <label>
+        <label class="is-required">
           <span>Quantity &amp; Unit *</span>
           <div class="qty-unit-input">
             <input v-model.number="editMovementForm.quantity" type="number" min="1" />
             <span class="qty-unit-suffix">{{ store.inventory.find((i) => i.id === editMovementForm.itemId)?.unit || 'unit' }}</span>
           </div>
         </label>
-        <label class="span-2"><span>Notes</span><textarea v-model="editMovementForm.notes" rows="2" /></label>
+        <label class="span-2 is-optional"><span>Notes <em class="opt-tag">Optional</em></span><textarea v-model="editMovementForm.notes" rows="2" /></label>
         <div class="span-2 attire-upload-block">
           <span class="upload-field-label">Photo Proof (Optional)</span>
           <label class="upload-zone">

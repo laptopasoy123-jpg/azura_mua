@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, Search, SlidersHorizontal, MapPin, CalendarDays, Phone, Eye, Pencil,
   Ban, RotateCcw, UploadCloud, LoaderCircle, Image as ImageIcon, AlertTriangle,
@@ -10,11 +11,20 @@ import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
 import CurrencyInput from '../components/CurrencyInput.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import DataPagination from '../components/DataPagination.vue'
 
 const store = useCrmStore()
+const route = useRoute()
+const router = useRouter()
 const activeView = ref<'bookings' | 'refunds'>('bookings')
 const search = ref('')
 const status = ref('All')
+const bookingPage = ref(1)
+const bookingPageSize = ref(10)
+const refundPage = ref(1)
+const refundPageSize = ref(10)
+const highlightedBookingId = ref('')
 const showForm = ref(false)
 const showDetail = ref(false)
 const editingId = ref('')
@@ -82,6 +92,78 @@ const rows = computed(() => store.bookings.filter((booking) => {
   const matchesSearch = !query || booking.poNumber.toLowerCase().includes(query) || customer?.name.toLowerCase().includes(query) || customer?.phone.includes(query)
   return matchesSearch && (status.value === 'All' || booking.status === status.value)
 }))
+
+const paginatedRows = computed(() => {
+  const start = (bookingPage.value - 1) * bookingPageSize.value
+  return rows.value.slice(start, start + bookingPageSize.value)
+})
+
+const paginatedRefunds = computed(() => {
+  const start = (refundPage.value - 1) * refundPageSize.value
+  return store.refunds.slice(start, start + refundPageSize.value)
+})
+
+watch([search, status], () => {
+  bookingPage.value = 1
+})
+
+watch(
+  () => route.query.highlight,
+  async (targetId) => {
+    if (typeof targetId !== 'string' || !targetId) return
+    activeView.value = 'bookings'
+    search.value = ''
+    status.value = 'All'
+    highlightedBookingId.value = targetId
+    const idx = rows.value.findIndex((b) => b.id === targetId)
+    if (idx >= 0) {
+      bookingPage.value = Math.floor(idx / bookingPageSize.value) + 1
+    }
+    await nextTick()
+    const el = document.querySelector(`[data-booking-id="${targetId}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    router.replace({ path: route.path, query: {} })
+  },
+  { immediate: true },
+)
+
+const statusSelectOptions = [
+  { value: 'All', label: 'All Statuses' },
+  { value: 'Draft', label: 'Draft' },
+  { value: 'Terkonfirmasi', label: 'Confirmed' },
+  { value: 'Selesai', label: 'Completed' },
+  { value: 'Dibatalkan', label: 'Cancelled' },
+]
+
+const bookingStatusOptions = [
+  { value: 'Draft', label: 'Draft' },
+  { value: 'Terkonfirmasi', label: 'Confirmed' },
+  { value: 'Selesai', label: 'Completed' },
+  { value: 'Dibatalkan', label: 'Cancelled' },
+]
+
+const stylingTypeOptions = computed(() => {
+  const base = store.stylingTypes.map((s) => ({ value: s, label: s }))
+  if (form.stylingType && !store.stylingTypes.includes(form.stylingType)) {
+    base.push({ value: form.stylingType, label: form.stylingType })
+  }
+  return base
+})
+
+const methodSelectOptions = computed(() =>
+  store.paymentMethods.map((m) => ({ value: m, label: m === 'Cash' || m === 'Tunai' ? 'Cash' : m })),
+)
+
+const cancelledPoSelectOptions = computed(() =>
+  cancelledBookings.value.map((b) => ({
+    value: b.id,
+    label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
+    sublabel: b.cancelledPaidAmount ? `Paid ${formatCurrency(b.cancelledPaidAmount)}` : undefined,
+  })),
+)
+
+const activeBookingsCount = computed(() => store.bookings.filter((b) => b.status !== 'Dibatalkan').length)
+const confirmedDoneCount = computed(() => store.bookings.filter((b) => b.status === 'Terkonfirmasi' || b.status === 'Selesai').length)
 
 const cancelledBookings = computed(() => store.bookings.filter((b) => b.status === 'Dibatalkan'))
 
@@ -321,9 +403,9 @@ const openProofZoom = (url: string) => {
     </section>
 
     <section class="summary-strip">
-      <div><span>Total Customers</span><strong>{{ store.customers.length }}</strong></div>
-      <div><span>Total Bookings</span><strong>{{ store.bookings.length }}</strong></div>
+      <div><span>Active Bookings</span><strong>{{ activeBookingsCount }}</strong></div>
       <div><span>Upcoming Events</span><strong>{{ store.upcomingBookings.length }}</strong></div>
+      <div><span>Confirmed / Done</span><strong>{{ confirmedDoneCount }}</strong></div>
       <div><span>Total Refunds</span><strong>{{ formatCurrency(store.totalRefunds) }}</strong></div>
     </section>
 
@@ -343,20 +425,20 @@ const openProofZoom = (url: string) => {
         <label class="table-search"><Search :size="17" /><input v-model="search" type="search" placeholder="Search name, PO number, or phone" /></label>
         <div class="filter-row">
           <SlidersHorizontal :size="17" />
-          <select v-model="status">
-            <option value="All">All Statuses</option>
-            <option value="Draft">Draft</option>
-            <option value="Terkonfirmasi">Confirmed</option>
-            <option value="Selesai">Completed</option>
-            <option value="Dibatalkan">Cancelled</option>
-          </select>
+          <SearchSelect v-model="status" :options="statusSelectOptions" search-placeholder="Filter status…" aria-label="Filter booking status" />
         </div>
       </div>
       <div class="data-table-wrap">
         <table class="data-table booking-table">
           <thead><tr><th>Customer</th><th>Booking</th><th>Event</th><th>Billing</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
-            <tr v-for="booking in rows" :key="booking.id">
+            <tr
+              v-for="booking in paginatedRows"
+              :key="booking.id"
+              :data-booking-id="booking.id"
+              :class="{ 'is-highlighted-row': highlightedBookingId === booking.id }"
+              @click="highlightedBookingId === booking.id && (highlightedBookingId = '')"
+            >
               <td><div class="customer-cell"><div class="avatar">{{ initials(store.customerFor(booking.customerId)?.name ?? '') }}</div><div><strong>{{ store.customerFor(booking.customerId)?.name }}</strong><span><Phone :size="12" />{{ store.customerFor(booking.customerId)?.phone }}</span></div></div></td>
               <td><strong class="mono-code">{{ booking.poNumber }}</strong><span class="subtle-line">Created {{ formatDate(booking.createdAt) }}</span></td>
               <td><strong><CalendarDays :size="14" />{{ formatDate(booking.eventDate) }} · {{ booking.eventTime || '—' }}</strong><span class="subtle-line"><MapPin :size="12" />{{ booking.location }}<template v-if="booking.stylingType"> · {{ booking.stylingType }}</template></span></td>
@@ -394,7 +476,11 @@ const openProofZoom = (url: string) => {
           </tbody>
         </table>
       </div>
-      <footer class="table-footer"><span>Showing {{ rows.length }} of {{ store.bookings.length }} bookings</span><div><button disabled>‹</button><button class="active" disabled>1</button><button disabled>›</button></div></footer>
+      <DataPagination
+        v-model:current-page="bookingPage"
+        v-model:page-size="bookingPageSize"
+        :total-items="rows.length"
+      />
     </section>
 
     <section v-else class="panel table-panel">
@@ -419,7 +505,7 @@ const openProofZoom = (url: string) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="refund in store.refunds" :key="refund.id">
+            <tr v-for="refund in paginatedRefunds" :key="refund.id">
               <td><strong class="mono-code">{{ refund.refundNumber }}</strong></td>
               <td><strong>{{ refund.customerName }}</strong><span class="subtle-line">{{ refund.poNumber }}</span></td>
               <td>{{ formatDate(refund.refundDate) }}</td>
@@ -452,32 +538,29 @@ const openProofZoom = (url: string) => {
           </tbody>
         </table>
       </div>
+      <DataPagination
+        v-model:current-page="refundPage"
+        v-model:page-size="refundPageSize"
+        :total-items="store.refunds.length"
+      />
     </section>
 
     <UiModal :open="showForm" :title="editingId ? 'Edit Booking' : 'Add New Booking'" :description="editingId ? 'Update customer details and event schedule.' : 'A PO Number will be generated automatically upon saving.'" wide @close="showForm = false">
       <form class="form-grid" @submit.prevent="submit">
-        <label><span>Customer Name *</span><input v-model="form.name" placeholder="e.g. Nadya Prameswari" /></label>
-        <label><span>Phone / WhatsApp *</span><input v-model="form.phone" placeholder="08xxxxxxxxxx" /></label>
-        <label class="span-2"><span>Event Venue *</span><input v-model="form.location" placeholder="Venue name or city" /></label>
-        <label><span>Event Date *</span><input v-model="form.eventDate" type="date" /></label>
-        <label><span>Event Time</span><input v-model="form.eventTime" type="time" /></label>
-        <label>
+        <label class="is-required"><span>Customer Name *</span><input v-model="form.name" placeholder="e.g. Nadya Prameswari" /></label>
+        <label class="is-required"><span>Phone / WhatsApp *</span><input v-model="form.phone" placeholder="08xxxxxxxxxx" /></label>
+        <label class="span-2 is-required"><span>Event Venue *</span><input v-model="form.location" placeholder="Venue name or city" /></label>
+        <label class="is-required"><span>Event Date *</span><input v-model="form.eventDate" type="date" /></label>
+        <label class="is-optional"><span>Event Time <em class="opt-tag">Optional</em></span><input v-model="form.eventTime" type="time" /></label>
+        <label class="is-required">
           <span>Styling Type *</span>
-          <select v-model="form.stylingType">
-            <option v-for="sty in store.stylingTypes" :key="sty" :value="sty">{{ sty }}</option>
-            <option v-if="form.stylingType && !store.stylingTypes.includes(form.stylingType)" :value="form.stylingType">{{ form.stylingType }}</option>
-          </select>
+          <SearchSelect v-model="form.stylingType" :options="stylingTypeOptions" required search-placeholder="Search styling…" />
         </label>
-        <label v-if="editingId">
-          <span>Booking Status</span>
-          <select v-model="form.status">
-            <option value="Draft">Draft</option>
-            <option value="Terkonfirmasi">Confirmed</option>
-            <option value="Selesai">Completed</option>
-            <option value="Dibatalkan">Cancelled</option>
-          </select>
+        <label v-if="editingId" class="is-optional">
+          <span>Booking Status <em class="opt-tag">Optional</em></span>
+          <SearchSelect v-model="form.status" :options="bookingStatusOptions" search-placeholder="Search status…" />
         </label>
-        <label class="span-2"><span>Additional Notes</span><textarea v-model="form.notes" rows="3" placeholder="Makeup concept, venue address details, or special requests" /></label>
+        <label class="span-2 is-optional"><span>Additional Notes <em class="opt-tag">Optional</em></span><textarea v-model="form.notes" rows="3" placeholder="Makeup concept, venue address details, or special requests" /></label>
         <p v-if="error" class="form-error span-2">{{ error }}</p>
         <div class="modal-actions span-2"><button type="button" class="secondary-button" @click="showForm = false">Cancel</button><button class="primary-button">{{ editingId ? 'Save Changes' : 'Save Booking' }}</button></div>
       </form>
@@ -522,17 +605,12 @@ const openProofZoom = (url: string) => {
         </label>
 
         <template v-if="cancelWithRefund">
-          <label><span>Refund Date *</span><input v-model="cancelRefundForm.refundDate" type="date" /></label>
-          <label>
+          <label class="is-required"><span>Refund Date *</span><input v-model="cancelRefundForm.refundDate" type="date" /></label>
+          <label class="is-required">
             <span>Refund Method *</span>
-            <select v-model="cancelRefundForm.method">
-              <option v-for="m in store.paymentMethods" :key="m" :value="m">{{ m }}</option>
-              <option v-if="cancelRefundForm.method && !store.paymentMethods.includes(cancelRefundForm.method)" :value="cancelRefundForm.method">
-                {{ cancelRefundForm.method === 'Cash' ? 'Cash' : cancelRefundForm.method }}
-              </option>
-            </select>
+            <SearchSelect v-model="cancelRefundForm.method" :options="methodSelectOptions" required search-placeholder="Search method…" />
           </label>
-          <label class="span-2">
+          <label class="span-2 is-required">
             <span>Refund Amount (max. {{ formatCurrency(cancelPaidAmount) }}) *</span>
             <CurrencyInput v-model="cancelRefundForm.amount" aria-label="Refund amount" />
           </label>
@@ -543,7 +621,7 @@ const openProofZoom = (url: string) => {
               <span>You entered {{ formatCurrency(cancelRefundForm.amount) }}, while total received payments equal {{ formatCurrency(cancelPaidAmount) }}.</span>
             </div>
           </div>
-          <label class="span-2"><span>Refund Notes</span><input v-model="cancelRefundForm.notes" placeholder="Reason / destination bank account" /></label>
+          <label class="span-2 is-optional"><span>Refund Notes <em class="opt-tag">Optional</em></span><input v-model="cancelRefundForm.notes" placeholder="Reason / destination bank account" /></label>
           <div class="span-2 attire-upload-block">
             <span class="upload-field-label">Transfer / Refund Proof</span>
             <label class="upload-zone">
@@ -572,13 +650,9 @@ const openProofZoom = (url: string) => {
       @close="showRefundModal = false"
     >
       <form class="form-grid" @submit.prevent="submitRefund">
-        <label class="span-2">
+        <label class="span-2 is-required">
           <span>Cancelled PO Number *</span>
-          <select v-model="refundForm.bookingId" :disabled="Boolean(editingRefundId)">
-            <option v-for="b in cancelledBookings" :key="b.id" :value="b.id">
-              {{ b.poNumber }} — {{ store.customerFor(b.customerId)?.name }}{{ b.cancelledPaidAmount ? ` (Paid ${formatCurrency(b.cancelledPaidAmount)})` : '' }}
-            </option>
-          </select>
+          <SearchSelect v-model="refundForm.bookingId" :options="cancelledPoSelectOptions" :disabled="Boolean(editingRefundId)" required search-placeholder="Search cancelled PO…" />
         </label>
         <div v-if="selectedRefundBooking" class="paid-info-banner span-2">
           <div>
@@ -587,17 +661,12 @@ const openProofZoom = (url: string) => {
           </div>
           <small>Enter the agreed refund amount manually.</small>
         </div>
-        <label><span>Refund Date *</span><input v-model="refundForm.refundDate" type="date" /></label>
-        <label>
+        <label class="is-required"><span>Refund Date *</span><input v-model="refundForm.refundDate" type="date" /></label>
+        <label class="is-required">
           <span>Method *</span>
-          <select v-model="refundForm.method">
-            <option v-for="m in store.paymentMethods" :key="m" :value="m">{{ m }}</option>
-            <option v-if="refundForm.method && !store.paymentMethods.includes(refundForm.method)" :value="refundForm.method">
-              {{ refundForm.method === 'Cash' ? 'Cash' : refundForm.method }}
-            </option>
-          </select>
+          <SearchSelect v-model="refundForm.method" :options="methodSelectOptions" required search-placeholder="Search method…" />
         </label>
-        <label class="span-2"><span>Refund Amount *</span><CurrencyInput v-model="refundForm.amount" aria-label="Refund amount" /></label>
+        <label class="span-2 is-required"><span>Refund Amount *</span><CurrencyInput v-model="refundForm.amount" aria-label="Refund amount" /></label>
         <div v-if="refundExceedsPaid" class="refund-limit-alert span-2" role="alert">
           <AlertTriangle :size="17" />
           <div>
@@ -605,7 +674,7 @@ const openProofZoom = (url: string) => {
             <span>{{ formatCurrency(refundForm.amount) }} exceeds the maximum refundable balance of {{ formatCurrency(refundMaxAllowed) }}.</span>
           </div>
         </div>
-        <label class="span-2"><span>Notes</span><input v-model="refundForm.notes" placeholder="Bank account details or notes" /></label>
+        <label class="span-2 is-optional"><span>Notes <em class="opt-tag">Optional</em></span><input v-model="refundForm.notes" placeholder="Bank account details or notes" /></label>
         <div class="span-2 attire-upload-block">
           <span class="upload-field-label">Transfer Proof</span>
           <label class="upload-zone">

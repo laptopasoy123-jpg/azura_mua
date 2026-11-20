@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ChevronDown, Lock, Shirt, X } from '@lucide/vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ChevronDown, Lock, Search, Shirt, X } from '@lucide/vue'
 import type { WeddingAttire } from '../stores/crm'
 
 export interface AttireSelectOption {
@@ -23,21 +23,35 @@ const emit = defineEmits<{
 }>()
 
 const open = ref(false)
+const query = ref('')
 const rootRef = ref<HTMLElement | null>(null)
 
 const selectedOption = computed(() =>
   props.options.find((opt) => opt.item.id === props.modelValue) ?? null,
 )
 
+const filteredOptions = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return props.options
+  return props.options.filter(
+    (opt) =>
+      opt.item.name.toLowerCase().includes(q)
+      || opt.item.code.toLowerCase().includes(q)
+      || opt.item.size.toLowerCase().includes(q),
+  )
+})
+
 const choose = (opt: AttireSelectOption) => {
   if (opt.locked) return
   emit('update:modelValue', opt.item.id)
   open.value = false
+  query.value = ''
 }
 
 const clear = () => {
   emit('update:modelValue', '')
   open.value = false
+  query.value = ''
 }
 
 const onDocClick = (event: MouseEvent) => {
@@ -50,6 +64,10 @@ const onDocClick = (event: MouseEvent) => {
 const onKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') open.value = false
 }
+
+watch(open, (val) => {
+  if (!val) query.value = ''
+})
 
 onMounted(() => {
   document.addEventListener('mousedown', onDocClick)
@@ -104,11 +122,18 @@ onBeforeUnmount(() => {
     </button>
 
     <div v-if="open" class="attire-picker-menu" role="listbox">
+      <div class="ss-search-wrap attire-picker-search">
+        <Search :size="14" class="ss-search-icon" />
+        <input v-model="query" type="text" class="ss-search-input" placeholder="Search attire name, code, size…" @click.stop />
+        <button v-if="query" type="button" class="ss-search-clear" aria-label="Clear search" @click.stop="query = ''">
+          <X :size="12" />
+        </button>
+      </div>
       <button type="button" class="attire-picker-option is-reset" @click="clear">
         <span>— No attire selected</span>
       </button>
       <button
-        v-for="opt in options"
+        v-for="opt in filteredOptions"
         :key="opt.item.id"
         type="button"
         class="attire-picker-option"
@@ -133,6 +158,7 @@ onBeforeUnmount(() => {
           {{ opt.statusLabel }}
         </span>
       </button>
+      <div v-if="!filteredOptions.length" class="ss-empty">No matching attire found</div>
     </div>
   </div>
 </template>

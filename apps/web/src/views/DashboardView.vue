@@ -112,6 +112,33 @@ const invoiceBuckets = computed(() => {
   return { paid, partial, unpaid }
 })
 
+const invoiceRingSegments = computed(() => {
+  const total = Math.max(1, store.invoices.length)
+  const circumference = 2 * Math.PI * 54
+  const items = [
+    { key: 'invoices-paid' as const, label: 'Paid', count: invoiceBuckets.value.paid.length, color: '#2b241f', cls: 'paid' },
+    { key: 'invoices-partial' as const, label: 'Partial', count: invoiceBuckets.value.partial.length, color: '#c8a062', cls: 'partial' },
+    { key: 'invoices-unpaid' as const, label: 'Unpaid', count: invoiceBuckets.value.unpaid.length, color: '#d47464', cls: 'unpaid' },
+  ]
+  let offset = 0
+  return items.map((item) => {
+    const fraction = store.invoices.length ? item.count / total : 0
+    const len = fraction * circumference
+    const gap = item.count > 0 && items.filter((i) => i.count > 0).length > 1 ? Math.min(4, len * 0.25) : 0
+    const visibleLen = Math.max(0, len - gap)
+    const pct = store.invoices.length ? Math.round((item.count / total) * 100) : 0
+    const segment = {
+      ...item,
+      pct,
+      circumference,
+      dashArray: `${visibleLen.toFixed(2)} ${(circumference - visibleLen).toFixed(2)}`,
+      dashOffset: (-offset).toFixed(2),
+    }
+    offset += len
+    return segment
+  })
+})
+
 const bookingPaymentStatus = (id: string) => {
   const total = store.bookingTotal(id)
   const paid = store.bookingPaid(id)
@@ -304,31 +331,60 @@ const exportCashflowRangePdf = async () => {
       </article>
 
       <article class="panel invoice-summary">
-        <header class="panel-header"><div><span class="eyebrow">Invoices</span><h3>Payment Status</h3><p>Click any status below to view matching POs in the database.</p></div></header>
+        <header class="panel-header"><div><span class="eyebrow">Invoices</span><h3>Payment Status</h3><p>Click any ring segment or status row to inspect matching POs.</p></div></header>
         <div class="donut-wrap">
           <div
-            class="donut interactive-row"
+            class="radial-donut-card interactive-row"
             role="button"
             tabindex="0"
-            :style="{
-              '--paid': `${(invoiceBuckets.paid.length / Math.max(1, store.invoices.length)) * 360}deg`,
-              '--partial': `${((invoiceBuckets.paid.length + invoiceBuckets.partial.length) / Math.max(1, store.invoices.length)) * 360}deg`,
-            }"
             @click="openDrill('billing')"
             @keydown.enter="openDrill('billing')"
           >
-            <div><strong>{{ store.invoices.length }} PO</strong><span>Total</span></div>
+            <svg viewBox="0 0 140 140" class="radial-donut-svg" aria-label="Invoice payment status donut chart">
+              <defs>
+                <filter id="donutSoftShadow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#211d1a" flood-opacity="0.12" />
+                </filter>
+              </defs>
+              <circle cx="70" cy="70" r="54" fill="none" stroke="#f0e9de" stroke-width="14" />
+              <circle cx="70" cy="70" r="41" fill="#fdfbf7" stroke="#ede5d8" stroke-width="1" />
+              <g transform="rotate(-90 70 70)" filter="url(#donutSoftShadow)">
+                <circle
+                  v-for="seg in invoiceRingSegments"
+                  v-show="seg.count > 0"
+                  :key="seg.key"
+                  cx="70"
+                  cy="70"
+                  r="54"
+                  fill="none"
+                  :stroke="seg.color"
+                  stroke-width="14"
+                  stroke-linecap="round"
+                  :stroke-dasharray="seg.dashArray"
+                  :stroke-dashoffset="seg.dashOffset"
+                  class="radial-donut-arc"
+                  @click.stop="openDrill(seg.key)"
+                />
+              </g>
+            </svg>
+            <div class="radial-donut-center">
+              <strong>{{ store.invoices.length }} PO</strong>
+              <span>Total</span>
+            </div>
           </div>
         </div>
         <div class="invoice-legend" style="display: grid; gap: 6px;">
-          <button type="button" class="invoice-legend-btn" @click="openDrill('invoices-paid')">
-            <i class="paid" /><span>Paid</span><strong>{{ invoiceBuckets.paid.length }} PO</strong>
-          </button>
-          <button type="button" class="invoice-legend-btn" @click="openDrill('invoices-partial')">
-            <i class="partial" /><span>Partial</span><strong>{{ invoiceBuckets.partial.length }} PO</strong>
-          </button>
-          <button type="button" class="invoice-legend-btn" @click="openDrill('invoices-unpaid')">
-            <i class="unpaid" /><span>Unpaid</span><strong>{{ invoiceBuckets.unpaid.length }} PO</strong>
+          <button
+            v-for="seg in invoiceRingSegments"
+            :key="seg.key"
+            type="button"
+            class="invoice-legend-btn"
+            @click="openDrill(seg.key)"
+          >
+            <i :class="seg.cls" />
+            <span>{{ seg.label }}</span>
+            <small class="legend-pct">{{ seg.pct }}%</small>
+            <strong>{{ seg.count }} PO</strong>
           </button>
         </div>
       </article>

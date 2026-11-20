@@ -1,22 +1,25 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import {
   Briefcase, CalendarDays, Check, Download, MapPin, Pencil, Phone, RotateCcw,
-  Search, SlidersHorizontal, Users, Plus, ChevronRight,
+  SlidersHorizontal, Users, Plus, ChevronRight,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type EmployeeRecord } from '../stores/crm'
 import { displayBookingStatus, formatDate } from '../utils/format'
 import type { JobReportRow } from '../utils/jobReportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import DataPagination from '../components/DataPagination.vue'
 
 const store = useCrmStore()
 
-const search = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 const employeeFilter = ref('')
 const poFilter = ref('')
+const page = ref(1)
+const pageSize = ref(10)
 
 // Complete Job Details & Crew Selection Modal
 const showDetailModal = ref(false)
@@ -53,9 +56,8 @@ const bookingServicesText = (bookingId: string) => {
   return allItems.map((it) => `${it.name} (${it.quantity})`).join(', ')
 }
 
-const filteredBookings = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  return activeBookings.value.filter((booking) => {
+const filteredBookings = computed(() =>
+  activeBookings.value.filter((booking) => {
     if (poFilter.value && booking.id !== poFilter.value) return false
     if (fromDate.value && booking.eventDate < fromDate.value) return false
     if (toDate.value && booking.eventDate > toDate.value) return false
@@ -65,17 +67,41 @@ const filteredBookings = computed(() => {
     } else if (employeeFilter.value && !assigned.some((e) => e.id === employeeFilter.value)) {
       return false
     }
-    if (!q) return true
-    const customer = store.customerFor(booking.customerId)
-    const staffNames = assigned.map((e) => e.name.toLowerCase()).join(' ')
-    return (
-      booking.poNumber.toLowerCase().includes(q)
-      || booking.location.toLowerCase().includes(q)
-      || (customer?.name.toLowerCase().includes(q) ?? false)
-      || staffNames.includes(q)
-    )
-  })
+    return true
+  }),
+)
+
+const paginatedBookings = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredBookings.value.slice(start, start + pageSize.value)
 })
+
+watch([fromDate, toDate, employeeFilter, poFilter], () => {
+  page.value = 1
+})
+
+const staffFilterOptions = computed(() => [
+  { value: '', label: 'All Employees' },
+  { value: '__unassigned__', label: 'Unassigned Only' },
+  ...store.activeEmployees.map((emp) => ({
+    value: emp.id,
+    label: emp.name,
+    sublabel: emp.role,
+  })),
+])
+
+const poFilterOptions = computed(() => [
+  { value: '', label: `All Active PO Orders (${activeBookings.value.length})` },
+  ...activeBookings.value.map((b) => ({
+    value: b.id,
+    label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
+    sublabel: formatDate(b.eventDate),
+  })),
+])
+
+const roleSelectOptions = computed(() =>
+  roleOptions.map((r) => ({ value: r, label: r })),
+)
 
 const assignedCount = computed(() =>
   filteredBookings.value.filter((b) => store.assignedEmployeesForBooking(b.id).length > 0).length,
@@ -103,7 +129,6 @@ const saveJobNotesAndClose = () => {
 }
 
 const resetFilters = () => {
-  search.value = ''
   fromDate.value = ''
   toDate.value = ''
   employeeFilter.value = ''
@@ -231,8 +256,8 @@ const exportPdf = async () => {
     </section>
 
     <section class="panel table-panel">
-      <div class="job-filter-bar job-filter-bar--stacked">
-        <div class="job-date-filters">
+      <div class="job-filter-bar job-filter-bar--clean">
+        <div class="job-clean-filter-grid">
           <label class="job-filter-field">
             <span>From Date</span>
             <input v-model="fromDate" type="date" aria-label="From event date" />
@@ -243,38 +268,27 @@ const exportPdf = async () => {
           </label>
           <label class="job-filter-field">
             <span>Filter Staff</span>
-            <div class="filter-row">
+            <div class="job-select-with-icon">
               <SlidersHorizontal :size="15" />
-              <select v-model="employeeFilter" aria-label="Filter employee">
-                <option value="">All Employees</option>
-                <option value="__unassigned__">Unassigned Only</option>
-                <option v-for="emp in store.activeEmployees" :key="emp.id" :value="emp.id">
-                  {{ emp.name }} ({{ emp.role }})
-                </option>
-              </select>
+              <SearchSelect
+                v-model="employeeFilter"
+                :options="staffFilterOptions"
+                search-placeholder="Search staff…"
+                aria-label="Filter employee"
+              />
             </div>
           </label>
-        </div>
-
-        <div class="job-order-search-row">
-          <label class="job-filter-field job-po-select-field">
+          <label class="job-filter-field">
             <span>Filter PO / Customer</span>
-            <select v-model="poFilter" aria-label="Filter by PO or Customer">
-              <option value="">All Active PO Orders ({{ activeBookings.length }})</option>
-              <option v-for="b in activeBookings" :key="b.id" :value="b.id">
-                {{ b.poNumber }} — {{ store.customerFor(b.customerId)?.name }} ({{ formatDate(b.eventDate) }})
-              </option>
-            </select>
-          </label>
-          <label class="job-filter-field job-search-field">
-            <span>Search Order / Customer / Venue</span>
-            <div class="table-search">
-              <Search :size="17" />
-              <input v-model="search" type="search" placeholder="Search PO number, customer name, venue, or staff…" />
-            </div>
+            <SearchSelect
+              v-model="poFilter"
+              :options="poFilterOptions"
+              search-placeholder="Search PO or customer…"
+              aria-label="Filter by PO or Customer"
+            />
           </label>
           <button
-            v-if="search || fromDate || toDate || employeeFilter || poFilter"
+            v-if="fromDate || toDate || employeeFilter || poFilter"
             type="button"
             class="soft-button job-reset-btn"
             title="Reset filters"
@@ -298,7 +312,7 @@ const exportPdf = async () => {
           </thead>
           <tbody>
             <tr
-              v-for="booking in filteredBookings"
+              v-for="booking in paginatedBookings"
               :key="booking.id"
               class="jobs-table-row"
               @click="openDetailModal(booking)"
@@ -352,9 +366,7 @@ const exportPdf = async () => {
           </tbody>
         </table>
       </div>
-      <footer class="table-footer">
-        <span>Showing {{ filteredBookings.length }} active PO · Click any row or Select Crew to view full details and assign staff</span>
-      </footer>
+      <DataPagination v-model:current-page="page" v-model:page-size="pageSize" :total-items="filteredBookings.length" />
     </section>
 
     <UiModal
@@ -450,13 +462,11 @@ const exportPdf = async () => {
       @close="showStaffModal = false"
     >
       <form class="form-grid" @submit.prevent="submitNewStaff">
-        <label><span>Employee Name *</span><input v-model="staffForm.name" placeholder="e.g. Sinta Dewi" /></label>
-        <label><span>Role / Position *</span>
-          <select v-model="staffForm.role">
-            <option v-for="role in roleOptions" :key="role" :value="role">{{ role }}</option>
-          </select>
+        <label class="is-required"><span>Employee Name *</span><input v-model="staffForm.name" placeholder="e.g. Sinta Dewi" /></label>
+        <label class="is-required"><span>Role / Position *</span>
+          <SearchSelect v-model="staffForm.role" :options="roleSelectOptions" required search-placeholder="Search role…" />
         </label>
-        <label class="span-2"><span>Phone / WhatsApp (optional)</span><input v-model="staffForm.phone" placeholder="08xxxxxxxxxx" /></label>
+        <label class="span-2 is-optional"><span>Phone / WhatsApp <em class="opt-tag">Optional</em></span><input v-model="staffForm.phone" placeholder="08xxxxxxxxxx" /></label>
         <p v-if="staffError" class="form-error span-2">{{ staffError }}</p>
         <div class="modal-actions span-2">
           <button v-if="editingStaff" type="button" class="secondary-button" @click="editingStaff = null; Object.assign(staffForm, { name: '', role: 'MUA & Hairdo', phone: '' })">

@@ -196,8 +196,8 @@ export const buildPaymentReceiptPdfFromPayload = (payload: ReceiptSharePayload) 
   const heroH = 24
   doc.setFillColor(...PDF_PALETTE.linen)
   doc.setDrawColor(...PDF_PALETTE.gold)
-  doc.setLineWidth(0.55)
-  doc.roundedRect(marginX, cursorY, contentWidth, heroH, 2.5, 2.5, 'FD')
+  doc.setLineWidth(0.32)
+  doc.roundedRect(marginX, cursorY, contentWidth, heroH, 3.2, 3.2, 'FD')
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(7.4)
@@ -249,10 +249,10 @@ export const buildPaymentReceiptPdfFromPayload = (payload: ReceiptSharePayload) 
   const cardH = 29
 
   doc.setFillColor(...PDF_PALETTE.ivory)
-  doc.setDrawColor(...PDF_PALETTE.goldDark)
-  doc.setLineWidth(0.4)
-  doc.roundedRect(marginX, cursorY, infoW, cardH, 2.2, 2.2, 'FD')
-  doc.roundedRect(marginX + infoW + colGap, cursorY, infoW, cardH, 2.2, 2.2, 'FD')
+  doc.setDrawColor(...PDF_PALETTE.gold)
+  doc.setLineWidth(0.28)
+  doc.roundedRect(marginX, cursorY, infoW, cardH, 3.2, 3.2, 'FD')
+  doc.roundedRect(marginX + infoW + colGap, cursorY, infoW, cardH, 3.2, 3.2, 'FD')
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(7.5)

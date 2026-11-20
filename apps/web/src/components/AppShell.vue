@@ -1,51 +1,51 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink, RouterView, useRoute } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useCrmStore } from '../stores/crm'
 import { displayBookingStatus, formatDate } from '../utils/format'
 import UiModal from './UiModal.vue'
 import StatusBadge from './StatusBadge.vue'
+import LiveClock from './LiveClock.vue'
 import {
   LayoutDashboard, UsersRound, ShoppingBag, Layers, FileText, CreditCard,
   BookOpen, CircleDollarSign, Boxes, BarChart3, Building2, SlidersHorizontal,
-  Bell, Search, Menu, X, ChevronLeft, ChevronRight,
-  Shirt, Briefcase, Calendar, Clock, CheckCircle2, AlertTriangle, Trash2, Info, MapPin, Phone,
+  Bell, Menu, X, ChevronLeft, ChevronRight, CheckCheck, ArrowUpRight,
+  Shirt, Briefcase, Calendar, CheckCircle2, AlertTriangle, Trash2, Info, MapPin, Phone,
 } from '@lucide/vue'
 
+const READ_NOTIF_STORAGE_KEY = 'azura_mua_read_notifications_v1'
+
+const loadReadNotifs = (): string[] => {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(READ_NOTIF_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 const route = useRoute()
+const router = useRouter()
 const store = useCrmStore()
 const collapsed = ref(false)
 const mobileOpen = ref(false)
 const showNotifications = ref(false)
+const readNotifKeys = ref<string[]>(loadReadNotifs())
 
-const now = ref(new Date())
-let clockTimer: ReturnType<typeof setInterval> | undefined
-
-onMounted(() => {
-  clockTimer = setInterval(() => {
-    now.value = new Date()
-  }, 1000)
-})
-
-onUnmounted(() => {
-  if (clockTimer) clearInterval(clockTimer)
-})
-
-const todayDateLabel = computed(() =>
-  new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(now.value),
+watch(
+  readNotifKeys,
+  (list) => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(READ_NOTIF_STORAGE_KEY, JSON.stringify(list.slice(-200)))
+    } catch {
+      // Ignore storage quota errors
+    }
+  },
+  { deep: true },
 )
-
-const liveClockLabel = computed(() => {
-  const hh = String(now.value.getHours()).padStart(2, '0')
-  const mm = String(now.value.getMinutes()).padStart(2, '0')
-  const ss = String(now.value.getSeconds()).padStart(2, '0')
-  return `${hh}:${mm}:${ss}`
-})
 
 const sections = [
   {
@@ -100,7 +100,7 @@ const localTodayIso = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-// Up to 10 nearest upcoming non-cancelled bookings from database with exact H-countdown
+// Up to 10 nearest upcoming non-cancelled bookings from database with exact H-countdown & persistent read state
 const upcomingCustomerAlerts = computed(() => {
   const today = localTodayIso()
   const todayMs = new Date(`${today}T00:00:00`).getTime()
@@ -114,9 +114,52 @@ const upcomingCustomerAlerts = computed(() => {
       const daysLeft = Math.max(0, Math.round((eventMs - todayMs) / 86_400_000))
       const hLabel = daysLeft === 0 ? 'Hari-H' : `H-${daysLeft}`
       const urgency = daysLeft === 0 ? 'today' : daysLeft <= 3 ? 'soon' : daysLeft <= 7 ? 'upcoming' : 'normal'
-      return { booking, customer, daysLeft, hLabel, urgency }
+      const alertKey = `booking:${booking.id}:${booking.eventDate}`
+      return { booking, customer, daysLeft, hLabel, urgency, alertKey }
     })
 })
+
+const readNotifSet = computed(() => new Set(readNotifKeys.value))
+
+const unreadCustomerAlertsCount = computed(() =>
+  upcomingCustomerAlerts.value.filter((item) => !readNotifSet.value.has(item.alertKey)).length,
+)
+
+const laundryAlertKey = (alert: { attireId: string; bookingId: string; daysLeft: number }) =>
+  `laundry:${alert.attireId}:${alert.bookingId}:${alert.daysLeft}`
+
+const unreadLaundryAlertsCount = computed(() =>
+  store.laundryUrgentAlerts.filter((a) => !readNotifSet.value.has(laundryAlertKey(a))).length,
+)
+
+const totalUnreadNotifications = computed(() =>
+  unreadCustomerAlertsCount.value + unreadLaundryAlertsCount.value,
+)
+
+const markAlertKeyRead = (key: string) => {
+  if (!readNotifSet.value.has(key)) {
+    readNotifKeys.value = [...readNotifKeys.value, key]
+  }
+}
+
+const openCustomerAlert = (item: { booking: { id: string }; alertKey: string }) => {
+  markAlertKeyRead(item.alertKey)
+  showNotifications.value = false
+  router.push({ path: '/customers', query: { highlight: item.booking.id } })
+}
+
+const openLaundryAlert = (alert: { attireId: string; bookingId: string; daysLeft: number }) => {
+  markAlertKeyRead(laundryAlertKey(alert))
+  showNotifications.value = false
+  router.push('/wedding-portal')
+}
+
+const markAllNotificationsRead = () => {
+  const next = new Set(readNotifKeys.value)
+  for (const item of upcomingCustomerAlerts.value) next.add(item.alertKey)
+  for (const l of store.laundryUrgentAlerts) next.add(laundryAlertKey(l))
+  readNotifKeys.value = [...next]
+}
 </script>
 
 <template>
@@ -198,26 +241,12 @@ const upcomingCustomerAlerts = computed(() => {
           </div>
         </div>
 
-        <div class="topbar-live-clock" aria-live="off">
-          <span class="live-date-part"><Calendar :size="14" :stroke-width="1.8" />{{ todayDateLabel }}</span>
-          <i class="live-clock-sep" aria-hidden="true" />
-          <strong class="live-time-part"><Clock :size="14" :stroke-width="1.8" />{{ liveClockLabel }} WIB</strong>
-          <i class="live-clock-sep" aria-hidden="true" />
-          <a href="https://daysheet.id" target="_blank" rel="noopener noreferrer" class="topbar-daysheet-link" title="Visit daysheet.id">
-            <span class="daysheet-pill-dot" />
-            <span class="daysheet-text-day">Day</span><span class="daysheet-text-sheet">Sheet.</span>
-          </a>
-        </div>
+        <LiveClock />
 
         <div class="topbar-actions">
-          <label class="global-search">
-            <Search :size="17" />
-            <input type="search" placeholder="Search PO, customer, invoice…" />
-            <kbd>⌘ K</kbd>
-          </label>
           <button class="icon-button notification-button" aria-label="Upcoming Event Alerts" @click="showNotifications = true">
             <Bell :size="19" />
-            <span v-if="upcomingCustomerAlerts.length" class="notification-count-badge">{{ upcomingCustomerAlerts.length }}</span>
+            <span v-if="totalUnreadNotifications" class="notification-count-badge">{{ totalUnreadNotifications }}</span>
           </button>
           <div class="profile-chip">
             <div class="profile-avatar">AR</div>
@@ -228,7 +257,7 @@ const upcomingCustomerAlerts = computed(() => {
 
       <main class="page-area">
         <RouterView v-slot="{ Component, route: currentRoute }">
-          <div :key="currentRoute.fullPath" class="page-enter-anim">
+          <div :key="currentRoute.path" class="page-enter-anim">
             <component :is="Component" v-if="Component" />
           </div>
         </RouterView>
@@ -243,23 +272,41 @@ const upcomingCustomerAlerts = computed(() => {
     <UiModal
       :open="showNotifications"
       title="Upcoming Customer Event Alerts"
-      :description="`Showing the nearest ${upcomingCustomerAlerts.length} upcoming active bookings (excluding cancelled and past dates).`"
+      :description="`${totalUnreadNotifications} unread · Click any customer event to jump directly to their record in Customers & Bookings.`"
       wide
       @close="showNotifications = false"
     >
+      <div class="notif-toolbar">
+        <span class="notif-unread-summary">
+          {{ upcomingCustomerAlerts.length }} upcoming schedule(s) · <strong>{{ unreadCustomerAlertsCount }} unread</strong>
+        </span>
+        <button
+          type="button"
+          class="soft-button notif-mark-all-btn"
+          :disabled="totalUnreadNotifications === 0"
+          @click="markAllNotificationsRead"
+        >
+          <CheckCheck :size="15" />Mark All as Read
+        </button>
+      </div>
+
       <div v-if="upcomingCustomerAlerts.length" class="upcoming-alert-list">
-        <article
+        <button
           v-for="item in upcomingCustomerAlerts"
-          :key="item.booking.id"
-          class="upcoming-alert-card"
-          :class="`is-${item.urgency}`"
+          :key="item.alertKey"
+          type="button"
+          class="upcoming-alert-card upcoming-alert-card--clickable"
+          :class="[`is-${item.urgency}`, readNotifSet.has(item.alertKey) ? 'is-read' : 'is-unread']"
+          @click="openCustomerAlert(item)"
         >
           <span class="upcoming-h-pill" :class="`is-${item.urgency}`">{{ item.hLabel }}</span>
           <div class="upcoming-alert-main">
             <div class="upcoming-alert-top">
+              <span v-if="!readNotifSet.has(item.alertKey)" class="notif-unread-dot" title="Unread notification" />
               <strong>{{ item.customer?.name ?? 'Customer' }}</strong>
               <span class="mono-code">{{ item.booking.poNumber }}</span>
               <StatusBadge :label="displayBookingStatus(item.booking.status)" />
+              <span v-if="readNotifSet.has(item.alertKey)" class="notif-read-pill">Read</span>
             </div>
             <div class="upcoming-alert-meta">
               <span><Calendar :size="13" />{{ formatDate(item.booking.eventDate) }}<template v-if="item.booking.eventTime"> · {{ item.booking.eventTime }}</template></span>
@@ -267,7 +314,8 @@ const upcomingCustomerAlerts = computed(() => {
               <span v-if="item.customer?.phone"><Phone :size="13" />{{ item.customer.phone }}</span>
             </div>
           </div>
-        </article>
+          <ArrowUpRight :size="16" class="upcoming-alert-arrow" />
+        </button>
       </div>
       <div v-else class="empty-state" style="min-height: 120px;">
         <Calendar :size="26" />
@@ -276,10 +324,17 @@ const upcomingCustomerAlerts = computed(() => {
       </div>
 
       <div v-if="store.laundryUrgentAlerts.length" class="notification-urgent-box" style="margin-top: 14px;">
-        <article v-for="alert in store.laundryUrgentAlerts" :key="`${alert.attireId}-${alert.bookingId}`" class="notification-urgent-item">
+        <button
+          v-for="alert in store.laundryUrgentAlerts"
+          :key="`${alert.attireId}-${alert.bookingId}`"
+          type="button"
+          class="notification-urgent-item notification-urgent-item--clickable"
+          :class="{ 'is-read': readNotifSet.has(laundryAlertKey(alert)) }"
+          @click="openLaundryAlert(alert)"
+        >
           <strong>Wardrobe Prep Reminder ({{ alert.daysLeft === 0 ? 'Event Today' : 'H-1 Tomorrow' }})</strong>
           <span>{{ alert.message }}</span>
-        </article>
+        </button>
       </div>
       <div class="modal-actions" style="margin-top: 14px;"><button class="primary-button" @click="showNotifications = false">Close</button></div>
     </UiModal>
@@ -335,7 +390,7 @@ const upcomingCustomerAlerts = computed(() => {
             <strong>{{ store.actionToast.title }}</strong>
             <span>{{ store.actionToast.detail }}</span>
           </div>
-          <button type="button" class="action-toast-ok" @click="store.dismissActionToast">OK</button>
+          <button type="button" class="action-toast-ok" @click="store.dismissActionToast">Close</button>
         </div>
       </div>
     </Transition>

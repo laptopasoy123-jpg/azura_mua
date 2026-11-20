@@ -8,6 +8,8 @@ import {
 import UiModal from '../components/UiModal.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import AttireSelect, { type AttireSelectOption } from '../components/AttireSelect.vue'
+import SearchSelect from '../components/SearchSelect.vue'
+import DataPagination from '../components/DataPagination.vue'
 import {
   useCrmStore,
   type AttireCategory,
@@ -27,6 +29,10 @@ const portalTab = ref<'inventory' | 'form' | 'database'>('inventory')
 const search = ref('')
 const category = ref<'All' | AttireCategory>('All')
 const status = ref<'All' | AttireStatus>('All')
+const attirePage = ref(1)
+const attirePageSize = ref(10)
+const fittingPage = ref(1)
+const fittingPageSize = ref(10)
 const showAttireForm = ref(false)
 const editingAttireId = ref('')
 const showZoom = ref(false)
@@ -205,6 +211,52 @@ const filteredAttire = computed(() => store.weddingAttire.filter((item) => {
     && (category.value === 'All' || item.category === category.value)
     && (status.value === 'All' || eff === status.value)
 }))
+
+const paginatedAttire = computed(() => {
+  const start = (attirePage.value - 1) * attirePageSize.value
+  return filteredAttire.value.slice(start, start + attirePageSize.value)
+})
+
+watch([search, category, status], () => {
+  attirePage.value = 1
+})
+
+const categoryFilterOptions = [
+  { value: 'All', label: 'All Categories' },
+  { value: 'Bride', label: 'Bride' },
+  { value: 'Groom', label: 'Groom' },
+]
+
+const statusFilterOptions = [
+  { value: 'All', label: 'All Statuses' },
+  { value: 'Tersedia', label: 'Available' },
+  { value: 'Booked', label: 'Booked (Upcoming)' },
+  { value: 'Terpakai', label: 'In Use (Event Day)' },
+  { value: 'Laundry', label: 'Laundry' },
+]
+
+const attireCardStatusOptions = [
+  { value: 'Tersedia', label: 'Available' },
+  { value: 'Laundry', label: 'Laundry' },
+]
+
+const attireCategoryFormOptions = [
+  { value: 'Bride', label: 'Bride' },
+  { value: 'Groom', label: 'Groom' },
+]
+
+const softlensSelectOptions = computed(() => [
+  { value: '', label: 'Select lens type' },
+  ...softlensOptions.map((o) => ({ value: o, label: o })),
+])
+
+const fittingBookingSelectOptions = computed(() =>
+  fittingBookingOptions.value.map((b) => ({
+    value: b.id,
+    label: `${b.poNumber} — ${store.customerFor(b.customerId)?.name ?? 'Customer'}`,
+    sublabel: formatDate(b.eventDate),
+  })),
+)
 
 // Hide POs that already have a saved fitting form unless currently editing that specific PO
 const filledBookingIds = computed(() => new Set(store.weddingForms.map((f) => f.bookingId)))
@@ -705,6 +757,11 @@ const fittingList = computed(() =>
     return { form, booking, customer }
   }),
 )
+
+const paginatedFittingList = computed(() => {
+  const start = (fittingPage.value - 1) * fittingPageSize.value
+  return fittingList.value.slice(start, start + fittingPageSize.value)
+})
 </script>
 
 <template>
@@ -768,15 +825,9 @@ const fittingList = computed(() =>
 
       <div class="attire-toolbar">
         <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search attire name, code, or size" /></label>
-        <div class="filter-row">
-          <select v-model="category"><option value="All">All Categories</option><option>Bride</option><option>Groom</option></select>
-          <select v-model="status">
-            <option value="All">All Statuses</option>
-            <option value="Tersedia">Available</option>
-            <option value="Booked">Booked (Upcoming)</option>
-            <option value="Terpakai">In Use (Event Day)</option>
-            <option value="Laundry">Laundry</option>
-          </select>
+        <div class="filter-row attire-filter-selects">
+          <SearchSelect v-model="category" :options="categoryFilterOptions" search-placeholder="Category…" aria-label="Filter attire category" />
+          <SearchSelect v-model="status" :options="statusFilterOptions" search-placeholder="Status…" aria-label="Filter attire status" />
         </div>
       </div>
 
@@ -813,7 +864,7 @@ const fittingList = computed(() =>
       </div>
 
       <div class="attire-grid">
-        <article v-for="item in filteredAttire" :key="item.id" class="attire-card">
+        <article v-for="item in paginatedAttire" :key="item.id" class="attire-card">
           <button class="attire-photo" :class="`attire-${item.category.toLowerCase()}`" @click="openZoom(item)">
             <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.name" loading="lazy" decoding="async" />
             <span v-else><Shirt :size="34" /><small>{{ item.category }}</small></span>
@@ -843,18 +894,19 @@ const fittingList = computed(() =>
               <span>In Laundry ({{ (scheduleMapByAttire.get(item.id)?.active ?? []).length }} upcoming)</span>
             </div>
 
-            <select
-              :value="item.status === 'Laundry' ? 'Laundry' : 'Tersedia'"
+            <SearchSelect
+              :model-value="item.status === 'Laundry' ? 'Laundry' : 'Tersedia'"
+              :options="attireCardStatusOptions"
+              size="sm"
+              search-placeholder="Status…"
               aria-label="Wardrobe status"
-              @change="onAttireStatusSelect(item, ($event.target as HTMLSelectElement).value as AttireStatus, $event)"
-            >
-              <option value="Tersedia">Available</option>
-              <option value="Laundry">Laundry</option>
-            </select>
+              @change="(val) => onAttireStatusSelect(item, val as AttireStatus)"
+            />
           </div>
         </article>
         <button class="attire-add-card" @click="openCreateAttire"><Plus :size="25" /><strong>Add New Attire</strong><span>Upload wardrobe photo and size</span></button>
       </div>
+      <DataPagination v-model:current-page="attirePage" v-model:page-size="attirePageSize" :total-items="filteredAttire.length" />
     </section>
 
     <!-- TAB 2: FITTING FORM ENTRY -->
@@ -893,14 +945,15 @@ const fittingList = computed(() =>
           </p>
           <p v-else>Only POs without an existing fitting record are listed here. Saved POs are managed under Saved Fitting Database.</p>
         </div>
-        <label>
-          <span>PO Number / Customer ({{ fittingBookingOptions.length }} pending)</span>
-          <select v-model="fittingForm.bookingId">
-            <option value="">Select PO booking</option>
-            <option v-for="booking in fittingBookingOptions" :key="booking.id" :value="booking.id">
-              {{ booking.poNumber }} — {{ store.customerFor(booking.customerId)?.name }} — {{ formatDate(booking.eventDate) }}
-            </option>
-          </select>
+        <label class="is-required">
+          <span>PO Number / Customer ({{ fittingBookingOptions.length }} pending) *</span>
+          <SearchSelect
+            v-model="fittingForm.bookingId"
+            :options="fittingBookingSelectOptions"
+            required
+            placeholder="Select PO booking"
+            search-placeholder="Search PO or customer…"
+          />
         </label>
       </section>
 
@@ -1095,12 +1148,9 @@ const fittingList = computed(() =>
             <div class="uniform-group-box">
               <h4>Contact Lenses &amp; Extras</h4>
               <div class="uniform-group-fields uniform-group-fields--two">
-                <label>
-                  <span>Contact Lenses</span>
-                  <select v-model="fittingForm.uniforms.softlens">
-                    <option value="">Select lens type</option>
-                    <option v-for="opt in softlensOptions" :key="opt" :value="opt">{{ opt }}</option>
-                  </select>
+                <label class="is-optional">
+                  <span>Contact Lenses <em class="opt-tag">Optional</em></span>
+                  <SearchSelect v-model="fittingForm.uniforms.softlens" :options="softlensSelectOptions" clearable placeholder="Select lens type" search-placeholder="Search lens…" />
                 </label>
                 <label v-for="([key, label, placeholder]) in addonUniformFields" :key="key">
                   <span>{{ label }}</span>
@@ -1182,7 +1232,7 @@ const fittingList = computed(() =>
           </thead>
           <tbody>
             <tr
-              v-for="row in fittingList"
+              v-for="row in paginatedFittingList"
               :key="row.form.id"
               class="order-row-selectable"
               @click="editSavedFitting(row.form.bookingId)"
@@ -1228,21 +1278,19 @@ const fittingList = computed(() =>
           </tbody>
         </table>
       </div>
+      <DataPagination v-model:current-page="fittingPage" v-model:page-size="fittingPageSize" :total-items="fittingList.length" />
     </section>
 
     <UiModal :open="showAttireForm" :title="editingAttireId ? 'Edit Attire' : 'Add New Attire'" description="Complete wardrobe details and upload photo for catalog and PDF reports." wide @close="showAttireForm = false">
       <form class="form-grid" @submit.prevent="submitAttire">
-        <label><span>Attire Name *</span><input v-model="attireForm.name" placeholder="e.g. Kebaya Sekar Arum Putih" /></label>
-        <label><span>Category *</span><select v-model="attireForm.category"><option>Bride</option><option>Groom</option></select></label>
-        <label><span>Size *</span><input v-model="attireForm.size" placeholder="S / M / L / Custom" /></label>
-        <label>
+        <label class="is-required"><span>Attire Name *</span><input v-model="attireForm.name" placeholder="e.g. Kebaya Sekar Arum Putih" /></label>
+        <label class="is-required"><span>Category *</span><SearchSelect v-model="attireForm.category" :options="attireCategoryFormOptions" required search-placeholder="Search category…" /></label>
+        <label class="is-required"><span>Size *</span><input v-model="attireForm.size" placeholder="S / M / L / Custom" /></label>
+        <label class="is-required">
           <span>Manual Status *</span>
-          <select v-model="attireForm.status">
-            <option value="Tersedia">Available</option>
-            <option value="Laundry">Laundry</option>
-          </select>
+          <SearchSelect v-model="attireForm.status" :options="attireCardStatusOptions" required search-placeholder="Search status…" />
         </label>
-        <label class="span-2"><span>Notes</span><textarea v-model="attireForm.notes" rows="2" placeholder="Color, fabric, full set accessories, or condition notes" /></label>
+        <label class="span-2 is-optional"><span>Notes <em class="opt-tag">Optional</em></span><textarea v-model="attireForm.notes" rows="2" placeholder="Color, fabric, full set accessories, or condition notes" /></label>
         <div class="span-2 attire-upload-block">
           <span class="upload-field-label">Attire Photo</span>
           <label class="upload-zone">
@@ -1533,12 +1581,9 @@ const fittingList = computed(() =>
             <div class="uniform-group-box">
               <h4>Contact Lenses &amp; Extras</h4>
               <div class="uniform-group-fields uniform-group-fields--two">
-                <label>
-                  <span>Contact Lenses</span>
-                  <select v-model="editModalForm.uniforms.softlens">
-                    <option value="">Select lens type</option>
-                    <option v-for="opt in softlensOptions" :key="opt" :value="opt">{{ opt }}</option>
-                  </select>
+                <label class="is-optional">
+                  <span>Contact Lenses <em class="opt-tag">Optional</em></span>
+                  <SearchSelect v-model="editModalForm.uniforms.softlens" :options="softlensSelectOptions" clearable placeholder="Select lens type" search-placeholder="Search lens…" />
                 </label>
                 <label v-for="([key, label, placeholder]) in addonUniformFields" :key="key">
                   <span>{{ label }}</span>
