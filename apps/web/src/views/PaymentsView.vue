@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import {
   Plus, WalletCards, CheckCircle2, ReceiptText, Search, Download, Eye, Pencil, Trash2,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import { useCrmStore, type Payment } from '../stores/crm'
 import { formatCurrency, formatDate, sortAlpha } from '../utils/format'
@@ -303,9 +304,11 @@ const onSendWhatsApp = async (payment: Payment) => {
             <tr>
               <th>Receipt</th>
               <th>
-                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleCustomerSort">
+                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleCustomerSort">
                   <span>Customer &amp; PO</span>
-                  <em>{{ customerSortDir === 'asc' ? 'A–Z ↑' : customerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                  <ArrowUp v-if="customerSortDir === 'asc'" :size="14" class="sort-icon" />
+                  <ArrowDown v-else-if="customerSortDir === 'desc'" :size="14" class="sort-icon" />
+                  <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
                 </button>
               </th>
               <th>Payment Date</th>

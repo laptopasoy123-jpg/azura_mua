@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Plus, Search, Image as ImageIcon, Pencil, Check, UploadCloud, LoaderCircle } from '@lucide/vue'
+import { Plus, Search, Image as ImageIcon, Pencil, Check, UploadCloud, LoaderCircle, ArrowUp, ArrowDown } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 import { useCrmStore, type CatalogItem, type CatalogType } from '../stores/crm'
 import { formatCurrency, sortAlpha } from '../utils/format'
@@ -126,11 +126,13 @@ const submit = () => {
         <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search services" /></label>
         <button
           type="button"
-          class="soft-button"
-          title="Sort services A-Z / Z-A"
+          class="soft-button catalog-sort-btn"
+          :title="nameSortDir === 'asc' ? 'Sorted A–Z (click for Z–A)' : 'Sorted Z–A (click for A–Z)'"
           @click="nameSortDir = nameSortDir === 'asc' ? 'desc' : 'asc'"
         >
-          {{ nameSortDir === 'asc' ? 'Name A–Z ↑' : 'Name Z–A ↓' }}
+          <ArrowUp v-if="nameSortDir === 'asc'" :size="15" />
+          <ArrowDown v-else :size="15" />
+          <span>Name</span>
         </button>
       </div>
     </section>

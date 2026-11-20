@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import {
   Plus, Search, ArrowDownToLine, ArrowUpFromLine, Boxes, TriangleAlert, PackageCheck,
   History, ClipboardCheck, Trash2, UploadCloud, LoaderCircle, Eye, Image as ImageIcon, Pencil, Download,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import { useCrmStore, type InventoryItem, type StockMovement, type StockOpnameRecord } from '../stores/crm'
 import { displayStockStatus, formatDate, sortAlpha } from '../utils/format'
@@ -617,9 +618,10 @@ const exportInventoryPdf = async () => {
             <thead>
               <tr>
                 <th>
-                  <button type="button" class="th-sort-btn is-active" title="Sort items A-Z / Z-A" @click="toggleItemSort">
+                  <button type="button" class="th-sort-btn is-active" title="Sort items A–Z / Z–A" @click="toggleItemSort">
                     <span>Item &amp; Photo</span>
-                    <em>{{ itemSortDir === 'asc' ? 'A–Z ↑' : 'Z–A ↓' }}</em>
+                    <ArrowUp v-if="itemSortDir === 'asc'" :size="14" class="sort-icon" />
+                    <ArrowDown v-else :size="14" class="sort-icon" />
                   </button>
                 </th>
                 <th>Category</th>
@@ -757,9 +759,11 @@ const exportInventoryPdf = async () => {
               <tr>
                 <th>Date</th>
                 <th>
-                  <button type="button" class="th-sort-btn" :class="{ 'is-active': movSortDir !== 'none' }" title="Sort item name A-Z / Z-A" @click="toggleMovSort">
+                  <button type="button" class="th-sort-btn" :class="{ 'is-active': movSortDir !== 'none' }" title="Sort item name A–Z / Z–A" @click="toggleMovSort">
                     <span>Item Name</span>
-                    <em>{{ movSortDir === 'asc' ? 'A–Z ↑' : movSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                    <ArrowUp v-if="movSortDir === 'asc'" :size="14" class="sort-icon" />
+                    <ArrowDown v-else-if="movSortDir === 'desc'" :size="14" class="sort-icon" />
+                    <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
                   </button>
                 </th>
                 <th>Qty</th><th>PIC</th><th>Photo Proof</th><th>Notes</th><th>Actions</th>

@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, Download, Printer, Search, ReceiptText, ShoppingBag,
   Sparkles, CircleDollarSign, BarChart3, Trash2, CalendarDays, Eye, Check, X, Pencil, CheckSquare, Square,
-  UploadCloud, LoaderCircle, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp,
+  UploadCloud, LoaderCircle, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp, ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import { useCrmStore, type CatalogType, type Expense, type Invoice, type OrderGroup } from '../stores/crm'
 import { formatCurrency, formatDate, sortAlpha } from '../utils/format'
@@ -1206,9 +1206,11 @@ watch(() => route.query.catalog, (catalog) => {
               <tr>
                 <th>PO Number</th>
                 <th>
-                  <button type="button" class="th-sort-btn" :class="{ 'is-active': orderCustomerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleOrderCustomerSort">
+                  <button type="button" class="th-sort-btn" :class="{ 'is-active': orderCustomerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleOrderCustomerSort">
                     <span>Customer</span>
-                    <em>{{ orderCustomerSortDir === 'asc' ? 'A–Z ↑' : orderCustomerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                    <ArrowUp v-if="orderCustomerSortDir === 'asc'" :size="14" class="sort-icon" />
+                    <ArrowDown v-else-if="orderCustomerSortDir === 'desc'" :size="14" class="sort-icon" />
+                    <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
                   </button>
                 </th>
                 <th>Invoice Issued</th>

@@ -4,6 +4,7 @@ import {
   Plus, Search, Shirt, ZoomIn, UploadCloud, LoaderCircle, Save, CalendarHeart,
   Ruler, UsersRound, Store, Download, Trash2, Image as ImageIcon, Pencil,
   CalendarDays, AlertTriangle, ChevronLeft, ChevronRight, ClipboardList, CheckCircle2, RotateCcw,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import UiModal from '../components/UiModal.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -1275,9 +1276,11 @@ const paginatedFittingList = computed(() => {
             <tr>
               <th>PO Number</th>
               <th>
-                <button type="button" class="th-sort-btn" :class="{ 'is-active': fittingCustomerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleFittingCustomerSort">
+                <button type="button" class="th-sort-btn" :class="{ 'is-active': fittingCustomerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleFittingCustomerSort">
                   <span>Customer</span>
-                  <em>{{ fittingCustomerSortDir === 'asc' ? 'A–Z ↑' : fittingCustomerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                  <ArrowUp v-if="fittingCustomerSortDir === 'asc'" :size="14" class="sort-icon" />
+                  <ArrowDown v-else-if="fittingCustomerSortDir === 'desc'" :size="14" class="sort-icon" />
+                  <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
                 </button>
               </th>
               <th>Event Date &amp; Venue</th>

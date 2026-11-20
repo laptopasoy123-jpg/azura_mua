@@ -2,7 +2,7 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import {
   Briefcase, CalendarDays, Check, Download, MapPin, Pencil, Phone, RotateCcw,
-  SlidersHorizontal, Users, Plus, ChevronRight, Save,
+  SlidersHorizontal, Users, Plus, ChevronRight, Save, ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type EmployeeRecord } from '../stores/crm'
 import { displayBookingStatus, formatDate, sortAlpha } from '../utils/format'
@@ -340,9 +340,11 @@ const exportPdf = async () => {
               <th>PO Number</th>
               <th>Event Date</th>
               <th>
-                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleCustomerSort">
+                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleCustomerSort">
                   <span>Customer &amp; Venue</span>
-                  <em>{{ customerSortDir === 'asc' ? 'A–Z ↑' : customerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                  <ArrowUp v-if="customerSortDir === 'asc'" :size="14" class="sort-icon" />
+                  <ArrowDown v-else-if="customerSortDir === 'desc'" :size="14" class="sort-icon" />
+                  <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
                 </button>
               </th>
               <th>Assigned Crew</th>

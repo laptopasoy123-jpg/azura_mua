@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, Search, SlidersHorizontal, MapPin, CalendarDays, Phone, Eye, Pencil,
   Ban, RotateCcw, UploadCloud, LoaderCircle, Image as ImageIcon, AlertTriangle,
+  ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type BookingRefund, type BookingStatus, type StylingType } from '../stores/crm'
 import { displayBookingStatus, formatCurrency, formatDate, initials, sortAlpha } from '../utils/format'
@@ -442,9 +443,11 @@ const openProofZoom = (url: string) => {
           <thead>
             <tr>
               <th>
-                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A-Z / Z-A" @click="toggleCustomerSort">
+                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleCustomerSort">
                   <span>Customer</span>
-                  <em>{{ customerSortDir === 'asc' ? 'A–Z ↑' : customerSortDir === 'desc' ? 'Z–A ↓' : '↕' }}</em>
+                  <ArrowUp v-if="customerSortDir === 'asc'" :size="14" class="sort-icon" />
+                  <ArrowDown v-else-if="customerSortDir === 'desc'" :size="14" class="sort-icon" />
+                  <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
                 </button>
               </th>
               <th>Booking</th><th>Event</th><th>Billing</th><th>Status</th><th>Actions</th>
