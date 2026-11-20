@@ -290,12 +290,10 @@ const lastSavedForm = computed(() => store.weddingForms.find((form) => form.book
 const selectedAttire = (id: string) => store.weddingAttire.find((item) => item.id === id)
 
 const isAttireLockedForBooking = (item: WeddingAttire, targetBooking?: Booking) => {
-  const eff = effectiveStatus(item)
-  if (eff === 'Laundry') return true
   if (targetBooking?.eventDate) {
     return store.attireConflictsOnDate(item.id, targetBooking.eventDate, targetBooking.id).length > 0
   }
-  return eff === 'Terpakai' || eff === 'Booked'
+  return false
 }
 
 const buildAttireOptionsForBooking = (list: WeddingAttire[], targetBooking?: Booking): AttireSelectOption[] =>
@@ -307,21 +305,19 @@ const buildAttireOptionsForBooking = (list: WeddingAttire[], targetBooking?: Boo
         return {
           item,
           statusKind: 'booked',
-          statusLabel: `Booked (${conflicts[0]!.customerName}) · Locked`,
+          statusLabel: `Booked (${conflicts[0]!.customerName} · ${conflicts[0]!.poNumber}) · Locked`,
           locked: true,
         }
       }
-    }
-    if (eff === 'Laundry') {
-      return {
-        item,
-        statusKind: 'laundry',
-        statusLabel: 'Laundry · Locked',
-        locked: true,
+      if (eff === 'Laundry') {
+        return {
+          item,
+          statusKind: 'laundry',
+          statusLabel: 'In Laundry · Available on this date',
+          locked: false,
+        }
       }
-    }
-    if (eff === 'Terpakai' || eff === 'Booked') {
-      if (targetBooking?.eventDate) {
+      if (eff === 'Terpakai' || eff === 'Booked') {
         return {
           item,
           statusKind: 'available',
@@ -331,9 +327,26 @@ const buildAttireOptionsForBooking = (list: WeddingAttire[], targetBooking?: Boo
       }
       return {
         item,
-        statusKind: 'booked',
-        statusLabel: `${displayAttireStatus(eff)} · Locked`,
-        locked: true,
+        statusKind: 'available',
+        statusLabel: 'Available',
+        locked: false,
+      }
+    }
+
+    if (eff === 'Laundry') {
+      return {
+        item,
+        statusKind: 'laundry',
+        statusLabel: 'In Laundry today (select PO to check date)',
+        locked: false,
+      }
+    }
+    if (eff === 'Terpakai' || eff === 'Booked') {
+      return {
+        item,
+        statusKind: 'available',
+        statusLabel: 'Has other schedule (select PO to check date)',
+        locked: false,
       }
     }
     return {
