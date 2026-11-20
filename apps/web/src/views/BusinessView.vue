@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, Download, Printer, Search, ReceiptText, ShoppingBag,
   Sparkles, CircleDollarSign, BarChart3, Trash2, CalendarDays, Eye, Check, X, Pencil, CheckSquare, Square,
-  UploadCloud, LoaderCircle, Image as ImageIcon, RotateCcw,
+  UploadCloud, LoaderCircle, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp,
 } from '@lucide/vue'
 import { useCrmStore, type CatalogType, type Expense, type Invoice, type OrderGroup } from '../stores/crm'
 import { formatCurrency, formatDate } from '../utils/format'
@@ -506,26 +506,67 @@ const selectedInvoice = computed(() =>
   store.invoices.find((inv) => inv.id === selectedInvoiceId.value) ?? null,
 )
 
-const selectedInvoiceFlattened = computed(() => {
+type OrderLineItem = OrderGroup['items'][number]
+
+const resolveItemServiceType = (item: OrderLineItem): CatalogType => {
+  if (item.serviceType === 'Inti' || item.serviceType === 'Additional') return item.serviceType
+  return store.catalog.find((c) => c.id === item.catalogItemId || c.name.toLowerCase() === item.name.toLowerCase())?.type ?? 'Additional'
+}
+
+const splitItemsByType = (items: OrderLineItem[]) => {
+  const sorted = store.sortInvoiceItemsIntiFirst(items)
+  const intiItems: OrderLineItem[] = []
+  const additionalItems: OrderLineItem[] = []
+  for (const item of sorted) {
+    if (resolveItemServiceType(item) === 'Inti') intiItems.push(item)
+    else additionalItems.push(item)
+  }
+  return { intiItems, additionalItems }
+}
+
+const expandedInvoiceGroups = ref<Record<string, boolean>>({})
+const expandedDetailGroups = ref<Record<string, boolean>>({})
+
+const isInvoiceGroupOpen = (groupId: string) => Boolean(expandedInvoiceGroups.value[groupId])
+const toggleInvoiceGroup = (groupId: string) => {
+  expandedInvoiceGroups.value[groupId] = !expandedInvoiceGroups.value[groupId]
+}
+
+const isDetailGroupOpen = (groupId: string) => Boolean(expandedDetailGroups.value[groupId])
+const toggleDetailGroup = (groupId: string) => {
+  expandedDetailGroups.value[groupId] = !expandedDetailGroups.value[groupId]
+}
+
+const selectedInvoiceOrderGroups = computed(() => {
   if (!selectedInvoice.value) return []
-  const list: Array<{ name: string; serviceType: CatalogType; groupTitle: string; quantity: number; unit?: string; unitPrice: number }> = []
-  store.sortedOrderGroups(selectedInvoice.value).forEach((group, gIdx) => {
-    const groupTitle = group.kind === 'Awal'
-      ? `Initial Order (${formatDate(group.orderDate)})`
-      : `Add-on #${gIdx} (${formatDate(group.orderDate)})`
-    for (const item of store.sortInvoiceItemsIntiFirst(group.items)) {
-      list.push({
-        name: item.name,
-        serviceType: item.serviceType === 'Inti' ? 'Inti' : 'Additional',
-        groupTitle,
-        quantity: item.quantity,
-        unit: item.unit,
-        unitPrice: item.unitPrice,
-      })
+  return store.sortedOrderGroups(selectedInvoice.value).map((group, gIdx) => {
+    const { intiItems, additionalItems } = splitItemsByType(group.items)
+    return {
+      id: group.id,
+      kind: group.kind,
+      title: group.kind === 'Awal' ? 'Initial Order' : `Add-on Batch #${gIdx}`,
+      orderDate: group.orderDate,
+      intiItems,
+      additionalItems,
+      itemCount: group.items.length,
+      total: store.groupTotal(group),
     }
   })
-  return list
 })
+
+const allInvoiceGroupsOpen = computed(() =>
+  selectedInvoiceOrderGroups.value.length > 0 &&
+  selectedInvoiceOrderGroups.value.every((group) => Boolean(expandedInvoiceGroups.value[group.id])),
+)
+
+const toggleAllInvoiceGroups = () => {
+  const next = !allInvoiceGroupsOpen.value
+  const map: Record<string, boolean> = {}
+  for (const group of selectedInvoiceOrderGroups.value) {
+    map[group.id] = next
+  }
+  expandedInvoiceGroups.value = map
+}
 
 const orderTotal = computed(() => order.items.reduce((sum, item) => sum + item.quantity * item.customerPrice, 0))
 const addGroupTotal = computed(() => addGroupForm.items.reduce((sum, item) => sum + item.quantity * item.customerPrice, 0))
@@ -593,15 +634,23 @@ const selectBookingOrder = (bookingId: string, openModal = false, startEditTarge
   addGroupError.value = ''
   editingGroupId.value = ''
   editGroupError.value = ''
+  const inv = store.bookingInvoice(bookingId)
+  const groups = inv ? store.sortedOrderGroups(inv) : []
+  const detailMap: Record<string, boolean> = {}
+  groups.forEach((g, idx) => {
+    detailMap[g.id] = idx === 0
+  })
+  expandedDetailGroups.value = detailMap
   if (openModal) {
     showOrderDetail.value = true
     if (startEditTarget) {
-      const inv = store.bookingInvoice(bookingId)
-      const groups = inv ? store.sortedOrderGroups(inv) : []
       const target = typeof startEditTarget === 'string'
         ? groups.find((g) => g.id === startEditTarget)
         : groups[0]
-      if (target) startEditGroup(target)
+      if (target) {
+        expandedDetailGroups.value[target.id] = true
+        startEditGroup(target)
+      }
     }
   }
 }
@@ -870,6 +919,11 @@ const submitExpense = () => {
 
 const previewInvoice = (invoice: Invoice) => {
   selectedInvoiceId.value = invoice.id
+  const map: Record<string, boolean> = {}
+  for (const group of store.sortedOrderGroups(invoice)) {
+    map[group.id] = false
+  }
+  expandedInvoiceGroups.value = map
   showInvoice.value = true
 }
 const downloadInvoice = async (invoice: Invoice) => {
@@ -1659,6 +1713,15 @@ watch(() => route.query.catalog, (catalog) => {
                   <strong>{{ formatCurrency(store.groupTotal(group)) }}</strong>
                 </div>
                 <button
+                  type="button"
+                  class="order-toggle-btn"
+                  @click="toggleDetailGroup(group.id)"
+                >
+                  <ChevronUp v-if="isDetailGroupOpen(group.id) || editingGroupId === group.id" :size="14" />
+                  <ChevronDown v-else :size="14" />
+                  <span>{{ isDetailGroupOpen(group.id) || editingGroupId === group.id ? 'Hide' : `Show (${group.items.length})` }}</span>
+                </button>
+                <button
                   v-if="editingGroupId !== group.id"
                   type="button"
                   class="icon-button"
@@ -1738,30 +1801,34 @@ watch(() => route.query.catalog, (catalog) => {
               <p v-if="editGroupError" class="form-error">{{ editGroupError }}</p>
             </div>
 
-            <div v-else class="order-group-table-wrap">
-              <table class="order-group-table">
-                <thead>
-                  <tr>
-                    <th>Service Name</th>
-                    <th class="col-qty">Qty</th>
-                    <th class="col-money">Unit Price</th>
-                    <th class="col-money">Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in store.sortInvoiceItemsIntiFirst(group.items)" :key="item.id">
-                    <td>
-                      <strong>{{ item.name }}</strong>
-                      <span class="service-kind-tag" :class="item.serviceType === 'Inti' ? 'is-inti' : 'is-add'">
-                        {{ item.serviceType === 'Inti' ? 'Core' : 'Add-on' }}
-                      </span>
-                    </td>
-                    <td class="col-qty">{{ item.quantity }} <small v-if="item.unit">{{ item.unit }}</small></td>
-                    <td class="col-money">{{ formatCurrency(item.unitPrice) }}</td>
-                    <td class="col-money"><strong>{{ formatCurrency(item.quantity * item.unitPrice) }}</strong></td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-else-if="isDetailGroupOpen(group.id)" class="order-group-tiers">
+              <div v-if="splitItemsByType(group.items).intiItems.length" class="service-tier-block is-inti">
+                <header class="service-tier-head">
+                  <span>Core Services (Inti)</span>
+                  <span class="service-tier-count">{{ splitItemsByType(group.items).intiItems.length }} item(s)</span>
+                </header>
+                <div class="tier-item-list">
+                  <div v-for="item in splitItemsByType(group.items).intiItems" :key="item.id" class="tier-item-row">
+                    <span class="tier-item-name">{{ item.name }}</span>
+                    <span class="tier-item-qtyprice">{{ item.quantity }}{{ item.unit ? ` ${item.unit}` : '' }} × {{ formatCurrency(item.unitPrice) }}</span>
+                    <strong class="tier-item-subtotal">{{ formatCurrency(item.quantity * item.unitPrice) }}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="splitItemsByType(group.items).additionalItems.length" class="service-tier-block is-add">
+                <header class="service-tier-head">
+                  <span>Add-on Services (Additional)</span>
+                  <span class="service-tier-count">{{ splitItemsByType(group.items).additionalItems.length }} item(s)</span>
+                </header>
+                <div class="tier-item-list">
+                  <div v-for="item in splitItemsByType(group.items).additionalItems" :key="item.id" class="tier-item-row">
+                    <span class="tier-item-name">{{ item.name }}</span>
+                    <span class="tier-item-qtyprice">{{ item.quantity }}{{ item.unit ? ` ${item.unit}` : '' }} × {{ formatCurrency(item.unitPrice) }}</span>
+                    <strong class="tier-item-subtotal">{{ formatCurrency(item.quantity * item.unitPrice) }}</strong>
+                  </div>
+                </div>
+              </div>
             </div>
           </article>
 
@@ -1933,30 +2000,85 @@ watch(() => route.query.catalog, (catalog) => {
             </div>
           </section>
 
-          <section class="editorial-table-wrap">
-            <table class="editorial-table">
-              <thead>
-                <tr>
-                  <th>Service Description</th>
-                  <th>Order Group</th>
-                  <th class="is-num">Qty</th>
-                  <th class="is-num">Unit Price</th>
-                  <th class="is-num">Subtotal</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(item, idx) in selectedInvoiceFlattened" :key="idx">
-                  <td>
-                    <strong>{{ item.name }}</strong>
-                    <span class="subtle-line">{{ item.serviceType === 'Inti' ? 'Core Service' : 'Add-on' }}</span>
-                  </td>
-                  <td>{{ item.groupTitle }}</td>
-                  <td class="is-num">{{ item.quantity }}{{ item.unit ? ` ${item.unit}` : '' }}</td>
-                  <td class="is-num">{{ formatCurrency(item.unitPrice) }}</td>
-                  <td class="is-num"><strong>{{ formatCurrency(item.quantity * item.unitPrice) }}</strong></td>
-                </tr>
-              </tbody>
-            </table>
+          <section class="invoice-orders-section">
+            <header class="invoice-orders-head">
+              <div class="invoice-orders-title">
+                <strong>Order Breakdown</strong>
+                <span>{{ selectedInvoiceOrderGroups.length }} order(s)</span>
+              </div>
+              <button
+                v-if="selectedInvoiceOrderGroups.length"
+                type="button"
+                class="invoice-expand-all-btn no-print"
+                @click="toggleAllInvoiceGroups"
+              >
+                <ChevronUp v-if="allInvoiceGroupsOpen" :size="14" />
+                <ChevronDown v-else :size="14" />
+                <span>{{ allInvoiceGroupsOpen ? 'Hide All Details' : 'Show All Details' }}</span>
+              </button>
+            </header>
+
+            <article v-for="group in selectedInvoiceOrderGroups" :key="group.id" class="invoice-order-card">
+              <header class="invoice-order-head">
+                <div class="invoice-order-meta">
+                  <div class="invoice-order-top">
+                    <span class="invoice-order-badge" :class="group.kind === 'Awal' ? 'is-initial' : 'is-additional'">
+                      {{ group.title }}
+                    </span>
+                    <span class="invoice-order-date">{{ formatDate(group.orderDate) }}</span>
+                  </div>
+                  <span class="invoice-order-submeta">
+                    {{ group.intiItems.length }} Inti · {{ group.additionalItems.length }} Additional
+                  </span>
+                </div>
+
+                <div class="invoice-order-right">
+                  <div class="invoice-order-total">
+                    <small>Order Total</small>
+                    <strong>{{ formatCurrency(group.total) }}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    class="invoice-toggle-btn no-print"
+                    @click="toggleInvoiceGroup(group.id)"
+                  >
+                    <ChevronUp v-if="isInvoiceGroupOpen(group.id)" :size="14" />
+                    <ChevronDown v-else :size="14" />
+                    <span>{{ isInvoiceGroupOpen(group.id) ? 'Hide' : `Show (${group.itemCount})` }}</span>
+                  </button>
+                </div>
+              </header>
+
+              <div v-show="isInvoiceGroupOpen(group.id)" class="invoice-order-body">
+                <div v-if="group.intiItems.length" class="service-tier-block is-inti">
+                  <header class="service-tier-head">
+                    <span>Core Services (Inti)</span>
+                    <span class="service-tier-count">{{ group.intiItems.length }} item(s)</span>
+                  </header>
+                  <div class="tier-item-list">
+                    <div v-for="item in group.intiItems" :key="item.id" class="tier-item-row">
+                      <span class="tier-item-name">{{ item.name }}</span>
+                      <span class="tier-item-qtyprice">{{ item.quantity }}{{ item.unit ? ` ${item.unit}` : '' }} × {{ formatCurrency(item.unitPrice) }}</span>
+                      <strong class="tier-item-subtotal">{{ formatCurrency(item.quantity * item.unitPrice) }}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="group.additionalItems.length" class="service-tier-block is-add">
+                  <header class="service-tier-head">
+                    <span>Add-on Services (Additional)</span>
+                    <span class="service-tier-count">{{ group.additionalItems.length }} item(s)</span>
+                  </header>
+                  <div class="tier-item-list">
+                    <div v-for="item in group.additionalItems" :key="item.id" class="tier-item-row">
+                      <span class="tier-item-name">{{ item.name }}</span>
+                      <span class="tier-item-qtyprice">{{ item.quantity }}{{ item.unit ? ` ${item.unit}` : '' }} × {{ formatCurrency(item.unitPrice) }}</span>
+                      <strong class="tier-item-subtotal">{{ formatCurrency(item.quantity * item.unitPrice) }}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
           </section>
 
           <section class="editorial-totals">
@@ -1990,7 +2112,7 @@ watch(() => route.query.catalog, (catalog) => {
           </a>
         </footer>
       </article>
-      <div class="modal-actions no-print" style="margin-top: 14px;">
+      <div class="modal-actions invoice-preview-actions no-print" style="margin-top: 14px;">
         <button class="secondary-button" @click="showInvoice = false">Close</button>
         <button type="button" class="secondary-button" @click="printInvoice"><Printer :size="16" />Print</button>
         <button

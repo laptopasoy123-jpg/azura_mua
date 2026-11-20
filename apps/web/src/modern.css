@@ -5122,4 +5122,305 @@ label.is-optional > span {
   }
 }
 
+/* Official Invoice & Order Detail: Per-Order Collapsible Core vs Add-on Breakdown */
+.order-toggle-btn,
+.invoice-toggle-btn,
+.invoice-expand-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid #d5cfc5;
+  background: #ffffff;
+  color: #3a3128;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease;
+}
+.order-toggle-btn:hover,
+.invoice-toggle-btn:hover,
+.invoice-expand-all-btn:hover {
+  background: #f5f0e8;
+  border-color: #b7a895;
+}
+
+.order-group-tiers {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.invoice-orders-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.invoice-orders-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.invoice-orders-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.invoice-orders-title strong {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #211d1a;
+}
+.invoice-orders-title span {
+  font-size: 11px;
+  color: #6b5f53;
+}
+
+.invoice-order-card {
+  border: 1px solid #d9d0c3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+}
+.invoice-order-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #faf7f2;
+  border-bottom: 1px solid #ebe4d8;
+}
+.invoice-order-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.invoice-order-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.invoice-order-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.invoice-order-badge.is-initial {
+  background: #e6efe9;
+  color: #235340;
+}
+.invoice-order-badge.is-additional {
+  background: #faeed7;
+  color: #84591b;
+}
+.invoice-order-date {
+  font-size: 11px;
+  color: #5c5044;
+  font-weight: 600;
+}
+.invoice-order-submeta {
+  font-size: 10.5px;
+  color: #776a5c;
+}
+.invoice-order-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.invoice-order-total {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.invoice-order-total small {
+  display: block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: #847768;
+}
+.invoice-order-total strong {
+  font-size: 13px;
+  color: #211d1a;
+}
+
+.invoice-order-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.service-tier-block {
+  border-radius: 10px;
+  border: 1px solid #e6dfd5;
+  overflow: hidden;
+  background: #ffffff;
+}
+.service-tier-block.is-inti {
+  border-color: #cbdbe7;
+}
+.service-tier-block.is-add {
+  border-color: #ecd9b9;
+}
+.service-tier-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.service-tier-block.is-inti .service-tier-head {
+  background: #eef5fa;
+  color: #234d6b;
+  border-bottom: 1px solid #d8e6f0;
+}
+.service-tier-block.is-add .service-tier-head {
+  background: #fdf5e7;
+  color: #7d561b;
+  border-bottom: 1px solid #f2e1c2;
+}
+.service-tier-count {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: .85;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.tier-item-list {
+  display: flex;
+  flex-direction: column;
+}
+.tier-item-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #f2eee8;
+  font-size: 11.5px;
+}
+.tier-item-row:last-child {
+  border-bottom: 0;
+}
+.tier-item-name {
+  font-weight: 600;
+  color: #211d1a;
+  word-break: break-word;
+}
+.tier-item-qtyprice {
+  color: #6b5f53;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tier-item-subtotal {
+  font-weight: 700;
+  color: #211d1a;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media print {
+  .invoice-order-body {
+    display: flex !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .order-group-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .order-group-head-right {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 6px;
+    border-top: 1px dashed #d8e3dd;
+  }
+  .invoice-preview-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    width: 100%;
+  }
+  .invoice-preview-actions > button {
+    width: 100% !important;
+    min-height: 44px;
+    padding: 8px 10px !important;
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
+    font-size: 12px !important;
+  }
+  .invoice-preview-actions > button:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .receipt-preview-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    width: 100%;
+  }
+  .receipt-preview-actions > button {
+    width: 100% !important;
+    min-height: 44px;
+    padding: 8px 10px !important;
+    justify-content: center;
+    text-align: center;
+    white-space: normal;
+    line-height: 1.2;
+    font-size: 12px !important;
+  }
+  .receipt-preview-actions > button:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .invoice-order-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .invoice-order-right {
+    justify-content: space-between;
+    padding-top: 6px;
+    border-top: 1px dashed #e5ddd0;
+  }
+  .invoice-order-total {
+    text-align: left;
+  }
+  .tier-item-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 10px;
+  }
+  .tier-item-name {
+    grid-column: 1 / -1;
+  }
+  .tier-item-qtyprice {
+    justify-self: start;
+  }
+  .tier-item-subtotal {
+    justify-self: end;
+  }
+}
+
 

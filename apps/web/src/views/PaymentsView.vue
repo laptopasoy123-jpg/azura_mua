@@ -406,7 +406,7 @@ const onSendWhatsApp = async (payment: Payment) => {
     >
       <div v-if="detailPayment && detailReceiptPayload" style="display: grid; gap: 16px;">
         <ReceiptStationery :payload="detailReceiptPayload" :logo-url="store.businessProfile.logoUrl" />
-        <div class="modal-actions">
+        <div class="modal-actions receipt-preview-actions">
           <button type="button" class="secondary-button" @click="showDetail = false">Close</button>
           <button type="button" class="secondary-button" @click="showDetail = false; openEdit(detailPayment)">
             <Pencil :size="15" />Edit Transaction
