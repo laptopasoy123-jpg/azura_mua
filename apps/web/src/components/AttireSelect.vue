@@ -66,12 +66,15 @@ const onKeyDown = (event: KeyboardEvent) => {
 }
 
 watch(open, (val) => {
-  if (!val) query.value = ''
-})
-
-onMounted(() => {
-  document.addEventListener('mousedown', onDocClick)
-  document.addEventListener('keydown', onKeyDown)
+  if (typeof document === 'undefined') return
+  if (val) {
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKeyDown)
+  } else {
+    query.value = ''
+    document.removeEventListener('mousedown', onDocClick)
+    document.removeEventListener('keydown', onKeyDown)
+  }
 })
 
 onBeforeUnmount(() => {

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useCrmStore } from '../stores/crm'
+import { prefetchAllRoutes } from '../router'
 import { displayBookingStatus, formatDate } from '../utils/format'
 import UiModal from './UiModal.vue'
 import StatusBadge from './StatusBadge.vue'
@@ -33,6 +34,10 @@ const collapsed = ref(false)
 const mobileOpen = ref(false)
 const showNotifications = ref(false)
 const readNotifKeys = ref<string[]>(loadReadNotifs())
+
+onMounted(() => {
+  prefetchAllRoutes()
+})
 
 watch(
   readNotifKeys,
@@ -257,9 +262,9 @@ const markAllNotificationsRead = () => {
 
       <main class="page-area">
         <RouterView v-slot="{ Component, route: currentRoute }">
-          <div :key="currentRoute.path" class="page-enter-anim">
-            <component :is="Component" v-if="Component" />
-          </div>
+          <KeepAlive :max="15">
+            <component :is="Component" v-if="Component" :key="currentRoute.path" />
+          </KeepAlive>
         </RouterView>
         <footer class="workspace-footer">
           <a href="https://daysheet.id" target="_blank" rel="noopener noreferrer" class="daysheet-copyright-link">

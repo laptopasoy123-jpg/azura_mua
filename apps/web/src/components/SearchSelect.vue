@@ -163,14 +163,19 @@ const onKeyDown = (event: KeyboardEvent) => {
 }
 
 watch(open, (isOpen) => {
-  if (!isOpen) query.value = ''
-})
-
-onMounted(() => {
-  document.addEventListener('mousedown', onDocPointerDown)
-  document.addEventListener('keydown', onKeyDown)
-  window.addEventListener('resize', onWindowResizeOrScroll)
-  window.addEventListener('scroll', onWindowResizeOrScroll, true)
+  if (typeof document === 'undefined' || typeof window === 'undefined') return
+  if (isOpen) {
+    document.addEventListener('mousedown', onDocPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', onWindowResizeOrScroll)
+    window.addEventListener('scroll', onWindowResizeOrScroll, true)
+  } else {
+    query.value = ''
+    document.removeEventListener('mousedown', onDocPointerDown)
+    document.removeEventListener('keydown', onKeyDown)
+    window.removeEventListener('resize', onWindowResizeOrScroll)
+    window.removeEventListener('scroll', onWindowResizeOrScroll, true)
+  }
 })
 
 onBeforeUnmount(() => {

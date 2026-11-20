@@ -721,17 +721,71 @@ export const useCrmStore = defineStore('crm', () => {
     return invoice.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
   }
 
-  const bookingInvoices = (bookingId: string) => invoices.value.filter((invoice) => invoice.bookingId === bookingId)
-  const bookingInvoice = (bookingId: string) => invoices.value.find((invoice) => invoice.bookingId === bookingId)
-  const bookingPayments = (bookingId: string) =>
-    payments.value
-      .filter((payment) => payment.bookingId === bookingId)
-      .sort((a, b) => a.paidAt.localeCompare(b.paidAt))
-  const bookingTotal = (bookingId: string) => bookingInvoices(bookingId).reduce((sum, invoice) => sum + invoiceTotal(invoice), 0)
-  const bookingPaid = (bookingId: string) => payments.value.filter((payment) => payment.bookingId === bookingId).reduce((sum, payment) => sum + payment.amount, 0)
+  const customerMap = computed(() => {
+    const map = new Map<string, Customer>()
+    for (const c of customers.value) map.set(c.id, c)
+    return map
+  })
+
+  const bookingMap = computed(() => {
+    const map = new Map<string, Booking>()
+    for (const b of bookings.value) map.set(b.id, b)
+    return map
+  })
+
+  const invoicesByBookingMap = computed(() => {
+    const map = new Map<string, Invoice[]>()
+    for (const inv of invoices.value) {
+      let list = map.get(inv.bookingId)
+      if (!list) {
+        list = []
+        map.set(inv.bookingId, list)
+      }
+      list.push(inv)
+    }
+    return map
+  })
+
+  const paymentsByBookingMap = computed(() => {
+    const map = new Map<string, Payment[]>()
+    for (const pay of payments.value) {
+      let list = map.get(pay.bookingId)
+      if (!list) {
+        list = []
+        map.set(pay.bookingId, list)
+      }
+      list.push(pay)
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.paidAt.localeCompare(b.paidAt))
+    }
+    return map
+  })
+
+  const totalByBookingMap = computed(() => {
+    const map = new Map<string, number>()
+    for (const inv of invoices.value) {
+      map.set(inv.bookingId, (map.get(inv.bookingId) ?? 0) + invoiceTotal(inv))
+    }
+    return map
+  })
+
+  const paidByBookingMap = computed(() => {
+    const map = new Map<string, number>()
+    for (const pay of payments.value) {
+      map.set(pay.bookingId, (map.get(pay.bookingId) ?? 0) + pay.amount)
+    }
+    return map
+  })
+
+  const bookingInvoices = (bookingId: string) => invoicesByBookingMap.value.get(bookingId) ?? []
+  const bookingInvoice = (bookingId: string) => invoicesByBookingMap.value.get(bookingId)?.[0]
+  const bookingPayments = (bookingId: string) => paymentsByBookingMap.value.get(bookingId) ?? []
+  const bookingTotal = (bookingId: string) => totalByBookingMap.value.get(bookingId) ?? 0
+  const bookingPaid = (bookingId: string) => paidByBookingMap.value.get(bookingId) ?? 0
   const bookingBalance = (bookingId: string) => bookingTotal(bookingId) - bookingPaid(bookingId)
-  const customerFor = (id: string) => customers.value.find((customer) => customer.id === id)
-  const bookingFor = (id: string) => bookings.value.find((booking) => booking.id === id)
+  const customerFor = (id: string) => customerMap.value.get(id)
+  const bookingFor = (id: string) => bookingMap.value.get(id)
 
   const stockAvailable = (item: InventoryItem) =>
     item.initialStock + item.stockIn - item.stockOut + (item.stockAdjustment ?? 0)
