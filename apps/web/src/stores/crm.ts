@@ -787,13 +787,32 @@ export const useCrmStore = defineStore('crm', () => {
   const customerFor = (id: string) => customerMap.value.get(id)
   const bookingFor = (id: string) => bookingMap.value.get(id)
 
+  const LOW_STOCK_THRESHOLD_KEY = 'azura_mua_low_stock_threshold_v1'
+  const loadLowStockThreshold = () => {
+    if (typeof window === 'undefined') return 3
+    const raw = Number(window.localStorage.getItem(LOW_STOCK_THRESHOLD_KEY))
+    return Number.isFinite(raw) && raw >= 1 ? Math.round(raw) : 3
+  }
+  const globalLowStockThreshold = ref<number>(loadLowStockThreshold())
+  const setGlobalLowStockThreshold = (value: number) => {
+    const clean = Number.isFinite(value) && value >= 1 ? Math.round(value) : 1
+    globalLowStockThreshold.value = clean
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(LOW_STOCK_THRESHOLD_KEY, String(clean))
+      } catch {
+        // ignore storage quota errors
+      }
+    }
+  }
+
   const stockAvailable = (item: InventoryItem) =>
     item.initialStock + item.stockIn - item.stockOut + (item.stockAdjustment ?? 0)
 
   const stockStatus = (item: InventoryItem) => {
     const available = stockAvailable(item)
     if (available <= 0) return 'Habis'
-    if (available <= item.minimumStock) return 'Menipis'
+    if (available <= globalLowStockThreshold.value) return 'Menipis'
     return 'Aman'
   }
 
@@ -2242,7 +2261,7 @@ export const useCrmStore = defineStore('crm', () => {
     stylingTypes, inventoryCategories, units,
     totalBilling, totalPaid, totalReceivable, totalExpenses, totalRefunds, totalCashOut, netCashflow, upcomingBookings, lowStock, laundryUrgentAlerts,
     groupTotal, sortedOrderGroups, sortInvoiceItemsIntiFirst, invoiceTotal, bookingInvoices, bookingInvoice, bookingPayments, bookingTotal, bookingPaid, bookingBalance, customerFor, bookingFor,
-    stockAvailable, stockStatus, attireSchedule, effectiveAttireStatus, attireConflictsOnDate, urgentAttireSchedules, getLaundryUrgentAlerts,
+    stockAvailable, stockStatus, globalLowStockThreshold, setGlobalLowStockThreshold, attireSchedule, effectiveAttireStatus, attireConflictsOnDate, urgentAttireSchedules, getLaundryUrgentAlerts,
     addBooking, updateBooking, cancelBooking, addBookingRefund, updateBookingRefund, addPayment, updatePayment, deletePayment, addCatalogItem, updateCatalogItem,
     createInvoiceFromOrder, addOrderGroupToBooking, updateOrderGroup, deleteOrderGroup,
     addExpense, addBatchExpenses, updateExpense, deleteExpense, moveStock, submitBatchStockMovement, submitStockOpname, updateStockMovement, deleteStockMovement, updateStockOpname, deleteStockOpname, addInventoryItem, updateInventoryItem, deleteInventoryItem,

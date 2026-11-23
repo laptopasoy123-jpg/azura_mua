@@ -788,24 +788,43 @@ const downloadSavedPdf = async (targetForm?: WeddingFittingForm) => {
   }
 }
 
+const fittingDbView = ref<'active' | 'archive'>('active')
 const fittingCustomerSortDir = ref<'none' | 'asc' | 'desc'>('none')
 const toggleFittingCustomerSort = () => {
   fittingCustomerSortDir.value = fittingCustomerSortDir.value === 'none' ? 'asc' : fittingCustomerSortDir.value === 'asc' ? 'desc' : 'none'
+}
+
+const isFittingArchived = (booking?: { status?: string; eventDate?: string }) => {
+  if (!booking) return false
+  if (booking.status === 'Selesai') return true
+  if (booking.eventDate && booking.eventDate < localTodayIso()) return true
+  return false
 }
 
 const fittingList = computed(() => {
   const list = store.weddingForms.map((form) => {
     const booking = store.bookingFor(form.bookingId)
     const customer = booking ? store.customerFor(booking.customerId) : undefined
-    return { form, booking, customer }
+    const archived = isFittingArchived(booking)
+    return { form, booking, customer, archived }
   })
   if (fittingCustomerSortDir.value === 'none') return list
   return sortAlpha(list, (row) => row.customer?.name ?? '', fittingCustomerSortDir.value)
 })
 
+const activeFittingList = computed(() => fittingList.value.filter((row) => !row.archived))
+const archivedFittingList = computed(() => fittingList.value.filter((row) => row.archived))
+const visibleFittingList = computed(() =>
+  fittingDbView.value === 'archive' ? archivedFittingList.value : activeFittingList.value,
+)
+
+watch(fittingDbView, () => {
+  fittingPage.value = 1
+})
+
 const paginatedFittingList = computed(() => {
   const start = (fittingPage.value - 1) * fittingPageSize.value
-  return fittingList.value.slice(start, start + fittingPageSize.value)
+  return visibleFittingList.value.slice(start, start + fittingPageSize.value)
 })
 </script>
 
@@ -857,7 +876,7 @@ const paginatedFittingList = computed(() => {
           <div>
             <span class="eyebrow">Wardrobe inventory &amp; schedule</span>
             <h3>Bride &amp; Groom Attire</h3>
-            <p>Shows <strong>Booked</strong> ahead of the event date, automatically switches to <strong>In Use</strong> on Event Day (Hari-H), and returns to <strong>Available</strong> once the event passes.</p>
+            <p>Shows <strong>Booked</strong> ahead of the event date, switches to <strong>In Use</strong> on Event Day (Hari-H), automatically enters <strong>Laundry</strong> on H+1, and returns to <strong>Available</strong> after H+1.</p>
           </div>
         </div>
         <div class="attire-summary">
@@ -1276,13 +1295,23 @@ const paginatedFittingList = computed(() => {
           <div>
             <span class="eyebrow">Saved fitting records</span>
             <h3>Customer Fitting Form Database</h3>
-            <p>Edit existing submissions or download high-resolution fitting PDFs with attire photos.</p>
+            <p>Active fitting records automatically move to <strong>Arsip</strong> once the event is completed or past its date.</p>
           </div>
         </div>
         <button type="button" class="primary-button" @click="portalTab = 'form'">
           <Plus :size="17" />Fill New Fitting Form
         </button>
       </header>
+      <div class="table-toolbar" style="padding-top: 12px;">
+        <div class="segmented-tabs">
+          <button type="button" :class="{ active: fittingDbView === 'active' }" @click="fittingDbView = 'active'">
+            Active Fitting ({{ activeFittingList.length }})
+          </button>
+          <button type="button" :class="{ active: fittingDbView === 'archive' }" @click="fittingDbView = 'archive'">
+            Arsip / Selesai ({{ archivedFittingList.length }})
+          </button>
+        </div>
+      </div>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -1338,19 +1367,19 @@ const paginatedFittingList = computed(() => {
                 </div>
               </td>
             </tr>
-            <tr v-if="!fittingList.length">
+            <tr v-if="!visibleFittingList.length">
               <td colspan="6">
                 <div class="empty-state">
                   <ClipboardList :size="26" />
-                  <strong>No fitting forms saved yet</strong>
-                  <span>Open Tab "2. Fitting Form Entry" to complete a customer's fitting details.</span>
+                  <strong>{{ fittingDbView === 'archive' ? 'Belum ada arsip fitting' : 'No active fitting forms saved yet' }}</strong>
+                  <span>{{ fittingDbView === 'archive' ? 'Data fitting otomatis berpindah ke sini setelah acara selesai atau tanggal acara berlalu.' : 'Open Tab "2. Fitting Form Entry" to complete a customer\'s fitting details.' }}</span>
                 </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-      <DataPagination v-model:current-page="fittingPage" v-model:page-size="fittingPageSize" :total-items="fittingList.length" />
+      <DataPagination v-model:current-page="fittingPage" v-model:page-size="fittingPageSize" :total-items="visibleFittingList.length" />
     </section>
 
     <UiModal :open="showAttireForm" :title="editingAttireId ? 'Edit Attire' : 'Add New Attire'" description="Complete wardrobe details and upload photo for catalog and PDF reports." wide @close="showAttireForm = false">

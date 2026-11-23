@@ -95,7 +95,6 @@ const staffFilterOptions = computed(() => [
   ...sortAlpha(store.activeEmployees, (emp) => emp.name).map((emp) => ({
     value: emp.id,
     label: emp.name,
-    sublabel: emp.role,
   })),
 ])
 
@@ -140,21 +139,9 @@ const resetFilters = () => {
   poFilter.value = ''
 }
 
-const roleOptions = [
-  'Owner / Lead MUA',
-  'Owner & Lead MUA',
-  'MUA & Hairdo',
-  'Hijabdo Stylist',
-  'Assistant MUA',
-  'Wardrobe & Inventory',
-  'Runner / Logistics',
-  'Finance',
-  'Admin / Finance',
-]
-
 // Inline employee manager modal
 const showStaffModal = ref(false)
-const staffForm = reactive({ name: '', role: 'MUA & Hairdo', phone: '' })
+const staffForm = reactive({ name: '', phone: '' })
 const staffError = ref('')
 const editingStaffId = ref('')
 const staffFormEl = ref<HTMLFormElement | null>(null)
@@ -164,19 +151,10 @@ const editingStaff = computed(() =>
   editingStaffId.value ? store.employees.find((e) => e.id === editingStaffId.value) ?? null : null,
 )
 
-const roleSelectOptions = computed(() => {
-  const merged = new Set<string>(roleOptions)
-  if (staffForm.role.trim()) merged.add(staffForm.role.trim())
-  for (const emp of store.employees) {
-    if (emp.role?.trim()) merged.add(emp.role.trim())
-  }
-  return [...merged].map((r) => ({ value: r, label: r }))
-})
-
 const resetStaffForm = () => {
   editingStaffId.value = ''
   staffError.value = ''
-  Object.assign(staffForm, { name: '', role: 'MUA & Hairdo', phone: '' })
+  Object.assign(staffForm, { name: '', phone: '' })
 }
 
 const openManageStaff = () => {
@@ -188,17 +166,16 @@ const submitNewStaff = () => {
   try {
     staffError.value = ''
     if (!staffForm.name.trim()) throw new Error('Employee name is required.')
-    if (!staffForm.role.trim()) throw new Error('Role / position is required.')
     if (editingStaffId.value) {
       store.updateEmployee(editingStaffId.value, {
         name: staffForm.name,
-        role: staffForm.role,
+        role: editingStaff.value?.role || 'Team',
         phone: staffForm.phone,
       })
     } else {
       store.addEmployee({
         name: staffForm.name,
-        role: staffForm.role,
+        role: 'Team',
         phone: staffForm.phone || undefined,
       })
     }
@@ -213,7 +190,6 @@ const startEditStaff = async (emp: EmployeeRecord) => {
   editingStaffId.value = emp.id
   Object.assign(staffForm, {
     name: emp.name,
-    role: emp.role || 'MUA & Hairdo',
     phone: emp.phone ?? '',
   })
   await nextTick()
@@ -475,7 +451,7 @@ const exportPdf = async () => {
               </span>
               <div class="job-crew-option-info">
                 <strong>{{ emp.name }}</strong>
-                <small>{{ emp.role }}<template v-if="emp.phone"> · <Phone :size="10" /> {{ emp.phone }}</template></small>
+                <small v-if="emp.phone"><Phone :size="10" /> {{ emp.phone }}</small>
               </div>
             </button>
           </div>
@@ -506,7 +482,7 @@ const exportPdf = async () => {
         <div v-if="editingStaff" class="span-2 staff-editing-banner">
           <div>
             <strong>Editing Crew Member: {{ editingStaff.name }}</strong>
-            <span>Update name, role, or WhatsApp number below and click Save Changes.</span>
+            <span>Update name or WhatsApp number below and click Save Changes.</span>
           </div>
           <button type="button" class="soft-button" @click="resetStaffForm">Cancel Edit</button>
         </div>
@@ -514,11 +490,7 @@ const exportPdf = async () => {
           <span>Employee Name *</span>
           <input ref="staffNameInput" v-model="staffForm.name" placeholder="e.g. Sinta Dewi" />
         </label>
-        <label class="is-required">
-          <span>Role / Position *</span>
-          <SearchSelect v-model="staffForm.role" :options="roleSelectOptions" required search-placeholder="Search role…" />
-        </label>
-        <label class="span-2 is-optional"><span>Phone / WhatsApp <em class="opt-tag">Optional</em></span><input v-model="staffForm.phone" placeholder="08xxxxxxxxxx" /></label>
+        <label class="is-optional"><span>Phone / WhatsApp <em class="opt-tag">Optional</em></span><input v-model="staffForm.phone" placeholder="08xxxxxxxxxx" /></label>
         <p v-if="staffError" class="form-error span-2">{{ staffError }}</p>
         <div class="modal-actions span-2">
           <button v-if="editingStaff" type="button" class="secondary-button" @click="resetStaffForm">
@@ -537,12 +509,11 @@ const exportPdf = async () => {
         <div class="data-table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>Name</th><th>Role</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Name</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
               <tr v-for="emp in sortedEmployees" :key="emp.id" :class="{ 'is-editing-row': editingStaffId === emp.id }">
                 <td><strong>{{ emp.name }}</strong><span v-if="emp.phone" class="subtle-line">{{ emp.phone }}</span></td>
-                <td>{{ emp.role }}</td>
                 <td><StatusBadge :label="emp.active ? 'Active' : 'Inactive'" /></td>
                 <td>
                   <div class="row-actions">

@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { displayBookingStatus, formatDate } from './format'
+import { formatDate } from './format'
 import type { BusinessProfile, EmployeeRecord } from '../stores/crm'
 import { drawEditorialBanner, drawEditorialFooter, drawEditorialKpiStrip, PDF_PALETTE } from './pdfTheme'
 
@@ -64,27 +64,24 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
   const tableBody = input.rows.length
     ? input.rows.map((row, idx) => [
       String(idx + 1),
-      `${formatDate(row.eventDate)}${row.eventTime ? `\nCall Time: ${row.eventTime}` : ''}`,
-      `${row.poNumber}\n${displayBookingStatus(row.status)}`,
-      `${row.customerName}${row.customerPhone ? `\nTel: ${row.customerPhone}` : ''}${row.stylingType ? `\nStyling: ${row.stylingType}` : ''}`,
-      row.location || '-',
-      row.servicesSummary || '-',
+      `${row.customerName}${row.customerPhone ? `\nTel: ${row.customerPhone}` : ''}`,
+      `${formatDate(row.eventDate)}${row.eventTime ? `\nPukul: ${row.eventTime}` : ''}`,
       row.assignedNames.length ? row.assignedNames.map((n, i) => `${i + 1}. ${n}`).join('\n') : 'Unassigned',
-      row.notes || '-',
+      `${row.location || '-'}${row.notes ? `\nCatatan: ${row.notes}` : ''}`,
     ])
-    : [['-', '-', '-', 'No job assignments found in the selected date range.', '-', '-', '-', '-']]
+    : [['-', 'No job assignments found in the selected date range.', '-', '-', '-']]
 
   autoTable(doc, {
     startY: y,
     margin: { left: margin, right: margin, bottom: 18 },
     tableWidth: contentWidth,
-    head: [['NO.', 'EVENT DATE & TIME', 'PO & STATUS', 'CLIENT & STYLING', 'VENUE LOCATION', 'ORDERED SERVICES', 'ASSIGNED TEAM', 'FIELD NOTES']],
+    head: [['NO.', 'ATAS NAMA (CUSTOMER)', 'TANGGAL ACARA', 'TIM YANG BERTUGAS', 'LOKASI & CATATAN']],
     body: tableBody,
     theme: 'grid',
     rowPageBreak: 'avoid',
     styles: {
-      fontSize: 8.3,
-      cellPadding: 3,
+      fontSize: 8.6,
+      cellPadding: 3.2,
       textColor: PDF_PALETTE.ink,
       lineColor: [204, 192, 176],
       lineWidth: 0.3,
@@ -94,8 +91,8 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
       fillColor: PDF_PALETTE.espresso,
       textColor: PDF_PALETTE.cream,
       fontStyle: 'bold',
-      fontSize: 7.9,
-      cellPadding: 3,
+      fontSize: 8.1,
+      cellPadding: 3.2,
       lineColor: [90, 78, 66],
       lineWidth: 0.3,
     },
@@ -103,17 +100,14 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
       fillColor: [251, 248, 243],
     },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' },
-      1: { cellWidth: 31, fontStyle: 'bold' },
-      2: { cellWidth: 27, fontStyle: 'bold' },
-      3: { cellWidth: 42 },
-      4: { cellWidth: 41 },
-      5: { cellWidth: 48 },
-      6: { cellWidth: 41, fontStyle: 'bold', fillColor: PDF_PALETTE.ivory },
-      7: { cellWidth: 29 },
+      0: { cellWidth: 12, halign: 'center', fontStyle: 'bold' },
+      1: { cellWidth: 60, fontStyle: 'bold' },
+      2: { cellWidth: 42, fontStyle: 'bold' },
+      3: { cellWidth: 75, fontStyle: 'bold', fillColor: PDF_PALETTE.ivory },
+      4: { cellWidth: contentWidth - 189 },
     },
     didParseCell: (hookData) => {
-      if (hookData.section === 'body' && hookData.column.index === 6) {
+      if (hookData.section === 'body' && hookData.column.index === 3) {
         if (String(hookData.cell.raw) === 'Unassigned') {
           hookData.cell.styles.textColor = PDF_PALETTE.dangerFg
           hookData.cell.styles.fillColor = PDF_PALETTE.dangerBg
@@ -124,7 +118,7 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
     },
   })
 
-  // Employee Workload Summary Table (scoped strictly to the selected employee when filtered)
+  // Employee Workload Summary Table (focus on name only, without Role)
   if (input.filterEmployeeName !== 'Unassigned') {
     const counts = new Map<string, number>()
     const targetEmployees = input.filterEmployeeName
@@ -141,7 +135,6 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
 
     const summaryRows = [...counts.entries()].map(([name, total]) => [
       name,
-      input.employees.find((e) => e.name === name)?.role ?? 'MUA / Team',
       `${total} job(s)`,
     ])
 
@@ -151,13 +144,13 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
         startY: lastY + 8,
         margin: { left: margin, right: margin, bottom: 18 },
         tableWidth: contentWidth,
-        head: [[input.filterEmployeeName ? 'SELECTED STAFF SUMMARY' : 'STAFF WORKLOAD SUMMARY (FILTERED PERIOD)', 'ROLE', 'TOTAL POs ASSIGNED']],
+        head: [[input.filterEmployeeName ? 'NAMA TIM (FILTERED)' : 'REKAP NAMA TIM', 'TOTAL JOB']],
         body: summaryRows,
         theme: 'grid',
         rowPageBreak: 'avoid',
         styles: {
-          fontSize: 8.1,
-          cellPadding: 2.6,
+          fontSize: 8.3,
+          cellPadding: 2.8,
           textColor: PDF_PALETTE.ink,
           lineColor: [212, 202, 188],
           lineWidth: 0.3,
@@ -169,14 +162,13 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
           fillColor: PDF_PALETTE.espresso,
           textColor: PDF_PALETTE.cream,
           fontStyle: 'bold',
-          fontSize: 7.7,
+          fontSize: 7.9,
           lineColor: [90, 78, 66],
           lineWidth: 0.3,
         },
         columnStyles: {
-          0: { cellWidth: 100, fontStyle: 'bold' },
-          1: { cellWidth: contentWidth - 150 },
-          2: { cellWidth: 50, halign: 'right', fontStyle: 'bold' },
+          0: { cellWidth: contentWidth - 55, fontStyle: 'bold' },
+          1: { cellWidth: 55, halign: 'right', fontStyle: 'bold' },
         },
       })
     }

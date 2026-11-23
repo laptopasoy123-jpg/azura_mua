@@ -3,10 +3,18 @@ import { computed, reactive, ref, watch } from 'vue'
 import {
   Plus, Search, ArrowDownToLine, ArrowUpFromLine, Boxes, TriangleAlert, PackageCheck,
   History, ClipboardCheck, Trash2, UploadCloud, LoaderCircle, Eye, Image as ImageIcon, Pencil, Download,
-  ArrowUp, ArrowDown, ArrowUpDown,
+  ArrowUp, ArrowDown, ArrowUpDown, Shirt, ZoomIn,
 } from '@lucide/vue'
-import { useCrmStore, type InventoryItem, type StockMovement, type StockOpnameRecord } from '../stores/crm'
-import { displayStockStatus, formatDate, sortAlpha } from '../utils/format'
+import {
+  useCrmStore,
+  type AttireCategory,
+  type AttireStatus,
+  type InventoryItem,
+  type StockMovement,
+  type StockOpnameRecord,
+  type WeddingAttire,
+} from '../stores/crm'
+import { displayAttireStatus, displayStockStatus, formatDate, sortAlpha } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import { downloadSelectedReportsPdf } from '../utils/reportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -15,7 +23,130 @@ import SearchSelect from '../components/SearchSelect.vue'
 import DataPagination from '../components/DataPagination.vue'
 
 const store = useCrmStore()
+const inventoryKind = ref<'makeup' | 'attire'>('makeup')
 const tab = ref<'master' | 'in' | 'out' | 'opname' | 'monitor'>('master')
+
+// Inventory Attire state (with photos)
+const attireSearch = ref('')
+const attireCategory = ref<'All' | AttireCategory>('All')
+const attireStatusFilter = ref<'All' | AttireStatus>('All')
+const attirePage = ref(1)
+const attirePageSize = ref(12)
+const showAttireForm = ref(false)
+const editingAttireId = ref('')
+const attireUploading = ref(false)
+const attireUploadError = ref('')
+const attireForm = reactive({
+  name: '',
+  category: 'Bride' as AttireCategory,
+  size: '',
+  status: 'Tersedia' as AttireStatus,
+  notes: '',
+  imageUrl: '',
+})
+const attireCategoryFilterOptions = [
+  { value: 'All', label: 'All Categories' },
+  { value: 'Bride', label: 'Bride' },
+  { value: 'Groom', label: 'Groom' },
+]
+const attireStatusFilterOptions = [
+  { value: 'All', label: 'All Statuses' },
+  { value: 'Tersedia', label: 'Available' },
+  { value: 'Booked', label: 'Booked' },
+  { value: 'Terpakai', label: 'In Use' },
+  { value: 'Laundry', label: 'Laundry' },
+]
+const attireCategoryFormOptions = [
+  { value: 'Bride', label: 'Bride' },
+  { value: 'Groom', label: 'Groom' },
+]
+const attireManualStatusOptions = [
+  { value: 'Tersedia', label: 'Available' },
+  { value: 'Laundry', label: 'Laundry' },
+]
+const filteredAttireItems = computed(() => {
+  const q = attireSearch.value.trim().toLowerCase()
+  return sortAlpha(
+    store.weddingAttire.filter((item) => {
+      const eff = store.effectiveAttireStatus(item)
+      const matchQ = !q || item.name.toLowerCase().includes(q) || item.code.toLowerCase().includes(q) || item.size.toLowerCase().includes(q)
+      const matchCat = attireCategory.value === 'All' || item.category === attireCategory.value
+      const matchStatus = attireStatusFilter.value === 'All' || eff === attireStatusFilter.value
+      return matchQ && matchCat && matchStatus
+    }),
+    (item) => item.name,
+  )
+})
+const paginatedAttireItems = computed(() => {
+  const start = (attirePage.value - 1) * attirePageSize.value
+  return filteredAttireItems.value.slice(start, start + attirePageSize.value)
+})
+watch([attireSearch, attireCategory, attireStatusFilter], () => {
+  attirePage.value = 1
+})
+const openCreateAttire = () => {
+  editingAttireId.value = ''
+  attireUploadError.value = ''
+  Object.assign(attireForm, { name: '', category: 'Bride', size: '', status: 'Tersedia', notes: '', imageUrl: '' })
+  showAttireForm.value = true
+}
+const openEditAttire = (item: WeddingAttire) => {
+  editingAttireId.value = item.id
+  attireUploadError.value = ''
+  Object.assign(attireForm, {
+    name: item.name,
+    category: item.category,
+    size: item.size,
+    status: item.status === 'Laundry' ? 'Laundry' : 'Tersedia',
+    notes: item.notes ?? '',
+    imageUrl: item.imageUrl ?? '',
+  })
+  showAttireForm.value = true
+}
+const handleAttirePhotoUpload = async (event: Event) => {
+  const inputEl = event.target as HTMLInputElement
+  const file = inputEl.files?.[0]
+  if (!file) return
+  attireUploadError.value = ''
+  attireUploading.value = true
+  try {
+    const res = await uploadImageWithFallback(file, 'wedding-attire')
+    attireForm.imageUrl = res.url
+  } catch (err) {
+    attireUploadError.value = err instanceof Error ? err.message : 'Failed to upload attire photo.'
+  } finally {
+    attireUploading.value = false
+    inputEl.value = ''
+  }
+}
+const submitAttire = () => {
+  attireUploadError.value = ''
+  if (!attireForm.name.trim() || !attireForm.size.trim()) {
+    attireUploadError.value = 'Attire name and size are required.'
+    return
+  }
+  if (editingAttireId.value) {
+    store.updateWeddingAttire(editingAttireId.value, {
+      name: attireForm.name.trim(),
+      category: attireForm.category,
+      size: attireForm.size.trim(),
+      status: attireForm.status,
+      notes: attireForm.notes.trim() || undefined,
+      imageUrl: attireForm.imageUrl || undefined,
+    })
+  } else {
+    store.addWeddingAttire({
+      name: attireForm.name.trim(),
+      category: attireForm.category,
+      size: attireForm.size.trim(),
+      status: attireForm.status,
+      notes: attireForm.notes.trim() || undefined,
+      imageUrl: attireForm.imageUrl || undefined,
+    })
+  }
+  editingAttireId.value = ''
+  showAttireForm.value = false
+}
 const search = ref('')
 const monitorStatusFilter = ref<'All' | 'Aman' | 'Menipis' | 'Habis'>('All')
 const masterPage = ref(1)
@@ -185,20 +316,19 @@ watch([search, monitorStatusFilter, tab], () => {
 
 const monitorStatusOptions = [
   { value: 'All', label: 'All Stock Statuses' },
-  { value: 'Aman', label: 'In Stock (Aman)' },
   { value: 'Menipis', label: 'Low Stock' },
-  { value: 'Habis', label: 'Out of Stock' },
+  { value: 'Habis', label: 'Stok Habis' },
+  { value: 'Aman', label: 'In Stock' },
 ]
 
 const staffPicOptions = computed(() => {
   const opts = sortAlpha(store.activeEmployees, (emp) => emp.name).map((emp) => ({
     value: emp.name,
     label: emp.name,
-    sublabel: emp.role,
   }))
   const extraPic = movement.pic || opnameForm.pic || editMovementForm.pic
   if (extraPic && !opts.some((o) => o.value === extraPic)) {
-    opts.push({ value: extraPic, label: extraPic, sublabel: 'Staff' })
+    opts.push({ value: extraPic, label: extraPic })
   }
   return opts
 })
@@ -207,7 +337,7 @@ const inventoryItemOptions = computed(() =>
   sortAlpha(store.inventory, (item) => item.name).map((item) => ({
     value: item.id,
     label: item.name,
-    sublabel: `Avail: ${store.stockAvailable(item)} ${item.unit}`,
+    sublabel: `Stok: ${store.stockAvailable(item)}`,
   })),
 )
 
@@ -497,11 +627,11 @@ const confirmDeleteItem = () => {
 
 const submitItem = () => {
   itemError.value = ''
-  if (!itemForm.name.trim() || !itemForm.category.trim() || !itemForm.unit.trim()) {
-    itemError.value = 'Item name, category, and unit are required.'
+  if (!itemForm.name.trim() || !itemForm.category.trim()) {
+    itemError.value = 'Item name and category are required.'
     return
   }
-  if (itemForm.initialStock < 0 || itemForm.minimumStock < 0) {
+  if (itemForm.initialStock < 0) {
     itemError.value = 'Stock quantities cannot be negative.'
     return
   }
@@ -509,21 +639,21 @@ const submitItem = () => {
     store.updateInventoryItem(editingItemId.value, {
       name: itemForm.name,
       category: itemForm.category,
-      unit: itemForm.unit,
+      unit: itemForm.unit || 'pcs',
       location: itemForm.location.trim() || '-',
       initialStock: itemForm.initialStock,
-      minimumStock: itemForm.minimumStock,
-      imageUrl: itemForm.imageUrl,
+      minimumStock: store.globalLowStockThreshold,
+      imageUrl: '',
     })
   } else {
     const created = store.addInventoryItem({
       name: itemForm.name,
       category: itemForm.category,
-      unit: itemForm.unit,
+      unit: 'pcs',
       location: itemForm.location.trim() || '-',
       initialStock: itemForm.initialStock,
-      minimumStock: itemForm.minimumStock,
-      imageUrl: itemForm.imageUrl || undefined,
+      minimumStock: store.globalLowStockThreshold,
+      imageUrl: undefined,
     })
     if (quickAddFromMovement.value && showMovement.value) {
       const emptyLine = movement.items.find((l) => !l.itemId)
@@ -574,20 +704,39 @@ const exportInventoryPdf = async () => {
 <template>
   <div class="page-stack">
     <section class="page-heading">
-      <div><span class="eyebrow">Business</span><h2>Inventory Management</h2><p>Track real-time stock balances, upload item images, record batch stock-in/out with proofs, and run physical opname audits.</p></div>
-      <div class="heading-actions inv-heading-actions">
+      <div>
+        <span class="eyebrow">Business</span>
+        <h2>Inventory Management</h2>
+        <p>{{ inventoryKind === 'makeup' ? 'Inventory Makeup: kelola stok barang makeup, stok masuk/keluar, opname, serta status Low Stock & Stok Habis (satu batas untuk semua).' : 'Inventory Attire: kelola koleksi busana Bride & Groom lengkap dengan foto dan status pemakaian/laundry.' }}</p>
+      </div>
+      <div v-if="inventoryKind === 'makeup'" class="heading-actions inv-heading-actions">
         <button class="secondary-button inv-action-btn" @click="exportInventoryPdf"><Download :size="16" /><span>Download Stock PDF</span></button>
         <button class="secondary-button inv-action-btn" @click="openOpnameModal"><ClipboardCheck :size="16" /><span>Stock Opname</span></button>
         <button class="secondary-button inv-action-btn is-out" @click="openMovement('Keluar')"><ArrowUpFromLine :size="16" /><span>Stock Out</span></button>
         <button class="primary-button inv-action-btn is-in" @click="openMovement('Masuk')"><ArrowDownToLine :size="16" /><span>Stock In</span></button>
       </div>
+      <div v-else class="heading-actions">
+        <button class="primary-button" @click="openCreateAttire"><Plus :size="18" />Add Attire</button>
+      </div>
     </section>
 
+    <section class="portal-tabs-bar">
+      <div class="segmented-tabs">
+        <button type="button" :class="{ active: inventoryKind === 'makeup' }" @click="inventoryKind = 'makeup'">
+          Inventory Makeup ({{ store.inventory.length }})
+        </button>
+        <button type="button" :class="{ active: inventoryKind === 'attire' }" @click="inventoryKind = 'attire'">
+          Inventory Attire ({{ store.weddingAttire.length }})
+        </button>
+      </div>
+    </section>
+
+    <template v-if="inventoryKind === 'makeup'">
     <section class="inventory-stats">
-      <article><span class="tone-sage"><Boxes :size="21" /></span><div><small>Total SKU Items</small><strong>{{ store.inventory.length }}</strong></div></article>
+      <article><span class="tone-sage"><Boxes :size="21" /></span><div><small>Total Item Makeup</small><strong>{{ store.inventory.length }}</strong></div></article>
       <article><span class="tone-blue"><PackageCheck :size="21" /></span><div><small>In Stock</small><strong>{{ safeCount }}</strong></div></article>
-      <article><span class="tone-amber"><TriangleAlert :size="21" /></span><div><small>Low Stock</small><strong>{{ lowCount }}</strong></div></article>
-      <article><span class="tone-rose"><TriangleAlert :size="21" /></span><div><small>Out of Stock</small><strong>{{ emptyCount }}</strong></div></article>
+      <article><span class="tone-amber"><TriangleAlert :size="21" /></span><div><small>Low Stock (≤ {{ store.globalLowStockThreshold }})</small><strong>{{ lowCount }}</strong></div></article>
+      <article><span class="tone-rose"><TriangleAlert :size="21" /></span><div><small>Stok Habis</small><strong>{{ emptyCount }}</strong></div></article>
     </section>
 
     <section class="panel table-panel">
@@ -602,7 +751,17 @@ const exportInventoryPdf = async () => {
       <template v-if="tab === 'master' || tab === 'monitor'">
         <div class="table-toolbar">
           <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search item name or code" /></label>
-          <div class="filter-row">
+          <div class="filter-row" style="gap: 10px; flex-wrap: wrap;">
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#5c5247;font-weight:600;">
+              <span>Batas Low Stock (Semua):</span>
+              <input
+                type="number"
+                min="1"
+                :value="store.globalLowStockThreshold"
+                style="width:64px;height:36px;padding:0 8px;border:1px solid #e4dcd1;border-radius:9px;background:#faf8f4;text-align:center;"
+                @input="store.setGlobalLowStockThreshold(Number(($event.target as HTMLInputElement).value))"
+              />
+            </label>
             <SearchSelect
               v-if="tab === 'monitor'"
               v-model="monitorStatusFilter"
@@ -610,7 +769,7 @@ const exportInventoryPdf = async () => {
               search-placeholder="Filter status…"
               aria-label="Filter monitor stock status"
             />
-            <button v-if="tab === 'master'" class="soft-button" @click="openItemForm(false)"><Plus :size="16" />Add Inventory Item</button>
+            <button v-if="tab === 'master'" class="soft-button" @click="openItemForm(false)"><Plus :size="16" />Add Makeup Item</button>
           </div>
         </div>
         <div class="data-table-wrap">
@@ -619,7 +778,7 @@ const exportInventoryPdf = async () => {
               <tr>
                 <th>
                   <button type="button" class="th-sort-btn is-active" title="Sort items A–Z / Z–A" @click="toggleItemSort">
-                    <span>Item &amp; Photo</span>
+                    <span>Item Name</span>
                     <ArrowUp v-if="itemSortDir === 'asc'" :size="14" class="sort-icon" />
                     <ArrowDown v-else :size="14" class="sort-icon" />
                   </button>
@@ -638,11 +797,8 @@ const exportInventoryPdf = async () => {
               <tr v-for="item in paginatedItems" :key="item.id">
                 <td>
                   <div class="inventory-name">
-                    <button v-if="item.imageUrl" type="button" class="proof-thumb-btn" style="width: 38px; height: 38px; padding: 0; border-radius: 9px;" title="Zoom product photo" @click="openProofModal(item.imageUrl)">
-                      <img :src="item.imageUrl" :alt="item.name" class="item-thumb-img" style="border: 0;" />
-                    </button>
-                    <span v-else>{{ item.name.slice(0, 1) }}</span>
-                    <div><strong>{{ item.name }}</strong><small>{{ item.code }} · {{ item.unit }}</small></div>
+                    <span>{{ item.name.slice(0, 1) }}</span>
+                    <div><strong>{{ item.name }}</strong><small>{{ item.code }}</small></div>
                   </div>
                 </td>
                 <td>{{ item.category }}</td>
@@ -654,12 +810,12 @@ const exportInventoryPdf = async () => {
                     {{ (item.stockAdjustment ?? 0) > 0 ? `+${item.stockAdjustment}` : (item.stockAdjustment ?? 0) }}
                   </strong>
                 </td>
-                <td><strong class="stock-number">{{ store.stockAvailable(item) }} <small>{{ item.unit }}</small></strong><span class="subtle-line">Minimum {{ item.minimumStock }}</span></td>
+                <td><strong class="stock-number">{{ store.stockAvailable(item) }}</strong></td>
                 <td><StatusBadge :label="displayStockStatus(store.stockStatus(item))" /></td>
                 <td v-if="tab === 'master'">
                   <div class="row-actions">
-                    <button type="button" class="icon-button" title="Edit item details & photo" @click="openEditItemForm(item)"><Pencil :size="15" /></button>
-                    <button type="button" class="icon-button danger-icon-button" title="Delete item from catalog" @click="openDeleteItemModal(item)"><Trash2 :size="15" /></button>
+                    <button type="button" class="icon-button" title="Edit item" @click="openEditItemForm(item)"><Pencil :size="15" /></button>
+                    <button type="button" class="icon-button danger-icon-button" title="Delete item" @click="openDeleteItemModal(item)"><Trash2 :size="15" /></button>
                   </div>
                 </td>
               </tr>
@@ -773,7 +929,7 @@ const exportInventoryPdf = async () => {
               <tr v-for="row in paginatedMovements" :key="row.id">
                 <td>{{ formatDate(row.date) }}</td>
                 <td><strong>{{ store.inventory.find((item) => item.id === row.itemId)?.name }}</strong></td>
-                <td><strong :class="row.type === 'Masuk' ? 'positive-number' : 'negative-number'">{{ row.type === 'Masuk' ? '+' : '−' }}{{ row.quantity }}</strong> <small class="unit-tag">{{ store.inventory.find((item) => item.id === row.itemId)?.unit ?? '' }}</small></td>
+                <td><strong :class="row.type === 'Masuk' ? 'positive-number' : 'negative-number'">{{ row.type === 'Masuk' ? '+' : '−' }}{{ row.quantity }}</strong></td>
                 <td>{{ row.pic }}</td>
                 <td>
                   <button v-if="row.proofImageUrl" type="button" class="proof-thumb-btn" title="View photo proof" @click="openProofModal(row.proofImageUrl)">
@@ -815,6 +971,48 @@ const exportInventoryPdf = async () => {
         />
       </template>
     </section>
+    </template>
+
+    <!-- INVENTORY ATTIRE (WITH PHOTOS) -->
+    <section v-else class="panel attire-catalog-panel">
+      <div class="attire-toolbar">
+        <label class="table-search"><Search :size="17" /><input v-model="attireSearch" placeholder="Search attire name, code, or size" /></label>
+        <div class="filter-row">
+          <SearchSelect v-model="attireCategory" :options="attireCategoryFilterOptions" search-placeholder="Category…" aria-label="Filter attire category" />
+          <SearchSelect v-model="attireStatusFilter" :options="attireStatusFilterOptions" search-placeholder="Status…" aria-label="Filter attire status" />
+        </div>
+      </div>
+      <div class="attire-grid">
+        <article v-for="item in paginatedAttireItems" :key="item.id" class="attire-card">
+          <button class="attire-photo" :class="`attire-${item.category.toLowerCase()}`" @click="item.imageUrl ? openProofModal(item.imageUrl) : openEditAttire(item)">
+            <img v-if="item.imageUrl" :src="item.imageUrl" :alt="item.name" loading="lazy" decoding="async" />
+            <span v-else><Shirt :size="34" /><small>{{ item.category }}</small></span>
+            <i><ZoomIn :size="15" />{{ item.imageUrl ? 'Zoom' : 'Add Photo' }}</i>
+          </button>
+          <div class="attire-card-body">
+            <div>
+              <span>{{ item.code }}</span>
+              <StatusBadge :label="displayAttireStatus(store.effectiveAttireStatus(item))" />
+            </div>
+            <h4>{{ item.name }}</h4>
+            <p>{{ item.category }} · Size <strong>{{ item.size }}</strong></p>
+            <div class="row-actions" style="justify-content:space-between;align-items:center;margin-top:6px;">
+              <SearchSelect
+                :model-value="store.effectiveAttireStatus(item) === 'Laundry' ? 'Laundry' : 'Tersedia'"
+                :options="attireManualStatusOptions"
+                size="sm"
+                search-placeholder="Status…"
+                aria-label="Attire status"
+                @change="(val) => store.updateWeddingAttireStatus(item.id, val as AttireStatus)"
+              />
+              <button type="button" class="icon-button" title="Edit attire & photo" @click="openEditAttire(item)"><Pencil :size="15" /></button>
+            </div>
+          </div>
+        </article>
+        <button type="button" class="attire-add-card" @click="openCreateAttire"><Plus :size="25" /><strong>Add New Attire</strong><span>Upload wardrobe photo and size</span></button>
+      </div>
+      <DataPagination v-model:current-page="attirePage" v-model:page-size="attirePageSize" :total-items="filteredAttireItems.length" />
+    </section>
 
     <UiModal :open="showMovement" :title="`Record Stock ${movement.type === 'Masuk' ? 'In' : 'Out'}`" :description="`Log multiple inventory ${movement.type === 'Masuk' ? 'restock' : 'usage'} lines with photo proof.`" wide @close="showMovement = false">
       <form class="form-grid" @submit.prevent="submitMovement">
@@ -842,16 +1040,13 @@ const exportInventoryPdf = async () => {
               <SearchSelect v-model="line.itemId" :options="inventoryItemOptions" required placeholder="Select inventory item" search-placeholder="Search item…" />
             </label>
             <label>
-              <span>Qty &amp; Unit *</span>
-              <div class="qty-unit-input">
-                <input
-                  v-model.number="line.quantity"
-                  type="number"
-                  min="1"
-                  :max="movement.type === 'Keluar' && line.itemId ? store.stockAvailable(store.inventory.find((i) => i.id === line.itemId)!) : undefined"
-                />
-                <span class="qty-unit-suffix">{{ store.inventory.find((i) => i.id === line.itemId)?.unit || 'unit' }}</span>
-              </div>
+              <span>Qty *</span>
+              <input
+                v-model.number="line.quantity"
+                type="number"
+                min="1"
+                :max="movement.type === 'Keluar' && line.itemId ? store.stockAvailable(store.inventory.find((i) => i.id === line.itemId)!) : undefined"
+              />
             </label>
             <button
               type="button"
@@ -992,33 +1187,42 @@ const exportInventoryPdf = async () => {
       </div>
     </UiModal>
 
-    <!-- Add / Edit Inventory Item WITH Photo Upload & Dropdown Settings synced Category/Unit -->
-    <UiModal :open="showItemForm" :title="editingItemId ? 'Edit Inventory Item' : 'Add Inventory Item'" :description="editingItemId ? 'Update item name, photo, category, unit, or minimum threshold.' : 'Item code is generated automatically and synced with Dropdown Settings.'" wide @close="showItemForm = false">
+    <!-- Add / Edit Makeup Inventory Item (No Photo, No Unit, No Per-Item Minimum Stock) -->
+    <UiModal :open="showItemForm" :title="editingItemId ? 'Edit Makeup Item' : 'Add Makeup Item'" :description="editingItemId ? 'Update makeup item name, category, or initial stock.' : 'Item code is generated automatically. Low stock uses one global threshold for all items.'" wide @close="showItemForm = false">
       <form class="form-grid" @submit.prevent="submitItem">
         <label class="span-2 is-required"><span>Item Name *</span><input v-model="itemForm.name" placeholder="e.g. Lip Tint Velvet" /></label>
         <label class="is-required">
           <span>Category *</span>
           <SearchSelect v-model="itemForm.category" :options="invCategorySelectOptions" required search-placeholder="Search category…" />
         </label>
-        <label class="is-required">
-          <span>Unit *</span>
-          <SearchSelect v-model="itemForm.unit" :options="invUnitSelectOptions" required search-placeholder="Search unit…" />
-        </label>
         <label class="is-optional"><span>Initial Stock <em class="opt-tag">Optional</em></span><input v-model.number="itemForm.initialStock" type="number" min="0" /></label>
-        <label class="is-optional"><span>Minimum Stock Alert <em class="opt-tag">Optional</em></span><input v-model.number="itemForm.minimumStock" type="number" min="0" /></label>
-        <div class="span-2 attire-upload-block">
-          <span class="upload-field-label">Upload Product Image (Displayed in Catalog &amp; Stock PDF)</span>
-          <label class="upload-zone">
-            <img v-if="itemForm.imageUrl" :src="itemForm.imageUrl" alt="Inventory item image" />
-            <div v-else><UploadCloud :size="24" /><strong>Upload JPG, PNG, or WebP product photo</strong><span>Max 5 MB</span></div>
-            <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleItemPhotoUpload" />
-          </label>
-          <button v-if="itemForm.imageUrl" type="button" class="soft-button remove-photo-btn" @click="itemForm.imageUrl = ''">Remove item photo</button>
-          <p v-if="uploadingItemPhoto" class="upload-state"><LoaderCircle class="spin" :size="15" />Processing photo…</p>
-          <p v-if="itemPhotoError" class="form-error">{{ itemPhotoError }}</p>
-        </div>
         <p v-if="itemError" class="form-error span-2">{{ itemError }}</p>
-        <div class="modal-actions span-2"><button type="button" class="secondary-button" @click="showItemForm = false">Cancel</button><button class="primary-button" :disabled="uploadingItemPhoto">{{ editingItemId ? 'Save Changes' : 'Save to Catalog' }}</button></div>
+        <div class="modal-actions span-2"><button type="button" class="secondary-button" @click="showItemForm = false">Cancel</button><button class="primary-button">{{ editingItemId ? 'Save Changes' : 'Save to Catalog' }}</button></div>
+      </form>
+    </UiModal>
+
+    <UiModal :open="showAttireForm" :title="editingAttireId ? 'Edit Attire' : 'Add New Attire'" description="Upload wardrobe photo and manage Bride/Groom attire inventory." wide @close="showAttireForm = false">
+      <form class="form-grid" @submit.prevent="submitAttire">
+        <label class="is-required"><span>Attire Name *</span><input v-model="attireForm.name" placeholder="e.g. Kebaya Sekar Arum Putih" /></label>
+        <label class="is-required"><span>Category *</span><SearchSelect v-model="attireForm.category" :options="attireCategoryFormOptions" required search-placeholder="Search category…" /></label>
+        <label class="is-required"><span>Size *</span><input v-model="attireForm.size" placeholder="S / M / L / Custom" /></label>
+        <label class="is-required"><span>Manual Status *</span><SearchSelect v-model="attireForm.status" :options="attireManualStatusOptions" required search-placeholder="Search status…" /></label>
+        <label class="span-2 is-optional"><span>Notes <em class="opt-tag">Optional</em></span><textarea v-model="attireForm.notes" rows="2" placeholder="Color, fabric, or condition notes" /></label>
+        <div class="span-2 attire-upload-block">
+          <span class="upload-field-label">Upload Attire Photo</span>
+          <label class="upload-zone">
+            <img v-if="attireForm.imageUrl" :src="attireForm.imageUrl" alt="Attire preview" />
+            <div v-else><UploadCloud :size="24" /><strong>Upload JPG, PNG, or WebP attire photo</strong><span>Max 5 MB</span></div>
+            <input type="file" accept="image/jpeg,image/png,image/webp" @change="handleAttirePhotoUpload" />
+          </label>
+          <button v-if="attireForm.imageUrl" type="button" class="soft-button remove-photo-btn" @click="attireForm.imageUrl = ''">Remove attire photo</button>
+          <p v-if="attireUploading" class="upload-state"><LoaderCircle class="spin" :size="15" />Uploading photo…</p>
+          <p v-if="attireUploadError" class="form-error">{{ attireUploadError }}</p>
+        </div>
+        <div class="modal-actions span-2">
+          <button type="button" class="secondary-button" @click="showAttireForm = false">Cancel</button>
+          <button class="primary-button" :disabled="attireUploading">{{ editingAttireId ? 'Save Changes' : 'Save Attire' }}</button>
+        </div>
       </form>
     </UiModal>
 
@@ -1048,11 +1252,8 @@ const exportInventoryPdf = async () => {
           <SearchSelect v-model="editMovementForm.itemId" :options="inventoryItemOptions" required search-placeholder="Search item…" />
         </label>
         <label class="is-required">
-          <span>Quantity &amp; Unit *</span>
-          <div class="qty-unit-input">
-            <input v-model.number="editMovementForm.quantity" type="number" min="1" />
-            <span class="qty-unit-suffix">{{ store.inventory.find((i) => i.id === editMovementForm.itemId)?.unit || 'unit' }}</span>
-          </div>
+          <span>Quantity *</span>
+          <input v-model.number="editMovementForm.quantity" type="number" min="1" />
         </label>
         <label class="span-2 is-optional"><span>Notes <em class="opt-tag">Optional</em></span><textarea v-model="editMovementForm.notes" rows="2" /></label>
         <div class="span-2 attire-upload-block">

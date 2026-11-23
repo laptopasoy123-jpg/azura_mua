@@ -123,7 +123,7 @@ export const displayStockStatus = (status: string): string => {
   const map: Record<string, string> = {
     Aman: 'In Stock',
     Menipis: 'Low Stock',
-    Habis: 'Out of Stock',
+    Habis: 'Stok Habis',
   }
   return map[status] ?? status
 }
