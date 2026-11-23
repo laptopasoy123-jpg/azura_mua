@@ -387,6 +387,7 @@ export const pullAllFromSupabase = async (): Promise<RemoteHydrationResult | nul
       unit: String(c.unit),
       active: Boolean(c.is_active ?? true),
       imageUrl: c.image_url ? String(c.image_url) : undefined,
+      createdAt: String(c.created_at ?? ''),
     }))
     out.catalog = catalog
 
@@ -449,6 +450,7 @@ export const pullAllFromSupabase = async (): Promise<RemoteHydrationResult | nul
         dueDate: inv.due_date ? String(inv.due_date) : undefined,
         groups: [group],
         items,
+        createdAt: String(inv.created_at ?? ''),
       })
     }
     out.invoices = rawInvoices
@@ -461,6 +463,7 @@ export const pullAllFromSupabase = async (): Promise<RemoteHydrationResult | nul
       method: String(p.method),
       amount: Number(p.amount),
       notes: p.notes ? String(p.notes) : undefined,
+      createdAt: String(p.created_at ?? ''),
     }))
 
     out.expenses = expRows.map((e) => ({
@@ -547,6 +550,7 @@ export const pullAllFromSupabase = async (): Promise<RemoteHydrationResult | nul
         location: String(it.storage_location ?? ''),
         imageUrl: it.image_url ? String(it.image_url) : undefined,
         active: Boolean(it.is_active ?? true),
+        createdAt: String(it.created_at ?? ''),
       }
     })
 
@@ -588,6 +592,7 @@ export const pullAllFromSupabase = async (): Promise<RemoteHydrationResult | nul
       status: fromDbAttireStatus(a.status),
       imageUrl: a.image_url ? String(a.image_url) : undefined,
       notes: a.notes ? String(a.notes) : undefined,
+      createdAt: String(a.created_at ?? ''),
     }))
 
     const eventDetailsByFormId = new Map<string, WeddingFittingForm['events']>()

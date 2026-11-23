@@ -67,7 +67,7 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
       `${row.customerName}${row.customerPhone ? `\nTel: ${row.customerPhone}` : ''}`,
       `${formatDate(row.eventDate)}${row.eventTime ? `\nPukul: ${row.eventTime}` : ''}`,
       row.assignedNames.length ? row.assignedNames.map((n, i) => `${i + 1}. ${n}`).join('\n') : 'Unassigned',
-      `${row.location || '-'}${row.notes ? `\nCatatan: ${row.notes}` : ''}`,
+      row.notes ? `Catatan: ${row.notes}` : '-',
     ])
     : [['-', 'No job assignments found in the selected date range.', '-', '-', '-']]
 
@@ -75,7 +75,7 @@ export const downloadJobReportPdf = (input: JobReportInput) => {
     startY: y,
     margin: { left: margin, right: margin, bottom: 18 },
     tableWidth: contentWidth,
-    head: [['NO.', 'ATAS NAMA (CUSTOMER)', 'TANGGAL ACARA', 'TIM YANG BERTUGAS', 'LOKASI & CATATAN']],
+    head: [['NO.', 'ATAS NAMA (CUSTOMER)', 'TANGGAL ACARA', 'TIM YANG BERTUGAS', 'CATATAN']],
     body: tableBody,
     theme: 'grid',
     rowPageBreak: 'avoid',

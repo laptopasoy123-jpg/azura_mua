@@ -5,7 +5,7 @@ import {
   SlidersHorizontal, Users, Plus, ChevronRight, Save, ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type EmployeeRecord } from '../stores/crm'
-import { displayBookingStatus, formatDate, sortAlpha } from '../utils/format'
+import { displayBookingStatus, formatDate, sortAlpha, sortByInputDate } from '../utils/format'
 import { downloadJobReportPdf, type JobReportRow } from '../utils/jobReportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -77,7 +77,7 @@ const filteredBookings = computed(() => {
     return true
   })
   if (customerSortDir.value === 'none') return list
-  return sortAlpha(list, (b) => store.customerFor(b.customerId)?.name ?? '', customerSortDir.value)
+  return sortByInputDate(list, (b) => b.createdAt, customerSortDir.value)
 })
 
 const paginatedBookings = computed(() => {
@@ -315,14 +315,12 @@ const exportPdf = async () => {
             <tr>
               <th>PO Number</th>
               <th>Event Date</th>
-              <th>
-                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleCustomerSort">
-                  <span>Customer &amp; Venue</span>
+              <th><button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Urutkan tanggal input PO" @click="toggleCustomerSort">
+                  <span>Customer &amp; Venue · Input Date</span>
                   <ArrowUp v-if="customerSortDir === 'asc'" :size="14" class="sort-icon" />
                   <ArrowDown v-else-if="customerSortDir === 'desc'" :size="14" class="sort-icon" />
                   <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
-                </button>
-              </th>
+                </button></th>
               <th>Assigned Crew</th>
               <th>Details &amp; Crew</th>
             </tr>
@@ -339,6 +337,7 @@ const exportPdf = async () => {
                   <strong class="mono-code">{{ booking.poNumber }}</strong>
                   <StatusBadge :label="displayBookingStatus(booking.status)" />
                 </div>
+                <span class="subtle-line">Input {{ formatDate(booking.createdAt) }}</span>
               </td>
               <td>
                 <span class="job-date-line">

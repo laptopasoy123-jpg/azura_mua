@@ -292,8 +292,8 @@ describe('Wedding Portal — Acara, Domas/Manggolo & Softlens', () => {
       updatedAt: '',
     })
 
-    // Before event date (2026-11-20 -> 2026-11-22): Booked; on event day (2026-11-22): Terpakai; H+1 (2026-11-23): auto Laundry; H+2 (2026-11-24): Tersedia
-    expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Booked')
+    // Available before the event; In Use on event day; Laundry on H+1; Available again on H+2.
+    expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Tersedia')
     expect(store.effectiveAttireStatus(attire1, '2026-11-22')).toBe('Terpakai')
     expect(store.effectiveAttireStatus(attire1, '2026-11-23')).toBe('Laundry')
     expect(store.effectiveAttireStatus(attire1, '2026-11-24')).toBe('Tersedia')
@@ -309,12 +309,9 @@ describe('Wedding Portal — Acara, Domas/Manggolo & Softlens', () => {
     expect(store.urgentAttireSchedules('attire-1', '2026-11-21')).toHaveLength(1)
     expect(store.urgentAttireSchedules('attire-1', '2026-11-22')).toHaveLength(1)
 
-    // H-1 Laundry reminder alert
-    store.updateWeddingAttireStatus('attire-1', 'Laundry')
-    const alertsHMinus1 = store.getLaundryUrgentAlerts('2026-11-21')
-    expect(alertsHMinus1).toHaveLength(1)
-    expect(alertsHMinus1[0]!.daysLeft).toBe(1)
-    expect(alertsHMinus1[0]!.message).toContain('Prepare attire Kebaya Sekar Arum immediately')
+    // Laundry status follows the event date without a manual action.
+    expect(store.effectiveAttireStatus(attire1, '2026-11-21')).toBe('Tersedia')
+    expect(store.getLaundryUrgentAlerts('2026-11-21')).toHaveLength(0)
 
     // Conflict check on same date for a different booking
     expect(store.attireConflictsOnDate('attire-1', '2026-11-22', 'b-2')).toHaveLength(1)
@@ -356,7 +353,7 @@ describe('Wedding Portal — Acara, Domas/Manggolo & Softlens', () => {
     })
 
     const attire1 = store.weddingAttire.find((a) => a.id === 'attire-1')!
-    expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Booked')
+    expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Tersedia')
     expect(store.effectiveAttireStatus(attire1, '2026-11-22')).toBe('Terpakai')
     expect(store.bookingTotal('b-1')).toBe(3200000)
     expect(store.bookingPaid('b-1')).toBe(1500000)

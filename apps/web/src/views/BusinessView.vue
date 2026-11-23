@@ -7,7 +7,7 @@ import {
   UploadCloud, LoaderCircle, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp, ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import { useCrmStore, type CatalogType, type Expense, type Invoice, type OrderGroup } from '../stores/crm'
-import { formatCurrency, formatDate, sortAlpha } from '../utils/format'
+import { formatCurrency, formatDate, sortAlpha, sortByInputDate } from '../utils/format'
 import { REPORT_CATALOG, type ReportKey } from '../utils/reportCatalog'
 import { downloadInvoicePdf, resolveInvoiceShareUrl } from '../utils/invoicePdf'
 import { downloadSelectedReportsPdf } from '../utils/reportPdf'
@@ -272,7 +272,7 @@ const filteredOrderInvoices = computed(() => {
     )
   })
   if (orderCustomerSortDir.value === 'none') return list
-  return sortAlpha(list, (inv) => store.customerFor(store.bookingFor(inv.bookingId)?.customerId ?? '')?.name ?? '', orderCustomerSortDir.value)
+  return sortByInputDate(list, (inv) => inv.createdAt ?? inv.issuedAt, orderCustomerSortDir.value)
 })
 
 const paginatedOrderInvoices = computed(() => {
@@ -1213,15 +1213,13 @@ watch(() => route.query.catalog, (catalog) => {
             <thead>
               <tr>
                 <th>PO Number</th>
-                <th>
-                  <button type="button" class="th-sort-btn" :class="{ 'is-active': orderCustomerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleOrderCustomerSort">
-                    <span>Customer</span>
+                <th>Customer</th>
+                <th><button type="button" class="th-sort-btn" :class="{ 'is-active': orderCustomerSortDir !== 'none' }" title="Urutkan tanggal input invoice" @click="toggleOrderCustomerSort">
+                    <span>Invoice Issued · Input</span>
                     <ArrowUp v-if="orderCustomerSortDir === 'asc'" :size="14" class="sort-icon" />
                     <ArrowDown v-else-if="orderCustomerSortDir === 'desc'" :size="14" class="sort-icon" />
                     <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
-                  </button>
-                </th>
-                <th>Invoice Issued</th>
+                  </button></th>
                 <th>Total Billing</th>
                 <th>Balance Due</th>
                 <th>Status</th>
@@ -1239,7 +1237,7 @@ watch(() => route.query.catalog, (catalog) => {
               >
                 <td><strong class="mono-code">{{ store.bookingFor(invoice.bookingId)?.poNumber }}</strong></td>
                 <td><strong>{{ store.customerFor(store.bookingFor(invoice.bookingId)?.customerId ?? '')?.name }}</strong></td>
-                <td>{{ formatDate(invoice.issuedAt) }}</td>
+                <td>{{ formatDate(invoice.issuedAt) }}<span v-if="invoice.createdAt" class="subtle-line">Input {{ formatDate(invoice.createdAt) }}</span></td>
                 <td><strong>{{ formatCurrency(store.bookingTotal(invoice.bookingId)) }}</strong></td>
                 <td><strong>{{ formatCurrency(store.bookingBalance(invoice.bookingId)) }}</strong></td>
                 <td><StatusBadge :label="paymentStatus(invoice.bookingId)" /></td>

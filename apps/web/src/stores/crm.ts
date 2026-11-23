@@ -127,6 +127,7 @@ export interface CatalogItem {
   unit: string
   active: boolean
   imageUrl?: string
+  createdAt?: string
 }
 
 export interface InvoiceItem {
@@ -157,6 +158,7 @@ export interface Invoice {
   dueDate?: string
   groups: OrderGroup[]
   items: InvoiceItem[]
+  createdAt?: string
 }
 
 export interface Payment {
@@ -167,6 +169,7 @@ export interface Payment {
   method: string
   amount: number
   notes?: string
+  createdAt?: string
 }
 
 export interface InventoryItem {
@@ -183,6 +186,7 @@ export interface InventoryItem {
   location: string
   imageUrl?: string
   active: boolean
+  createdAt?: string
 }
 
 export interface StockMovement {
@@ -253,6 +257,7 @@ export interface WeddingAttire {
   status: AttireStatus
   imageUrl?: string
   notes?: string
+  createdAt?: string
 }
 
 export interface AttireScheduleEntry {
@@ -863,13 +868,11 @@ export const useCrmStore = defineStore('crm', () => {
   }
 
   const effectiveAttireStatus = (attire: WeddingAttire, referenceDate?: string): AttireStatus => {
-    if (attire.status === 'Laundry') return 'Laundry'
     const refDate = referenceDate ?? localTodayIso()
     const allScheduled = attireSchedule(attire.id, { includePast: true, referenceDate: refDate })
     if (allScheduled.some((entry) => entry.eventDate === refDate)) return 'Terpakai'
     // Automatically in Laundry on H+1 after an event day, then returns to Tersedia on H+2+
     if (allScheduled.some((entry) => calendarDaysDiff(entry.eventDate, refDate) === 1)) return 'Laundry'
-    if (allScheduled.some((entry) => entry.eventDate > refDate)) return 'Booked'
     return 'Tersedia'
   }
 
@@ -1246,6 +1249,7 @@ export const useCrmStore = defineStore('crm', () => {
       id: uid(),
       receiptNumber,
       ...input,
+      createdAt: new Date().toISOString(),
     }
     payments.value.unshift(payment)
     addActivity('Payment received', `${booking?.poNumber ?? 'PO'} for Rp. ${new Intl.NumberFormat('id-ID').format(input.amount)}`, 'green')
@@ -1295,7 +1299,7 @@ export const useCrmStore = defineStore('crm', () => {
   }
 
   const addCatalogItem = (input: Omit<CatalogItem, 'id' | 'code'>) => {
-    const item: CatalogItem = { ...input, id: uid(), code: `CAT-${String(catalog.value.length + 1).padStart(4, '0')}` }
+    const item: CatalogItem = { ...input, id: uid(), code: `CAT-${String(catalog.value.length + 1).padStart(4, '0')}`, createdAt: new Date().toISOString() }
     catalog.value.unshift(item)
     addActivity('Service added', `${item.name} added to ${item.type} catalog`, 'blue')
     syncCatalogItem(item)
@@ -1379,6 +1383,7 @@ export const useCrmStore = defineStore('crm', () => {
       dueDate: input.dueDate,
       groups: [initialGroup],
       items: [...invoiceItems],
+      createdAt: new Date().toISOString(),
     }
     invoices.value.unshift(invoice)
     addActivity('Initial order created', `${invoice.invoiceNumber} for ${booking.poNumber}`, 'blue')
@@ -1892,6 +1897,7 @@ export const useCrmStore = defineStore('crm', () => {
       stockOut: 0,
       stockAdjustment: 0,
       active: true,
+      createdAt: new Date().toISOString(),
     }
     inventory.value.unshift(item)
     addActivity('New inventory item added', `${item.name} added to inventory catalog`, 'blue')
@@ -1940,6 +1946,7 @@ export const useCrmStore = defineStore('crm', () => {
       ...input,
       id: uid(),
       code: `BTR-${String(weddingAttire.value.length + 1).padStart(4, '0')}`,
+      createdAt: new Date().toISOString(),
     }
     weddingAttire.value.unshift(item)
     addActivity('Attire added', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
@@ -1954,14 +1961,6 @@ export const useCrmStore = defineStore('crm', () => {
     addActivity('Attire updated', `${item.name} · ${item.category} · Size ${item.size}`, 'blue')
     syncWeddingAttire(item)
     return item
-  }
-
-  const updateWeddingAttireStatus = (id: string, status: AttireStatus) => {
-    const item = weddingAttire.value.find((entry) => entry.id === id)
-    if (!item) throw new Error('Attire not found.')
-    item.status = status
-    addActivity('Attire status updated', `${item.name} → ${status === 'Tersedia' ? 'Available' : status}`, 'blue')
-    syncWeddingAttire(item)
   }
 
   const saveWeddingForm = (input: WeddingFittingForm) => {
@@ -2265,7 +2264,7 @@ export const useCrmStore = defineStore('crm', () => {
     addBooking, updateBooking, cancelBooking, addBookingRefund, updateBookingRefund, addPayment, updatePayment, deletePayment, addCatalogItem, updateCatalogItem,
     createInvoiceFromOrder, addOrderGroupToBooking, updateOrderGroup, deleteOrderGroup,
     addExpense, addBatchExpenses, updateExpense, deleteExpense, moveStock, submitBatchStockMovement, submitStockOpname, updateStockMovement, deleteStockMovement, updateStockOpname, deleteStockOpname, addInventoryItem, updateInventoryItem, deleteInventoryItem,
-    addWeddingAttire, updateWeddingAttire, updateWeddingAttireStatus, saveWeddingForm, deleteWeddingForm,
+    addWeddingAttire, updateWeddingAttire, saveWeddingForm, deleteWeddingForm,
     addEmployee, updateEmployee, toggleEmployeeStatus, jobForBooking, assignedEmployeesForBooking, toggleBookingEmployee, setBookingJobNotes,
     updateBusinessProfile, addDropdownOption, updateDropdownOption, removeDropdownOption, resetDemo,
     actionToast, showActionToast, dismissActionToast, pdfDownloadState, runWithPdfLoader,

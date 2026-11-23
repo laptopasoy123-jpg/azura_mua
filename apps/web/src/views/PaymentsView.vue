@@ -5,7 +5,7 @@ import {
   ArrowUp, ArrowDown, ArrowUpDown,
 } from '@lucide/vue'
 import { useCrmStore, type Payment } from '../stores/crm'
-import { formatCurrency, formatDate, sortAlpha } from '../utils/format'
+import { formatCurrency, formatDate, sortAlpha, sortByInputDate } from '../utils/format'
 import { downloadPaymentReceiptPdf, formatWhatsAppPhone, resolveReceiptShareUrl, toReceiptSharePayload, type ReceiptSharePayload } from '../utils/receiptPdf'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -65,7 +65,7 @@ const rows = computed(() => {
     return !query || payment.receiptNumber.toLowerCase().includes(query) || booking?.poNumber.toLowerCase().includes(query) || customer?.name.toLowerCase().includes(query)
   })
   if (customerSortDir.value === 'none') return list
-  return sortAlpha(list, (p) => store.customerFor(store.bookingFor(p.bookingId)?.customerId ?? '')?.name ?? '', customerSortDir.value)
+  return sortByInputDate(list, (p) => p.createdAt ?? p.paidAt, customerSortDir.value)
 })
 
 const paginatedRows = computed(() => {
@@ -314,15 +314,13 @@ const onSendWhatsApp = async (payment: Payment) => {
           <thead>
             <tr>
               <th>Receipt</th>
-              <th>
-                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleCustomerSort">
-                  <span>Customer &amp; PO</span>
+              <th>Customer &amp; PO</th>
+              <th><button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Urutkan tanggal input pembayaran" @click="toggleCustomerSort">
+                  <span>Payment Date · Input</span>
                   <ArrowUp v-if="customerSortDir === 'asc'" :size="14" class="sort-icon" />
                   <ArrowDown v-else-if="customerSortDir === 'desc'" :size="14" class="sort-icon" />
                   <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
-                </button>
-              </th>
-              <th>Payment Date</th>
+                </button></th>
               <th>Method</th>
               <th>Amount Paid</th>
               <th>PO Status</th>
@@ -336,7 +334,7 @@ const onSendWhatsApp = async (payment: Payment) => {
                 <strong>{{ store.customerFor(store.bookingFor(payment.bookingId)?.customerId ?? '')?.name }}</strong>
                 <span class="subtle-line">{{ store.bookingFor(payment.bookingId)?.poNumber }} · {{ store.customerFor(store.bookingFor(payment.bookingId)?.customerId ?? '')?.phone }}</span>
               </td>
-              <td>{{ formatDate(payment.paidAt) }}</td>
+              <td>{{ formatDate(payment.paidAt) }}<span v-if="payment.createdAt" class="subtle-line">Input {{ formatDate(payment.createdAt) }}</span></td>
               <td><span class="method-chip"><WalletCards :size="14" />{{ methodLabel(payment.method) }}</span></td>
               <td><strong>{{ formatCurrency(payment.amount) }}</strong></td>
               <td><StatusBadge :label="store.bookingBalance(payment.bookingId) <= 0 ? 'Paid' : 'Partial'" /></td>

@@ -1807,8 +1807,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .attire-picker-option.is-available { border-color: #dcebe2; background: #f8fcfa; }
 .attire-picker-option.is-available:hover { border-color: #8cc2a6; background: #edf8f2; }
 .attire-picker-option.is-booked {
-  border-color: #f0cbc4;
-  background: #fff3f1;
+  border-color: #e4b669;
+  background: #fff4da;
   opacity: 1 !important;
   cursor: not-allowed;
 }
@@ -1822,7 +1822,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .attire-picker-opt-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .attire-picker-opt-body strong { font-size: 12.5px; line-height: 1.3; color: #1e1a17; word-break: break-word; }
 .attire-picker-opt-body small { font-size: 11px; color: #6e645a; }
-.attire-picker-option.is-booked .attire-picker-opt-body strong { color: #7d2920; }
+.attire-picker-option.is-booked .attire-picker-opt-body strong { color: #805717; }
 .attire-picker-option.is-laundry .attire-picker-opt-body strong { color: #1b4675; }
 
 .attire-status-pill {
@@ -1837,7 +1837,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   white-space: nowrap;
 }
 .attire-status-pill.is-available { color: #246344; background: #dff2e7; border: 1px solid #b5dec6; }
-.attire-status-pill.is-booked { color: #9c2b20; background: #fde2de; border: 1px solid #f0b7b0; }
+.attire-status-pill.is-booked { color: #805717; background: #fff0c8; border: 1px solid #e4b669; }
+
+.fitting-entry-fields { display: flex; flex-direction: column; gap: 18px; }
+.fitting-po-required { padding: 18px 22px; color: #805717; background: #fff9ec; }
+.fitting-preview-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.attire-auto-status { display: block; margin-top: 8px; color: #6d786f; font-size: 11px; }
+.attire-date-filter { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.attire-date-filter input { min-height: 36px; padding: 0 8px; border: 1px solid #e4dcd1; border-radius: 8px; }
+.attire-date-summary { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; }
+.attire-date-summary small { width: 100%; color: #6d786f; }
+.attire-catalog-panel .attire-toolbar { flex-wrap: wrap; }
 .attire-status-pill.is-laundry { color: #1d4e89; background: #dfecfc; border: 1px solid #b4cfef; }
 
 @media (max-width: 720px) {

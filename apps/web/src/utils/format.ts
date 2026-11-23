@@ -56,6 +56,17 @@ export const initials = (value: string) =>
 
 export const uid = () => crypto.randomUUID()
 
+export const sortByInputDate = <T>(items: T[], getDate: (item: T) => string | undefined, direction: 'asc' | 'desc'): T[] =>
+  items.map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const dateA = getDate(a.item) ?? ''
+      const dateB = getDate(b.item) ?? ''
+      const byDate = dateA.localeCompare(dateB)
+      if (byDate) return direction === 'asc' ? byDate : -byDate
+      return direction === 'asc' ? b.index - a.index : a.index - b.index
+    })
+    .map(({ item }) => item)
+
 const satuan = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan', 'sepuluh', 'sebelas']
 
 const terbilangCore = (n: number): string => {

@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { Plus, Search, Image as ImageIcon, Pencil, Check, UploadCloud, LoaderCircle, ArrowUp, ArrowDown } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 import { useCrmStore, type CatalogItem, type CatalogType } from '../stores/crm'
-import { formatCurrency, sortAlpha } from '../utils/format'
+import { formatCurrency, sortByInputDate } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -26,13 +26,13 @@ const uploadError = ref('')
 const imagePreview = ref('')
 const form = reactive({ name: '', type: 'Inti' as CatalogType, description: '', price: 0, unit: 'paket', imageUrl: '' })
 
-const nameSortDir = ref<'asc' | 'desc'>('asc')
+const nameSortDir = ref<'asc' | 'desc'>('desc')
 const items = computed(() => {
   const filtered = store.catalog.filter((item) => {
     const matchesTab = activeTab.value === 'All' || item.type === activeTab.value
     return matchesTab && item.name.toLowerCase().includes(search.value.toLowerCase())
   })
-  return sortAlpha(filtered, (i) => i.name, nameSortDir.value)
+  return sortByInputDate(filtered, (i) => i.createdAt, nameSortDir.value)
 })
 
 const paginatedItems = computed(() => {
@@ -127,12 +127,12 @@ const submit = () => {
         <button
           type="button"
           class="soft-button catalog-sort-btn"
-          :title="nameSortDir === 'asc' ? 'Sorted A–Z (click for Z–A)' : 'Sorted Z–A (click for A–Z)'"
+          :title="nameSortDir === 'asc' ? 'Tanggal input terlama dulu' : 'Tanggal input terbaru dulu'"
           @click="nameSortDir = nameSortDir === 'asc' ? 'desc' : 'asc'"
         >
           <ArrowUp v-if="nameSortDir === 'asc'" :size="15" />
           <ArrowDown v-else :size="15" />
-          <span>Name</span>
+          <span>Tanggal Input</span>
         </button>
       </div>
     </section>

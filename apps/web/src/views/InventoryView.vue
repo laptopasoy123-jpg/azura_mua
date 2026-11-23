@@ -14,7 +14,7 @@ import {
   type StockOpnameRecord,
   type WeddingAttire,
 } from '../stores/crm'
-import { displayAttireStatus, displayStockStatus, formatDate, sortAlpha } from '../utils/format'
+import { displayAttireStatus, displayStockStatus, formatDate, sortAlpha, sortByInputDate } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import { downloadSelectedReportsPdf } from '../utils/reportPdf'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -52,7 +52,6 @@ const attireCategoryFilterOptions = [
 const attireStatusFilterOptions = [
   { value: 'All', label: 'All Statuses' },
   { value: 'Tersedia', label: 'Available' },
-  { value: 'Booked', label: 'Booked' },
   { value: 'Terpakai', label: 'In Use' },
   { value: 'Laundry', label: 'Laundry' },
 ]
@@ -60,15 +59,22 @@ const attireCategoryFormOptions = [
   { value: 'Bride', label: 'Bride' },
   { value: 'Groom', label: 'Groom' },
 ]
-const attireManualStatusOptions = [
-  { value: 'Tersedia', label: 'Available' },
-  { value: 'Laundry', label: 'Laundry' },
-]
+const todayIso = () => {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+const attireDate = ref(todayIso())
+const attireStatusOnDate = (item: WeddingAttire) => store.effectiveAttireStatus(item, attireDate.value || todayIso())
+const attireStockSummary = computed(() => ({
+  available: store.weddingAttire.filter((item) => attireStatusOnDate(item) === 'Tersedia').length,
+  booked: store.weddingAttire.filter((item) => attireStatusOnDate(item) === 'Terpakai').length,
+  laundry: store.weddingAttire.filter((item) => attireStatusOnDate(item) === 'Laundry').length,
+}))
 const filteredAttireItems = computed(() => {
   const q = attireSearch.value.trim().toLowerCase()
   return sortAlpha(
     store.weddingAttire.filter((item) => {
-      const eff = store.effectiveAttireStatus(item)
+      const eff = attireStatusOnDate(item)
       const matchQ = !q || item.name.toLowerCase().includes(q) || item.code.toLowerCase().includes(q) || item.size.toLowerCase().includes(q)
       const matchCat = attireCategory.value === 'All' || item.category === attireCategory.value
       const matchStatus = attireStatusFilter.value === 'All' || eff === attireStatusFilter.value
@@ -97,7 +103,7 @@ const openEditAttire = (item: WeddingAttire) => {
     name: item.name,
     category: item.category,
     size: item.size,
-    status: item.status === 'Laundry' ? 'Laundry' : 'Tersedia',
+    status: 'Tersedia',
     notes: item.notes ?? '',
     imageUrl: item.imageUrl ?? '',
   })
@@ -130,7 +136,7 @@ const submitAttire = () => {
       name: attireForm.name.trim(),
       category: attireForm.category,
       size: attireForm.size.trim(),
-      status: attireForm.status,
+      status: 'Tersedia',
       notes: attireForm.notes.trim() || undefined,
       imageUrl: attireForm.imageUrl || undefined,
     })
@@ -139,7 +145,7 @@ const submitAttire = () => {
       name: attireForm.name.trim(),
       category: attireForm.category,
       size: attireForm.size.trim(),
-      status: attireForm.status,
+      status: 'Tersedia',
       notes: attireForm.notes.trim() || undefined,
       imageUrl: attireForm.imageUrl || undefined,
     })
@@ -256,13 +262,13 @@ const itemForm = reactive({
   name: '',
   category: '',
   unit: 'pcs',
-  initialStock: 0,
+  initialStock: 1,
   minimumStock: 0,
   location: '',
   imageUrl: '',
 })
 
-const itemSortDir = ref<'asc' | 'desc'>('asc')
+const itemSortDir = ref<'asc' | 'desc'>('desc')
 const movSortDir = ref<'none' | 'asc' | 'desc'>('none')
 
 const toggleItemSort = () => {
@@ -283,7 +289,7 @@ const items = computed(() => {
     }
     return true
   })
-  return sortAlpha(filtered, (item) => item.name, itemSortDir.value)
+  return sortByInputDate(filtered, (item) => item.createdAt, itemSortDir.value)
 })
 
 const paginatedItems = computed(() => {
@@ -298,7 +304,7 @@ const paginatedMovements = computed(() => {
   const rawList = tab.value === 'in' ? inMovements.value : outMovements.value
   const list = movSortDir.value === 'none'
     ? rawList
-    : sortAlpha(rawList, (m) => store.inventory.find((i) => i.id === m.itemId)?.name ?? '', movSortDir.value)
+    : sortByInputDate(rawList, (m) => m.date, movSortDir.value)
   const page = tab.value === 'in' ? inPage.value : outPage.value
   const size = tab.value === 'in' ? inPageSize.value : outPageSize.value
   const start = (page - 1) * size
@@ -585,8 +591,8 @@ const openItemForm = (fromMovement = false) => {
   Object.assign(itemForm, {
     name: '',
     category: store.inventoryCategories[0] ?? '',
-    unit: store.units[0] ?? 'pcs',
-    initialStock: 0,
+    unit: 'pcs',
+    initialStock: 1,
     minimumStock: 0,
     location: '-',
     imageUrl: '',
@@ -649,7 +655,7 @@ const submitItem = () => {
     const created = store.addInventoryItem({
       name: itemForm.name,
       category: itemForm.category,
-      unit: 'pcs',
+      unit: itemForm.unit.trim() || 'pcs',
       location: itemForm.location.trim() || '-',
       initialStock: itemForm.initialStock,
       minimumStock: store.globalLowStockThreshold,
@@ -777,8 +783,8 @@ const exportInventoryPdf = async () => {
             <thead>
               <tr>
                 <th>
-                  <button type="button" class="th-sort-btn is-active" title="Sort items A–Z / Z–A" @click="toggleItemSort">
-                    <span>Item Name</span>
+                  <button type="button" class="th-sort-btn is-active" title="Urutkan berdasarkan tanggal input" @click="toggleItemSort">
+                    <span>Item Name · Input Date</span>
                     <ArrowUp v-if="itemSortDir === 'asc'" :size="14" class="sort-icon" />
                     <ArrowDown v-else :size="14" class="sort-icon" />
                   </button>
@@ -798,7 +804,7 @@ const exportInventoryPdf = async () => {
                 <td>
                   <div class="inventory-name">
                     <span>{{ item.name.slice(0, 1) }}</span>
-                    <div><strong>{{ item.name }}</strong><small>{{ item.code }}</small></div>
+                    <div><strong>{{ item.name }}</strong><small>{{ item.code }}<template v-if="item.createdAt"> · Input {{ formatDate(item.createdAt) }}</template></small></div>
                   </div>
                 </td>
                 <td>{{ item.category }}</td>
@@ -915,8 +921,8 @@ const exportInventoryPdf = async () => {
               <tr>
                 <th>Date</th>
                 <th>
-                  <button type="button" class="th-sort-btn" :class="{ 'is-active': movSortDir !== 'none' }" title="Sort item name A–Z / Z–A" @click="toggleMovSort">
-                    <span>Item Name</span>
+                  <button type="button" class="th-sort-btn" :class="{ 'is-active': movSortDir !== 'none' }" title="Urutkan berdasarkan tanggal transaksi" @click="toggleMovSort">
+                    <span>Item Name · Date</span>
                     <ArrowUp v-if="movSortDir === 'asc'" :size="14" class="sort-icon" />
                     <ArrowDown v-else-if="movSortDir === 'desc'" :size="14" class="sort-icon" />
                     <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
@@ -977,6 +983,8 @@ const exportInventoryPdf = async () => {
     <section v-else class="panel attire-catalog-panel">
       <div class="attire-toolbar">
         <label class="table-search"><Search :size="17" /><input v-model="attireSearch" placeholder="Search attire name, code, or size" /></label>
+        <label class="attire-date-filter"><span>Tanggal</span><input v-model="attireDate" type="date" aria-label="Tanggal stok busana" /></label>
+        <div class="attire-date-summary"><strong>{{ attireStockSummary.available }} available</strong><strong>{{ attireStockSummary.booked }} booked</strong><strong>{{ attireStockSummary.laundry }} laundry</strong><small>Qty berdasarkan {{ formatDate(attireDate || todayIso()) }}</small></div>
         <div class="filter-row">
           <SearchSelect v-model="attireCategory" :options="attireCategoryFilterOptions" search-placeholder="Category…" aria-label="Filter attire category" />
           <SearchSelect v-model="attireStatusFilter" :options="attireStatusFilterOptions" search-placeholder="Status…" aria-label="Filter attire status" />
@@ -992,19 +1000,12 @@ const exportInventoryPdf = async () => {
           <div class="attire-card-body">
             <div>
               <span>{{ item.code }}</span>
-              <StatusBadge :label="displayAttireStatus(store.effectiveAttireStatus(item))" />
+              <StatusBadge :label="displayAttireStatus(attireStatusOnDate(item))" />
             </div>
             <h4>{{ item.name }}</h4>
             <p>{{ item.category }} · Size <strong>{{ item.size }}</strong></p>
             <div class="row-actions" style="justify-content:space-between;align-items:center;margin-top:6px;">
-              <SearchSelect
-                :model-value="store.effectiveAttireStatus(item) === 'Laundry' ? 'Laundry' : 'Tersedia'"
-                :options="attireManualStatusOptions"
-                size="sm"
-                search-placeholder="Status…"
-                aria-label="Attire status"
-                @change="(val) => store.updateWeddingAttireStatus(item.id, val as AttireStatus)"
-              />
+              <span class="attire-auto-status">Qty: {{ attireStatusOnDate(item) === 'Tersedia' ? '1 available · 0 booked' : attireStatusOnDate(item) === 'Terpakai' ? '0 available · 1 booked' : '0 available · 0 booked · 1 laundry' }}</span>
               <button type="button" class="icon-button" title="Edit attire & photo" @click="openEditAttire(item)"><Pencil :size="15" /></button>
             </div>
           </div>
@@ -1195,6 +1196,7 @@ const exportInventoryPdf = async () => {
           <span>Category *</span>
           <SearchSelect v-model="itemForm.category" :options="invCategorySelectOptions" required search-placeholder="Search category…" />
         </label>
+        <label><span>Unit</span><input v-model="itemForm.unit" placeholder="pcs" /></label>
         <label class="is-optional"><span>Initial Stock <em class="opt-tag">Optional</em></span><input v-model.number="itemForm.initialStock" type="number" min="0" /></label>
         <p v-if="itemError" class="form-error span-2">{{ itemError }}</p>
         <div class="modal-actions span-2"><button type="button" class="secondary-button" @click="showItemForm = false">Cancel</button><button class="primary-button">{{ editingItemId ? 'Save Changes' : 'Save to Catalog' }}</button></div>
@@ -1206,7 +1208,6 @@ const exportInventoryPdf = async () => {
         <label class="is-required"><span>Attire Name *</span><input v-model="attireForm.name" placeholder="e.g. Kebaya Sekar Arum Putih" /></label>
         <label class="is-required"><span>Category *</span><SearchSelect v-model="attireForm.category" :options="attireCategoryFormOptions" required search-placeholder="Search category…" /></label>
         <label class="is-required"><span>Size *</span><input v-model="attireForm.size" placeholder="S / M / L / Custom" /></label>
-        <label class="is-required"><span>Manual Status *</span><SearchSelect v-model="attireForm.status" :options="attireManualStatusOptions" required search-placeholder="Search status…" /></label>
         <label class="span-2 is-optional"><span>Notes <em class="opt-tag">Optional</em></span><textarea v-model="attireForm.notes" rows="2" placeholder="Color, fabric, or condition notes" /></label>
         <div class="span-2 attire-upload-block">
           <span class="upload-field-label">Upload Attire Photo</span>

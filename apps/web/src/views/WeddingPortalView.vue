@@ -4,7 +4,7 @@ import {
   Plus, Search, Shirt, ZoomIn, UploadCloud, LoaderCircle, Save, CalendarHeart,
   Ruler, UsersRound, Store, Download, Trash2, Image as ImageIcon, Pencil,
   CalendarDays, AlertTriangle, ChevronLeft, ChevronRight, ClipboardList, CheckCircle2, RotateCcw,
-  ArrowUp, ArrowDown, ArrowUpDown,
+  ArrowUp, ArrowDown, ArrowUpDown, Eye,
 } from '@lucide/vue'
 import UiModal from '../components/UiModal.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -21,7 +21,7 @@ import {
   type WeddingEventDetail,
   type WeddingFittingForm,
 } from '../stores/crm'
-import { displayAttireStatus, formatDate, sortAlpha, uid } from '../utils/format'
+import { displayAttireStatus, formatDate, sortAlpha, sortByInputDate, uid } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import { downloadWeddingAttireReportPdf, generateWeddingFittingPdf } from '../utils/weddingPdf'
 
@@ -60,19 +60,13 @@ const calendarYear = ref(2026)
 const calendarMonth = ref(10)
 const selectedCalendarDate = ref('')
 
-// Blocked status alert (e.g. cannot set Available on event day) & H-1 Laundry alert
-const showStatusAlert = ref(false)
-const statusAlertBlocked = ref(false)
-const pendingAlertAttire = ref<WeddingAttire | null>(null)
-const pendingAlertTargetStatus = ref<AttireStatus>('Laundry')
-const statusAlertConflicts = ref<AttireScheduleEntry[]>([])
-
 // Floating success window after saving fitting form
 const showSaveSuccessModal = ref(false)
 const lastSavedSummary = ref('')
 
 // Inline floating edit modal for Tab 3 (Saved Fitting Database)
 const showEditFittingModal = ref(false)
+const previewOnly = ref(false)
 const modalFormError = ref('')
 
 // Date-range PDF report for attire schedule
@@ -176,10 +170,7 @@ const effectiveStatus = (item: WeddingAttire) => store.effectiveAttireStatus(ite
 
 // Card badge status reflects today's active booking or auto H+1 / manual laundry status
 const cardTodayStatus = (item: WeddingAttire): AttireStatus => {
-  const eff = store.effectiveAttireStatus(item)
-  if (eff === 'Laundry') return 'Laundry'
-  if (eff === 'Terpakai') return 'Booked'
-  return 'Tersedia'
+  return store.effectiveAttireStatus(item)
 }
 
 // Cached per-attire schedules so wardrobe cards don't recompute on every render pass
@@ -211,7 +202,7 @@ const attireSummaryCounts = computed(() => {
   return { available, booked, inUse, laundry }
 })
 
-const attireSortDir = ref<'asc' | 'desc'>('asc')
+const attireSortDir = ref<'asc' | 'desc'>('desc')
 const toggleAttireSort = () => {
   attireSortDir.value = attireSortDir.value === 'asc' ? 'desc' : 'asc'
 }
@@ -224,7 +215,7 @@ const filteredAttire = computed(() => {
       && (category.value === 'All' || item.category === category.value)
       && (status.value === 'All' || eff === status.value)
   })
-  return sortAlpha(list, (i) => i.name, attireSortDir.value)
+  return sortByInputDate(list, (i) => i.createdAt, attireSortDir.value)
 })
 
 const paginatedAttire = computed(() => {
@@ -245,13 +236,7 @@ const categoryFilterOptions = [
 const statusFilterOptions = [
   { value: 'All', label: 'All Statuses' },
   { value: 'Tersedia', label: 'Available' },
-  { value: 'Booked', label: 'Booked (Upcoming)' },
   { value: 'Terpakai', label: 'In Use (Event Day)' },
-  { value: 'Laundry', label: 'Laundry' },
-]
-
-const attireCardStatusOptions = [
-  { value: 'Tersedia', label: 'Available' },
   { value: 'Laundry', label: 'Laundry' },
 ]
 
@@ -305,16 +290,16 @@ const buildAttireOptionsForBooking = (list: WeddingAttire[], targetBooking?: Boo
         return {
           item,
           statusKind: 'booked',
-          statusLabel: `Booked (${conflicts[0]!.customerName} · ${conflicts[0]!.poNumber}) · Locked`,
+          statusLabel: `In Use (${conflicts[0]!.customerName} · ${conflicts[0]!.poNumber})`,
           locked: true,
         }
       }
-      if (eff === 'Laundry') {
+      if (store.effectiveAttireStatus(item, targetBooking.eventDate) === 'Laundry') {
         return {
           item,
           statusKind: 'laundry',
-          statusLabel: 'In Laundry · Available on this date',
-          locked: false,
+          statusLabel: 'Laundry on this date',
+          locked: true,
         }
       }
       if (eff === 'Terpakai' || eff === 'Booked') {
@@ -338,7 +323,7 @@ const buildAttireOptionsForBooking = (list: WeddingAttire[], targetBooking?: Boo
         item,
         statusKind: 'laundry',
         statusLabel: 'In Laundry today (select PO to check date)',
-        locked: false,
+        locked: true,
       }
     }
     if (eff === 'Terpakai' || eff === 'Booked') {
@@ -367,8 +352,8 @@ const attireSelectionAlert = (attireId: string, targetBooking: Booking | undefin
   const item = selectedAttire(attireId)
   if (!item) return ''
   const warnings: string[] = []
-  if (item.status === 'Laundry') {
-    warnings.push('This attire is currently in Laundry / maintenance.')
+  if (targetBooking?.eventDate && store.effectiveAttireStatus(item, targetBooking.eventDate) === 'Laundry') {
+    warnings.push('This attire is in Laundry on the selected event date.')
   }
   if (targetBooking?.eventDate) {
     const conflicts = store.attireConflictsOnDate(attireId, targetBooking.eventDate, targetBooking.id)
@@ -441,9 +426,15 @@ watch(() => fittingForm.bookingId, (bookingId, prevId) => {
 
 // Keep user on Tab 3 (Saved Fitting Database) and edit in a floating popup modal
 const editSavedFitting = (bookingId: string) => {
+  previewOnly.value = false
   modalFormError.value = ''
   Object.assign(editModalForm, buildNormalizedForm(bookingId))
   showEditFittingModal.value = true
+}
+
+const previewSavedFitting = (bookingId: string) => {
+  editSavedFitting(bookingId)
+  previewOnly.value = true
 }
 
 const addEventSectionTo = (target: WeddingFittingForm) => {
@@ -516,7 +507,7 @@ const submitAttire = () => {
     name: attireForm.name.trim(),
     category: attireForm.category,
     size: attireForm.size.trim(),
-    status: attireForm.status,
+    status: 'Tersedia' as AttireStatus,
     notes: attireForm.notes.trim() || undefined,
     imageUrl: attireForm.imageUrl || undefined,
   }
@@ -531,40 +522,6 @@ const submitAttire = () => {
   showAttireForm.value = false
 }
 
-const onAttireStatusSelect = (item: WeddingAttire, nextStatus: AttireStatus, event?: Event) => {
-  const today = localTodayIso()
-  const resetSelectToStored = () => {
-    if (event?.target) {
-      (event.target as HTMLSelectElement).value = item.status === 'Laundry' ? 'Laundry' : 'Tersedia'
-    }
-  }
-  // Strict Rule: Switching to Available is BLOCKED if there is a non-cancelled event TODAY using this attire
-  if (nextStatus === 'Tersedia') {
-    const todayEvents = store.attireConflictsOnDate(item.id, today)
-    if (todayEvents.length > 0) {
-      resetSelectToStored()
-      statusAlertBlocked.value = true
-      statusAlertConflicts.value = todayEvents
-      pendingAlertAttire.value = item
-      pendingAlertTargetStatus.value = nextStatus
-      showStatusAlert.value = true
-      return
-    }
-  }
-
-  const urgentSchedule = store.urgentAttireSchedules(item.id, undefined, 2)
-  if (nextStatus === 'Laundry' && urgentSchedule.length > 0) {
-    resetSelectToStored()
-    statusAlertBlocked.value = false
-    statusAlertConflicts.value = urgentSchedule
-    pendingAlertAttire.value = item
-    pendingAlertTargetStatus.value = nextStatus
-    showStatusAlert.value = true
-    return
-  }
-  store.updateWeddingAttireStatus(item.id, nextStatus)
-}
-
 const urgentDayBadgeLabel = (eventDate: string) => {
   const today = localTodayIso()
   const a = new Date(`${today}T00:00:00`)
@@ -573,21 +530,6 @@ const urgentDayBadgeLabel = (eventDate: string) => {
   if (diff <= 0) return 'Today (Hari-H)'
   if (diff === 1) return 'Tomorrow (H-1)'
   return `H-${diff}`
-}
-
-const confirmStatusAlertOverride = () => {
-  if (!statusAlertBlocked.value && pendingAlertAttire.value) {
-    store.updateWeddingAttireStatus(pendingAlertAttire.value.id, pendingAlertTargetStatus.value)
-  }
-  pendingAlertAttire.value = null
-  statusAlertConflicts.value = []
-  showStatusAlert.value = false
-}
-
-const cancelStatusAlertOverride = () => {
-  pendingAlertAttire.value = null
-  statusAlertConflicts.value = []
-  showStatusAlert.value = false
 }
 
 const calendarEntryStatus = (entry: AttireScheduleEntry): 'Cancelled' | 'Completed' | 'In Use' | 'Booked' => {
@@ -809,7 +751,7 @@ const fittingList = computed(() => {
     return { form, booking, customer, archived }
   })
   if (fittingCustomerSortDir.value === 'none') return list
-  return sortAlpha(list, (row) => row.customer?.name ?? '', fittingCustomerSortDir.value)
+  return sortByInputDate(list, (row) => row.form.updatedAt, fittingCustomerSortDir.value)
 })
 
 const activeFittingList = computed(() => fittingList.value.filter((row) => !row.archived))
@@ -837,23 +779,6 @@ const paginatedFittingList = computed(() => {
       </div>
     </section>
 
-    <div v-if="store.laundryUrgentAlerts.length" class="urgent-laundry-banner">
-      <AlertTriangle :size="20" />
-      <div class="urgent-laundry-list">
-        <strong>Urgent Wardrobe Preparation Alert (H-2 / H-1 / Hari-H)</strong>
-        <div v-for="alert in store.laundryUrgentAlerts" :key="`${alert.attireId}-${alert.bookingId}`" class="urgent-laundry-item">
-          <span>{{ alert.message }}</span>
-          <button
-            type="button"
-            class="soft-button urgent-ready-btn"
-            @click="store.updateWeddingAttireStatus(alert.attireId, 'Tersedia')"
-          >
-            Mark Laundry Complete
-          </button>
-        </div>
-      </div>
-    </div>
-
     <section class="portal-tabs-bar">
       <div class="segmented-tabs">
         <button :class="{ active: portalTab === 'inventory' }" @click="portalTab = 'inventory'">
@@ -876,12 +801,11 @@ const paginatedFittingList = computed(() => {
           <div>
             <span class="eyebrow">Wardrobe inventory &amp; schedule</span>
             <h3>Bride &amp; Groom Attire</h3>
-            <p>Shows <strong>Booked</strong> ahead of the event date, switches to <strong>In Use</strong> on Event Day (Hari-H), automatically enters <strong>Laundry</strong> on H+1, and returns to <strong>Available</strong> after H+1.</p>
+            <p>Status otomatis mengikuti tanggal acara: <strong>In Use</strong> pada hari acara, <strong>Laundry</strong> pada H+1, dan <strong>Available</strong> saat busana tidak dipakai.</p>
           </div>
         </div>
         <div class="attire-summary">
           <span><i class="dot-available" />{{ attireSummaryCounts.available }} Available</span>
-          <span><i class="dot-booked" />{{ attireSummaryCounts.booked }} Booked</span>
           <span><i class="dot-booked" style="background:#d97706" />{{ attireSummaryCounts.inUse }} In Use</span>
           <span><i class="dot-laundry" />{{ attireSummaryCounts.laundry }} Laundry</span>
         </div>
@@ -889,6 +813,9 @@ const paginatedFittingList = computed(() => {
 
       <div class="attire-toolbar">
         <label class="table-search"><Search :size="17" /><input v-model="search" placeholder="Search attire name, code, or size" /></label>
+        <button type="button" class="soft-button" title="Urutkan tanggal input" @click="toggleAttireSort">
+          <ArrowUp v-if="attireSortDir === 'asc'" :size="14" /><ArrowDown v-else :size="14" />Tanggal Input
+        </button>
         <div class="filter-row attire-filter-selects">
           <SearchSelect v-model="category" :options="categoryFilterOptions" search-placeholder="Category…" aria-label="Filter attire category" />
           <SearchSelect v-model="status" :options="statusFilterOptions" search-placeholder="Status…" aria-label="Filter attire status" />
@@ -966,14 +893,7 @@ const paginatedFittingList = computed(() => {
               </span>
             </div>
 
-            <SearchSelect
-              :model-value="scheduleMapByAttire.get(item.id)?.status === 'Laundry' ? 'Laundry' : 'Tersedia'"
-              :options="attireCardStatusOptions"
-              size="sm"
-              search-placeholder="Status…"
-              aria-label="Wardrobe status"
-              @change="(val) => onAttireStatusSelect(item, val as AttireStatus)"
-            />
+            <span class="attire-auto-status">Status otomatis berdasarkan tanggal acara</span>
           </div>
         </article>
         <button class="attire-add-card" @click="openCreateAttire"><Plus :size="25" /><strong>Add New Attire</strong><span>Upload wardrobe photo and size</span></button>
@@ -1029,6 +949,7 @@ const paginatedFittingList = computed(() => {
         </label>
       </section>
 
+      <div v-if="selectedBooking" class="fitting-entry-fields">
       <section id="size-chart" class="panel fitting-panel">
         <header class="wedding-section-head"><div><span class="section-number">02</span><div><span class="eyebrow">Size chart</span><h3>Body Measurements <small>cm</small></h3><p>Enter measurements recorded during fitting. Fields marked * are required.</p></div></div><Ruler :size="23" /></header>
         <div class="measurement-grid">
@@ -1285,6 +1206,8 @@ const paginatedFittingList = computed(() => {
           <button class="primary-button" @click="saveForm"><Save :size="17" />Save Fitting Form</button>
         </div>
       </section>
+      </div>
+      <p v-else class="panel fitting-po-required">Pilih PO terlebih dahulu untuk mengisi fitting form.</p>
     </template>
 
     <!-- TAB 3: SAVED FITTING DATABASE -->
@@ -1317,17 +1240,12 @@ const paginatedFittingList = computed(() => {
           <thead>
             <tr>
               <th>PO Number</th>
-              <th>
-                <button type="button" class="th-sort-btn" :class="{ 'is-active': fittingCustomerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleFittingCustomerSort">
-                  <span>Customer</span>
-                  <ArrowUp v-if="fittingCustomerSortDir === 'asc'" :size="14" class="sort-icon" />
-                  <ArrowDown v-else-if="fittingCustomerSortDir === 'desc'" :size="14" class="sort-icon" />
-                  <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
-                </button>
-              </th>
+              <th>Customer</th>
               <th>Event Date &amp; Venue</th>
               <th>Sessions &amp; Assigned Wardrobe</th>
-              <th>Updated</th>
+              <th><button type="button" class="th-sort-btn" :class="{ 'is-active': fittingCustomerSortDir !== 'none' }" title="Urutkan tanggal input" @click="toggleFittingCustomerSort">
+                <span>Updated</span><ArrowUp v-if="fittingCustomerSortDir === 'asc'" :size="14" class="sort-icon" /><ArrowDown v-else-if="fittingCustomerSortDir === 'desc'" :size="14" class="sort-icon" /><ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
+              </button></th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -1361,6 +1279,9 @@ const paginatedFittingList = computed(() => {
                   <button type="button" class="icon-button" title="Edit fitting form" @click="editSavedFitting(row.form.bookingId)">
                     <Pencil :size="15" />
                   </button>
+                  <button type="button" class="icon-button" title="Lihat fitting form" aria-label="Lihat fitting form" @click="previewSavedFitting(row.form.bookingId)">
+                    <Eye :size="15" />
+                  </button>
                   <button type="button" class="icon-button" title="Download Fitting PDF" @click="downloadSavedPdf(row.form)">
                     <Download :size="15" />
                   </button>
@@ -1387,10 +1308,6 @@ const paginatedFittingList = computed(() => {
         <label class="is-required"><span>Attire Name *</span><input v-model="attireForm.name" placeholder="e.g. Kebaya Sekar Arum Putih" /></label>
         <label class="is-required"><span>Category *</span><SearchSelect v-model="attireForm.category" :options="attireCategoryFormOptions" required search-placeholder="Search category…" /></label>
         <label class="is-required"><span>Size *</span><input v-model="attireForm.size" placeholder="S / M / L / Custom" /></label>
-        <label class="is-required">
-          <span>Manual Status *</span>
-          <SearchSelect v-model="attireForm.status" :options="attireCardStatusOptions" required search-placeholder="Search status…" />
-        </label>
         <label class="span-2 is-optional"><span>Notes <em class="opt-tag">Optional</em></span><textarea v-model="attireForm.notes" rows="2" placeholder="Color, fabric, full set accessories, or condition notes" /></label>
         <div class="span-2 attire-upload-block">
           <span class="upload-field-label">Attire Photo</span>
@@ -1444,7 +1361,7 @@ const paginatedFittingList = computed(() => {
             <template v-if="cell.day">
               <span>{{ cell.day }}</span>
               <i v-if="cell.count > 0">{{ cell.count }}</i>
-              <em v-else-if="cell.completedCount > 0">✓</em>
+              <CheckCircle2 v-else-if="cell.completedCount > 0" :size="15" aria-label="Completed" />
             </template>
           </button>
         </div>
@@ -1480,48 +1397,6 @@ const paginatedFittingList = computed(() => {
       <div class="modal-actions"><button class="primary-button" @click="showCalendarModal = false">Close</button></div>
     </UiModal>
 
-    <UiModal
-      :open="showStatusAlert"
-      :title="statusAlertBlocked ? 'Cannot Change Status to Available — Scheduled Today' : 'Upcoming Event Warning (H-2 / H-1 / Today)'"
-      :description="statusAlertBlocked ? 'This attire is currently assigned to an active event taking place today.' : 'This attire is reserved for an upcoming wedding within the next 2 days (H-2 / H-1 / Today).'"
-      @close="cancelStatusAlertOverride"
-    >
-      <div v-if="pendingAlertAttire" class="laundry-alert-body">
-        <div class="laundry-alert-banner">
-          <AlertTriangle :size="20" />
-          <div>
-            <strong v-if="statusAlertBlocked">{{ pendingAlertAttire.name }} is booked for an event today and cannot be switched to Available!</strong>
-            <strong v-else>{{ pendingAlertAttire.name }} will be worn soon!</strong>
-            <p v-if="statusAlertBlocked">
-              Status changes to <b>Available</b> are locked while an active booking exists on today's date:
-            </p>
-            <p v-else>
-              This attire will be used by the following customer(s) on <b>H-2 / H-1 / Today</b>:
-            </p>
-          </div>
-        </div>
-        <ul class="laundry-conflict-list">
-          <li v-for="entry in statusAlertConflicts" :key="`${entry.bookingId}-${entry.eventNumber}`">
-            <strong>{{ urgentDayBadgeLabel(entry.eventDate) }} · {{ formatDate(entry.eventDate) }}</strong> — Will be worn by <b>{{ entry.customerName }}</b> ({{ entry.poNumber }}) · {{ entry.eventName }}
-          </li>
-        </ul>
-        <div v-if="!statusAlertBlocked" class="paid-info-banner" style="margin-top: 10px;">
-          <div>
-            <strong>Important Reminder After Laundry</strong>
-            <span>Please remember to update this attire's status back to <b>Available</b> immediately after laundry is finished so it is ready for the customer!</span>
-          </div>
-        </div>
-      </div>
-      <div class="modal-actions">
-        <button type="button" :class="statusAlertBlocked ? 'primary-button' : 'secondary-button'" @click="cancelStatusAlertOverride">
-          {{ statusAlertBlocked ? 'Understood' : 'Cancel' }}
-        </button>
-        <button v-if="!statusAlertBlocked" type="button" class="danger-button" @click="confirmStatusAlertOverride">
-          Set to Laundry &amp; Remind Me
-        </button>
-      </div>
-    </UiModal>
-
     <UiModal :open="showSaveSuccessModal" title="Fitting Form Saved Successfully" description="Fitting record has been saved to Fitting Database and the form has been cleared." @close="showSaveSuccessModal = false">
       <div class="save-success-modal-body">
         <div class="save-success-icon"><CheckCircle2 :size="30" /></div>
@@ -1553,11 +1428,12 @@ const paginatedFittingList = computed(() => {
 
     <UiModal
       :open="showEditFittingModal"
-      :title="modalEditingBooking ? `Edit Fitting Form — ${modalEditingBooking.poNumber}` : 'Edit Fitting Form'"
+      :title="modalEditingBooking ? `${previewOnly ? 'Lihat' : 'Edit'} Fitting Form — ${modalEditingBooking.poNumber}` : 'Fitting Form'"
       :description="modalEditingBooking ? `${store.customerFor(modalEditingBooking.customerId)?.name ?? '-'} · Event: ${formatDate(modalEditingBooking.eventDate)} · ${modalEditingBooking.location}` : 'Update saved fitting measurements, sessions, uniforms, and vendors.'"
       wide
       @close="showEditFittingModal = false"
     >
+      <fieldset class="fitting-preview-fieldset" :disabled="previewOnly">
       <div class="fitting-modal-body">
         <section class="panel fitting-panel">
           <header class="wedding-section-head">
@@ -1790,6 +1666,7 @@ const paginatedFittingList = computed(() => {
         </section>
       </div>
 
+      </fieldset>
       <p v-if="modalFormError" class="form-error" role="alert">{{ modalFormError }}</p>
       <div class="modal-actions fitting-modal-actions">
         <button
@@ -1800,8 +1677,8 @@ const paginatedFittingList = computed(() => {
         >
           <Download :size="16" />Download PDF
         </button>
-        <button type="button" class="secondary-button" @click="showEditFittingModal = false">Cancel</button>
-        <button type="button" class="primary-button" @click="saveEditModalForm"><Save :size="16" />Save Changes</button>
+        <button type="button" class="secondary-button" @click="showEditFittingModal = false">{{ previewOnly ? 'Close' : 'Cancel' }}</button>
+        <button v-if="!previewOnly" type="button" class="primary-button" @click="saveEditModalForm"><Save :size="16" />Save Changes</button>
       </div>
     </UiModal>
   </div>

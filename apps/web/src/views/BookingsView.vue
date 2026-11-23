@@ -7,7 +7,7 @@ import {
   ArrowUp, ArrowDown, ArrowUpDown, Trash2, ShoppingBag, Layers,
 } from '@lucide/vue'
 import { useCrmStore, type Booking, type BookingRefund, type BookingStatus, type CatalogType, type StylingType } from '../stores/crm'
-import { displayBookingStatus, formatCurrency, formatDate, initials, sortAlpha } from '../utils/format'
+import { displayBookingStatus, formatCurrency, formatDate, initials, sortByInputDate } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
 import UiModal from '../components/UiModal.vue'
@@ -200,7 +200,7 @@ const rows = computed(() => {
     return matchesSearch && (status.value === 'All' || booking.status === status.value)
   })
   if (customerSortDir.value === 'none') return filtered
-  return sortAlpha(filtered, (b) => store.customerFor(b.customerId)?.name ?? '', customerSortDir.value)
+  return sortByInputDate(filtered, (b) => b.createdAt, customerSortDir.value)
 })
 
 const paginatedRows = computed(() => {
@@ -690,15 +690,14 @@ const openProofZoom = (url: string) => {
         <table class="data-table booking-table">
           <thead>
             <tr>
-              <th>
-                <button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Sort customer A–Z / Z–A" @click="toggleCustomerSort">
-                  <span>Customer</span>
+              <th>Customer</th>
+              <th><button type="button" class="th-sort-btn" :class="{ 'is-active': customerSortDir !== 'none' }" title="Urutkan tanggal input PO" @click="toggleCustomerSort">
+                  <span>Booking · Input Date</span>
                   <ArrowUp v-if="customerSortDir === 'asc'" :size="14" class="sort-icon" />
                   <ArrowDown v-else-if="customerSortDir === 'desc'" :size="14" class="sort-icon" />
                   <ArrowUpDown v-else :size="13" class="sort-icon is-idle" />
-                </button>
-              </th>
-              <th>Booking</th><th>Event</th><th>Billing</th><th>Status</th><th>Actions</th>
+                </button></th>
+              <th>Event</th><th>Billing</th><th>Status</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
