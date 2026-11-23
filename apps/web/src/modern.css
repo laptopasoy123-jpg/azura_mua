@@ -215,8 +215,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .status-success { color: #2d684c; background: #e5f3ec; }.status-warning { color: #94631f; background: #fdf0d6; }.status-danger { color: #a8493e; background: #fceae7; }.status-info { color: #4b6275; background: #eaf0f5; }
 
 .segmented-tabs { padding: 5px; border-radius: 13px; background: #ece5da; }
-.segmented-tabs button { padding: 9px 15px; border-radius: 9px; font-size: 13px; font-weight: 600; color: #5c5247; }
-.segmented-tabs button.active { color: #1e1a17; background: #fff; box-shadow: 0 5px 14px rgba(30,26,23,.09); font-weight: 700; }
+.segmented-tabs button, .segmented-tabs .segmented-tab-link { display: inline-flex; align-items: center; justify-content: center; padding: 9px 15px; border-radius: 9px; font-size: 13px; font-weight: 600; color: #5c5247; text-decoration: none; }
+.segmented-tabs button.active, .segmented-tabs .segmented-tab-link.active { color: #1e1a17; background: #fff; box-shadow: 0 5px 14px rgba(30,26,23,.09); font-weight: 700; }
+
+.nav-group { display: flex; flex-direction: column; gap: 3px; }
+.nav-group-trigger { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; font: inherit; color: #cfc6ba; }
+.nav-group-trigger.is-group-active { color: #f6efe3; background: rgba(255,248,238,.08); font-weight: 700; }
+.nav-group-trigger.is-group-active .nav-icon { color: #e6d3b7; }
+.nav-chevron { margin-left: auto; transition: transform .18s ease; opacity: .78; color: inherit; }
+.nav-chevron.is-open { transform: rotate(180deg); }
+.nav-submenu { display: flex; flex-direction: column; gap: 3px; padding-left: 14px; margin-left: 14px; border-left: 1px solid rgba(255,248,238,.14); }
+.nav-subitem { font-size: 13px !important; height: 38px !important; }
 .service-card, .report-card, .invoice-row-card { border-color: rgba(229,221,210,.92); border-radius: 18px; box-shadow: 0 8px 22px rgba(30,26,23,.04); }
 .service-card:hover, .report-card:hover, .invoice-row-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-3px); border-color: #d3c4af; }
 .service-image { height: 155px; background: linear-gradient(140deg,#efe7da,#faf5ee); }.service-additional { background: linear-gradient(140deg,#efe5eb,#faf2ee); }

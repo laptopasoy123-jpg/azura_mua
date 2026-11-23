@@ -174,11 +174,11 @@ const localTodayIso = () => {
 
 const effectiveStatus = (item: WeddingAttire) => store.effectiveAttireStatus(item)
 
-// Card badge status reflects today's active booking or laundry status
+// Card badge status reflects today's active booking or auto H+1 / manual laundry status
 const cardTodayStatus = (item: WeddingAttire): AttireStatus => {
-  if (item.status === 'Laundry') return 'Laundry'
-  const today = localTodayIso()
-  if (store.attireConflictsOnDate(item.id, today).length > 0) return 'Booked'
+  const eff = store.effectiveAttireStatus(item)
+  if (eff === 'Laundry') return 'Laundry'
+  if (eff === 'Terpakai') return 'Booked'
   return 'Tersedia'
 }
 
@@ -935,7 +935,7 @@ const paginatedFittingList = computed(() => {
             </div>
 
             <div
-              v-if="item.status === 'Laundry' && (scheduleMapByAttire.get(item.id)?.urgent.length || scheduleMapByAttire.get(item.id)?.active.length)"
+              v-if="scheduleMapByAttire.get(item.id)?.status === 'Laundry' && (scheduleMapByAttire.get(item.id)?.urgent.length || scheduleMapByAttire.get(item.id)?.active.length)"
               class="attire-laundry-warning"
             >
               <AlertTriangle :size="13" />
@@ -948,7 +948,7 @@ const paginatedFittingList = computed(() => {
             </div>
 
             <SearchSelect
-              :model-value="item.status === 'Laundry' ? 'Laundry' : 'Tersedia'"
+              :model-value="scheduleMapByAttire.get(item.id)?.status === 'Laundry' ? 'Laundry' : 'Tersedia'"
               :options="attireCardStatusOptions"
               size="sm"
               search-placeholder="Status…"

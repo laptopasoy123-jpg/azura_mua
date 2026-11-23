@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
-import { uid } from '../utils/format'
+import { uid, buildBusinessDocCode } from '../utils/format'
 import {
   getSupabaseClient,
   pullAllFromSupabase,
@@ -846,10 +846,11 @@ export const useCrmStore = defineStore('crm', () => {
   const effectiveAttireStatus = (attire: WeddingAttire, referenceDate?: string): AttireStatus => {
     if (attire.status === 'Laundry') return 'Laundry'
     const refDate = referenceDate ?? localTodayIso()
-    const activeScheduled = attireSchedule(attire.id, { includePast: false, referenceDate: refDate })
-    if (activeScheduled.some((entry) => entry.eventDate === refDate)) return 'Terpakai'
-    if (activeScheduled.length > 0) return 'Booked'
-    // Once event dates have passed, attire automatically returns to Tersedia
+    const allScheduled = attireSchedule(attire.id, { includePast: true, referenceDate: refDate })
+    if (allScheduled.some((entry) => entry.eventDate === refDate)) return 'Terpakai'
+    // Automatically in Laundry on H+1 after an event day, then returns to Tersedia on H+2+
+    if (allScheduled.some((entry) => calendarDaysDiff(entry.eventDate, refDate) === 1)) return 'Laundry'
+    if (allScheduled.some((entry) => entry.eventDate > refDate)) return 'Booked'
     return 'Tersedia'
   }
 
@@ -872,7 +873,7 @@ export const useCrmStore = defineStore('crm', () => {
     const refDate = referenceDate ?? localTodayIso()
     const alerts: LaundryUrgentAlert[] = []
     for (const item of weddingAttire.value) {
-      if (item.status !== 'Laundry') continue
+      if (effectiveAttireStatus(item, refDate) !== 'Laundry') continue
       const upcoming = attireSchedule(item.id, { includePast: false, referenceDate: refDate })
       for (const entry of upcoming) {
         const diff = calendarDaysDiff(refDate, entry.eventDate)
@@ -972,10 +973,15 @@ export const useCrmStore = defineStore('crm', () => {
 
   const addBooking = (input: { name: string; phone: string; location: string; eventDate: string; eventTime?: string; stylingType?: StylingType; notes?: string }) => {
     const customer: Customer = { id: uid(), name: input.name.trim(), phone: input.phone.trim() }
-    const sequence = bookings.value.length + 1
+    const poNumber = buildBusinessDocCode(
+      'PO',
+      customer.name,
+      input.eventDate,
+      bookings.value.map((b) => b.poNumber),
+    )
     const booking: Booking = {
       id: uid(),
-      poNumber: `PO-${new Date(input.eventDate).getFullYear()}-${String(sequence).padStart(4, '0')}`,
+      poNumber,
       customerId: customer.id,
       location: input.location.trim(),
       eventDate: input.eventDate,
@@ -997,9 +1003,20 @@ export const useCrmStore = defineStore('crm', () => {
     if (!booking) throw new Error('Booking not found.')
     const customer = customerFor(booking.customerId)
     if (!customer) throw new Error('Customer not found.')
+    const nameChanged = customer.name !== input.name.trim()
+    const dateChanged = booking.eventDate !== input.eventDate
     customer.name = input.name.trim()
     customer.phone = input.phone.trim()
+    const nextPoNumber = nameChanged || dateChanged
+      ? buildBusinessDocCode(
+          'PO',
+          customer.name,
+          input.eventDate,
+          bookings.value.filter((b) => b.id !== id).map((b) => b.poNumber),
+        )
+      : booking.poNumber
     Object.assign(booking, {
+      poNumber: nextPoNumber,
       location: input.location.trim(),
       eventDate: input.eventDate,
       eventTime: input.eventTime,
@@ -1007,6 +1024,33 @@ export const useCrmStore = defineStore('crm', () => {
       notes: input.notes,
       status: input.status,
     })
+    if (nameChanged || dateChanged) {
+      const inv = invoices.value.find((entry) => entry.bookingId === id)
+      if (inv) {
+        inv.invoiceNumber = buildBusinessDocCode(
+          'INV',
+          customer.name,
+          booking.eventDate,
+          invoices.value.filter((entry) => entry.id !== inv.id).map((entry) => entry.invoiceNumber),
+        )
+        const firstGroup = inv.groups[0]
+        if (firstGroup) syncInvoiceOrderGroup(inv, firstGroup)
+      }
+      const bookingPays = payments.value.filter((p) => p.bookingId === id)
+      for (const p of [...bookingPays].reverse()) {
+        p.receiptNumber = buildBusinessDocCode(
+          'KWT',
+          customer.name,
+          booking.eventDate,
+          payments.value.filter((entry) => entry.id !== p.id).map((entry) => entry.receiptNumber),
+        )
+        syncPayment(p, {
+          totalBilling: bookingTotal(id),
+          totalPaid: bookingPaid(id),
+          balance: bookingBalance(id),
+        })
+      }
+    }
     addActivity('Booking updated', `${booking.poNumber} for ${customer.name}`, 'blue')
     syncBooking(booking, customer)
     return booking
@@ -1171,13 +1215,20 @@ export const useCrmStore = defineStore('crm', () => {
   const addPayment = (input: { bookingId: string; amount: number; method: Payment['method']; paidAt: string; notes?: string }) => {
     const balance = bookingBalance(input.bookingId)
     if (input.amount <= 0 || input.amount > balance) throw new Error('Payment amount must be positive and cannot exceed remaining balance.')
+    const booking = bookingFor(input.bookingId)
+    const customer = booking ? customerFor(booking.customerId) : undefined
+    const receiptNumber = buildBusinessDocCode(
+      'KWT',
+      customer?.name ?? 'Customer',
+      booking?.eventDate ?? input.paidAt,
+      payments.value.map((p) => p.receiptNumber),
+    )
     const payment: Payment = {
       id: uid(),
-      receiptNumber: `KWT-${new Date(input.paidAt).getFullYear()}-${String(payments.value.length + 1).padStart(4, '0')}`,
+      receiptNumber,
       ...input,
     }
     payments.value.unshift(payment)
-    const booking = bookingFor(input.bookingId)
     addActivity('Payment received', `${booking?.poNumber ?? 'PO'} for Rp. ${new Intl.NumberFormat('id-ID').format(input.amount)}`, 'green')
     syncPayment(payment, {
       totalBilling: bookingTotal(input.bookingId),
@@ -1294,9 +1345,15 @@ export const useCrmStore = defineStore('crm', () => {
       items: invoiceItems,
     }
 
+    const customer = customerFor(booking.customerId)
     const invoice: Invoice = {
       id: uid(),
-      invoiceNumber: `INV-${new Date(input.issuedAt).getFullYear()}-${String(invoices.value.length + 1).padStart(4, '0')}`,
+      invoiceNumber: buildBusinessDocCode(
+        'INV',
+        customer?.name ?? 'Customer',
+        booking.eventDate,
+        invoices.value.map((entry) => entry.invoiceNumber),
+      ),
       bookingId: input.bookingId,
       kind: 'Utama',
       issuedAt: input.issuedAt,

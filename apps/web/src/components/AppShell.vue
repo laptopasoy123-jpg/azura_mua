@@ -8,7 +8,7 @@ import UiModal from './UiModal.vue'
 import StatusBadge from './StatusBadge.vue'
 import LiveClock from './LiveClock.vue'
 import {
-  LayoutDashboard, UsersRound, ShoppingBag, Layers, FileText, CreditCard,
+  LayoutDashboard, UsersRound, ShoppingBag, Layers, FileText,
   BookOpen, CircleDollarSign, Boxes, BarChart3, Building2, SlidersHorizontal,
   Bell, Menu, X, ChevronLeft, ChevronRight, CheckCheck, ArrowUpRight,
   Shirt, Briefcase, Calendar, CheckCircle2, AlertTriangle, Trash2, Info, MapPin, Phone,
@@ -52,7 +52,9 @@ watch(
   { deep: true },
 )
 
-const sections = [
+type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; matchPaths?: string[] }
+
+const sections: Array<{ label: string; items: NavItem[] }> = [
   {
     label: 'Overview',
     items: [
@@ -66,8 +68,7 @@ const sections = [
       { to: '/catalog', label: 'Service Catalog', icon: BookOpen },
       { to: '/orders', label: 'Orders', icon: ShoppingBag },
       { to: '/additional', label: 'Add-on Services', icon: Layers },
-      { to: '/invoices', label: 'Invoices', icon: FileText },
-      { to: '/payments', label: 'Payments', icon: CreditCard },
+      { to: '/invoices', label: 'Invoices & Receipts', icon: FileText, matchPaths: ['/invoices', '/payments'] },
     ],
   },
   {
@@ -94,8 +95,11 @@ const sections = [
   },
 ]
 
+const isNavItemActive = (item: NavItem) =>
+  item.matchPaths ? item.matchPaths.includes(route.path) : item.to === route.path
+
 const currentNavItem = computed(() =>
-  sections.flatMap((s) => s.items).find((item) => item.to === route.path),
+  sections.flatMap((s) => s.items).find((item) => isNavItemActive(item)),
 )
 const pageTitle = computed(() => String(route.meta.title ?? 'Dashboard'))
 const closeMobile = () => { mobileOpen.value = false }
@@ -216,6 +220,7 @@ const markAllNotificationsRead = () => {
             :key="item.to"
             :to="item.to"
             class="nav-item"
+            :class="{ 'router-link-active': isNavItemActive(item) }"
             :title="collapsed ? item.label : undefined"
             @click="closeMobile"
           >

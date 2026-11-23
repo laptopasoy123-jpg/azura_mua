@@ -4,9 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   Plus, Search, SlidersHorizontal, MapPin, CalendarDays, Phone, Eye, Pencil,
   Ban, RotateCcw, UploadCloud, LoaderCircle, Image as ImageIcon, AlertTriangle,
-  ArrowUp, ArrowDown, ArrowUpDown,
+  ArrowUp, ArrowDown, ArrowUpDown, Trash2, ShoppingBag, Layers,
 } from '@lucide/vue'
-import { useCrmStore, type Booking, type BookingRefund, type BookingStatus, type StylingType } from '../stores/crm'
+import { useCrmStore, type Booking, type BookingRefund, type BookingStatus, type CatalogType, type StylingType } from '../stores/crm'
 import { displayBookingStatus, formatCurrency, formatDate, initials, sortAlpha } from '../utils/format'
 import { uploadImageWithFallback } from '../utils/uploadImage'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -86,6 +86,106 @@ const form = reactive({
   notes: '',
   status: 'Draft' as BookingStatus,
 })
+
+type BookingOrderLine = {
+  key: string
+  id?: string
+  catalogItemId: string
+  serviceName: string
+  serviceKind?: CatalogType
+  filterType: CatalogType
+  catalogPrice: number
+  unit?: string
+  quantity: number
+  customerPrice: number
+}
+
+type BookingOrderGroupDraft = {
+  id: string
+  kind: 'Awal' | 'Tambahan'
+  isNew: boolean
+  orderDate: string
+  items: BookingOrderLine[]
+}
+
+const bookingOrderMeta = reactive({
+  issuedAt: new Date().toISOString().slice(0, 10),
+  dueDate: '',
+})
+const bookingOrderGroups = ref<BookingOrderGroupDraft[]>([])
+
+const activeCoreCatalogOptions = computed(() =>
+  store.catalog
+    .filter((c) => c.active && c.type === 'Inti')
+    .map((c) => ({ value: c.id, label: c.name, sublabel: `${formatCurrency(c.price)} / ${c.unit}` })),
+)
+const activeAddonCatalogOptions = computed(() =>
+  store.catalog
+    .filter((c) => c.active && c.type === 'Additional')
+    .map((c) => ({ value: c.id, label: c.name, sublabel: `${formatCurrency(c.price)} / ${c.unit}` })),
+)
+
+const catalogOptionsForLine = (line: BookingOrderLine) => {
+  const base = line.filterType === 'Inti' ? activeCoreCatalogOptions.value : activeAddonCatalogOptions.value
+  if (line.catalogItemId && !base.some((o) => o.value === line.catalogItemId)) {
+    const fallback = store.catalog.find((c) => c.id === line.catalogItemId)
+    return [
+      {
+        value: line.catalogItemId,
+        label: line.serviceName || fallback?.name || 'Service',
+        sublabel: fallback ? `${formatCurrency(fallback.price)} / ${fallback.unit}` : undefined,
+      },
+      ...base,
+    ]
+  }
+  return base
+}
+
+const addOrderLineToGroup = (group: BookingOrderGroupDraft, filterType: CatalogType) => {
+  group.items.push({
+    key: crypto.randomUUID(),
+    catalogItemId: '',
+    serviceName: '',
+    serviceKind: filterType,
+    filterType,
+    catalogPrice: 0,
+    quantity: 1,
+    customerPrice: 0,
+  })
+}
+
+const onOrderLineCatalogChange = (line: BookingOrderLine) => {
+  const item = store.catalog.find((entry) => entry.id === line.catalogItemId)
+  line.serviceName = item?.name ?? ''
+  line.serviceKind = item?.type ?? line.filterType
+  line.catalogPrice = item?.price ?? 0
+  line.unit = item?.unit
+  line.customerPrice = item?.price ?? 0
+}
+
+const addExtraOrderBatch = () => {
+  const today = new Date().toISOString().slice(0, 10)
+  const batch: BookingOrderGroupDraft = {
+    id: crypto.randomUUID(),
+    kind: 'Tambahan',
+    isNew: true,
+    orderDate: today,
+    items: [],
+  }
+  addOrderLineToGroup(batch, 'Additional')
+  bookingOrderGroups.value.push(batch)
+}
+
+const bookingOrderGrandTotal = computed(() =>
+  bookingOrderGroups.value.reduce(
+    (sum, group) => sum + group.items.reduce((s, item) => s + item.quantity * item.customerPrice, 0),
+    0,
+  ),
+)
+
+const editingHasExistingInvoice = computed(() =>
+  Boolean(editingId.value && store.bookingInvoice(editingId.value)),
+)
 
 const customerSortDir = ref<'none' | 'asc' | 'desc'>('none')
 const toggleCustomerSort = () => {
@@ -203,18 +303,32 @@ const paymentStatus = (id: string) => {
   return 'Unpaid'
 }
 
-const resetForm = () => Object.assign(form, {
-  name: '',
-  phone: '',
-  location: '',
-  eventDate: '',
-  eventTime: '',
-  stylingType: (store.stylingTypes[0] || 'Hijabdo') as StylingType,
-  notes: '',
-  status: 'Draft',
-})
+const resetForm = () => {
+  const today = new Date().toISOString().slice(0, 10)
+  Object.assign(form, {
+    name: '',
+    phone: '',
+    location: '',
+    eventDate: '',
+    eventTime: '',
+    stylingType: (store.stylingTypes[0] || 'Hijabdo') as StylingType,
+    notes: '',
+    status: 'Draft',
+  })
+  Object.assign(bookingOrderMeta, { issuedAt: today, dueDate: '' })
+  bookingOrderGroups.value = [
+    {
+      id: crypto.randomUUID(),
+      kind: 'Awal',
+      isNew: true,
+      orderDate: today,
+      items: [],
+    },
+  ]
+}
 const openCreate = () => { editingId.value = ''; error.value = ''; resetForm(); showForm.value = true }
 const openEdit = (booking: Booking) => {
+  const today = new Date().toISOString().slice(0, 10)
   const customer = store.customerFor(booking.customerId)
   editingId.value = booking.id
   error.value = ''
@@ -228,32 +342,166 @@ const openEdit = (booking: Booking) => {
     notes: booking.notes ?? '',
     status: booking.status,
   })
+  const existingInv = store.bookingInvoice(booking.id)
+  if (existingInv) {
+    Object.assign(bookingOrderMeta, {
+      issuedAt: existingInv.issuedAt,
+      dueDate: existingInv.dueDate ?? '',
+    })
+    bookingOrderGroups.value = store.sortedOrderGroups(existingInv).map((group) => ({
+      id: group.id,
+      kind: group.kind,
+      isNew: false,
+      orderDate: group.orderDate,
+      items: group.items.map((item) => {
+        const inferredType: CatalogType = item.serviceType
+          ?? store.catalog.find((c) => c.id === item.catalogItemId || c.name.toLowerCase() === item.name.toLowerCase())?.type
+          ?? 'Additional'
+        return {
+          key: item.id,
+          id: item.id,
+          catalogItemId: item.catalogItemId ?? '',
+          serviceName: item.name,
+          serviceKind: inferredType,
+          filterType: inferredType,
+          catalogPrice: item.catalogPrice,
+          unit: item.unit,
+          quantity: item.quantity,
+          customerPrice: item.unitPrice,
+        }
+      }),
+    }))
+  } else {
+    Object.assign(bookingOrderMeta, { issuedAt: today, dueDate: '' })
+    bookingOrderGroups.value = [
+      {
+        id: crypto.randomUUID(),
+        kind: 'Awal',
+        isNew: true,
+        orderDate: today,
+        items: [],
+      },
+    ]
+  }
   showForm.value = true
 }
 const openDetail = (booking: Booking) => { selectedBooking.value = booking; showDetail.value = true }
 
 const submit = () => {
-  error.value = ''
-  if (!form.name.trim() || !form.phone.trim() || !form.location.trim() || !form.eventDate) {
-    error.value = 'Customer name, phone number, venue location, and event date are required.'
-    return
-  }
-  if (!form.stylingType) {
-    error.value = 'Styling type is required.'
-    return
-  }
-  const payload = { ...form, stylingType: form.stylingType as StylingType }
-  if (editingId.value) {
-    const prevStatus = store.bookingFor(editingId.value)?.status
-    store.updateBooking(editingId.value, payload)
-    if (payload.status === 'Dibatalkan' && prevStatus !== 'Dibatalkan') {
-      store.cancelBooking(editingId.value)
+  try {
+    error.value = ''
+    if (!form.name.trim() || !form.phone.trim() || !form.location.trim() || !form.eventDate) {
+      error.value = 'Customer name, phone number, venue location, and event date are required.'
+      return
     }
-  } else {
-    store.addBooking(payload)
+    if (!form.stylingType) {
+      error.value = 'Styling type is required.'
+      return
+    }
+
+    const activeGroups = bookingOrderGroups.value.filter((g) => !g.isNew || g.items.length > 0)
+    for (const group of activeGroups) {
+      if (!group.orderDate) {
+        error.value = 'Order date is required for every order group.'
+        return
+      }
+      if (!group.items.length) {
+        error.value = 'Each existing order group must have at least one service item.'
+        return
+      }
+      for (const line of group.items) {
+        if (!line.catalogItemId && !line.id) {
+          error.value = 'Please choose a service on all order lines (or remove empty lines).'
+          return
+        }
+        if (!Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.customerPrice) || line.customerPrice < 0) {
+          error.value = 'Order quantity must be greater than 0 and unit price cannot be negative.'
+          return
+        }
+      }
+    }
+
+    const payload = { ...form, stylingType: form.stylingType as StylingType }
+    let targetBookingId = editingId.value
+    let isCancelled = false
+
+    if (editingId.value) {
+      const prevStatus = store.bookingFor(editingId.value)?.status
+      store.updateBooking(editingId.value, payload)
+      if (payload.status === 'Dibatalkan' && prevStatus !== 'Dibatalkan') {
+        store.cancelBooking(editingId.value)
+        isCancelled = true
+      } else if (payload.status === 'Dibatalkan') {
+        isCancelled = true
+      }
+    } else {
+      const created = store.addBooking(payload)
+      targetBookingId = created.id
+    }
+
+    if (!isCancelled && activeGroups.length > 0) {
+      const existingInv = store.bookingInvoice(targetBookingId)
+      if (!existingInv) {
+        const firstGroup = activeGroups[0]!
+        store.createInvoiceFromOrder({
+          bookingId: targetBookingId,
+          kind: 'Utama',
+          issuedAt: bookingOrderMeta.issuedAt || firstGroup.orderDate,
+          orderDate: firstGroup.orderDate,
+          dueDate: bookingOrderMeta.dueDate || undefined,
+          items: firstGroup.items.map((line) => ({
+            catalogItemId: line.catalogItemId,
+            quantity: line.quantity,
+            customerPrice: line.customerPrice,
+          })),
+        })
+        for (const extra of activeGroups.slice(1)) {
+          store.addOrderGroupToBooking({
+            bookingId: targetBookingId,
+            orderDate: extra.orderDate,
+            items: extra.items.map((line) => ({
+              catalogItemId: line.catalogItemId,
+              quantity: line.quantity,
+              customerPrice: line.customerPrice,
+            })),
+          })
+        }
+      } else {
+        for (const group of activeGroups) {
+          if (!group.isNew) {
+            store.updateOrderGroup(targetBookingId, group.id, {
+              orderDate: group.orderDate,
+              items: group.items.map((line) => ({
+                id: line.id,
+                catalogItemId: line.catalogItemId || undefined,
+                serviceType: line.serviceKind,
+                name: line.serviceName,
+                catalogPrice: line.catalogPrice,
+                unit: line.unit,
+                quantity: line.quantity,
+                customerPrice: line.customerPrice,
+              })),
+            })
+          } else if (group.items.length > 0) {
+            store.addOrderGroupToBooking({
+              bookingId: targetBookingId,
+              orderDate: group.orderDate,
+              items: group.items.map((line) => ({
+                catalogItemId: line.catalogItemId,
+                quantity: line.quantity,
+                customerPrice: line.customerPrice,
+              })),
+            })
+          }
+        }
+      }
+    }
+
+    resetForm()
+    showForm.value = false
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to save booking & order.'
   }
-  resetForm()
-  showForm.value = false
 }
 
 const openCancelModal = (booking: Booking) => {
@@ -567,7 +815,7 @@ const openProofZoom = (url: string) => {
       />
     </section>
 
-    <UiModal :open="showForm" :title="editingId ? 'Edit Booking' : 'Add New Booking'" :description="editingId ? 'Update customer details and event schedule.' : 'A PO Number will be generated automatically upon saving.'" wide @close="showForm = false">
+    <UiModal :open="showForm" :title="editingId ? 'Edit Booking & Order' : 'Add New Booking & Order'" :description="editingId ? 'Update customer details, event schedule, and order services.' : 'PO Number and Invoice will be generated with Customer Name & Event Date.'" wide @close="showForm = false">
       <form class="form-grid" @submit.prevent="submit">
         <label class="is-required"><span>Customer Name *</span><input v-model="form.name" placeholder="e.g. Nadya Prameswari" /></label>
         <label class="is-required"><span>Phone / WhatsApp *</span><input v-model="form.phone" placeholder="08xxxxxxxxxx" /></label>
@@ -582,7 +830,74 @@ const openProofZoom = (url: string) => {
           <span>Booking Status <em class="opt-tag">Optional</em></span>
           <SearchSelect v-model="form.status" :options="bookingStatusOptions" search-placeholder="Search status…" />
         </label>
-        <label class="span-2 is-optional"><span>Additional Notes <em class="opt-tag">Optional</em></span><textarea v-model="form.notes" rows="3" placeholder="Makeup concept, venue address details, or special requests" /></label>
+        <label class="span-2 is-optional"><span>Additional Notes <em class="opt-tag">Optional</em></span><textarea v-model="form.notes" rows="2" placeholder="Makeup concept, venue address details, or special requests" /></label>
+
+        <div v-if="form.status !== 'Dibatalkan'" class="span-2" style="display:flex;flex-direction:column;gap:12px;">
+          <div v-if="!editingHasExistingInvoice" class="form-grid" style="margin:0;">
+            <label class="is-optional"><span>Invoice Issue Date</span><input v-model="bookingOrderMeta.issuedAt" type="date" /></label>
+            <label class="is-optional"><span>Invoice Due Date <em class="opt-tag">Optional</em></span><input v-model="bookingOrderMeta.dueDate" type="date" /></label>
+          </div>
+
+          <div v-for="(group, gIdx) in bookingOrderGroups" :key="group.id" class="order-lines">
+            <div class="order-lines-head">
+              <div>
+                <strong>{{ group.kind === 'Awal' ? 'Order Services (Initial)' : `Add-on Batch #${gIdx}` }}</strong>
+                <span>{{ group.isNew && !editingHasExistingInvoice ? 'Optional on booking creation — add services to generate invoice in one step.' : 'Edit services, quantities, customer prices, or add items.' }}</span>
+              </div>
+              <div class="add-group-add-trigger" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <input v-model="group.orderDate" type="date" title="Order date" style="height:34px;padding:0 10px;border-radius:9px;" />
+                <button type="button" class="soft-button" @click="addOrderLineToGroup(group, 'Inti')"><ShoppingBag :size="14" />+ Core Service</button>
+                <button type="button" class="soft-button" @click="addOrderLineToGroup(group, 'Additional')"><Layers :size="14" />+ Add-on</button>
+              </div>
+            </div>
+
+            <div v-if="group.items.length" class="order-lines-grid">
+              <div class="order-lines-columns">
+                <span>Service</span><span>Qty</span><span>Customer Price</span><span class="align-right">Subtotal</span><span></span>
+              </div>
+              <div v-for="(line, lIdx) in group.items" :key="line.key" class="order-line-row">
+                <div class="order-line-service">
+                  <div class="order-line-service-top">
+                    <span class="service-kind-tag" :class="line.filterType === 'Inti' ? 'is-core' : 'is-addon'">
+                      {{ line.filterType === 'Inti' ? 'Core' : 'Add-on' }}
+                    </span>
+                    <SearchSelect
+                      v-model="line.catalogItemId"
+                      :options="catalogOptionsForLine(line)"
+                      placeholder="Select service…"
+                      search-placeholder="Search service…"
+                      @update:model-value="onOrderLineCatalogChange(line)"
+                    />
+                  </div>
+                  <small v-if="line.catalogPrice">Catalog ref: {{ formatCurrency(line.catalogPrice) }} / {{ line.unit || 'unit' }}</small>
+                </div>
+                <input v-model.number="line.quantity" type="number" min="1" />
+                <CurrencyInput v-model="line.customerPrice" />
+                <div class="order-line-subtotal"><strong>{{ formatCurrency(line.quantity * line.customerPrice) }}</strong></div>
+                <button
+                  type="button"
+                  class="icon-button order-line-remove"
+                  :disabled="!group.isNew && group.items.length === 1"
+                  title="Remove item"
+                  @click="group.items.splice(lIdx, 1)"
+                >
+                  <Trash2 :size="15" />
+                </button>
+              </div>
+            </div>
+            <p v-else class="subtle-line" style="margin:4px 0 0;">No services added yet. Click <strong>+ Core Service</strong> or <strong>+ Add-on</strong> above.</p>
+          </div>
+
+          <div v-if="editingHasExistingInvoice" style="display:flex;justify-content:flex-start;">
+            <button type="button" class="soft-button" @click="addExtraOrderBatch"><Plus :size="15" />Add New Add-on Batch</button>
+          </div>
+
+          <div class="order-grand-total">
+            <span>Total Order Billing</span>
+            <strong>{{ formatCurrency(bookingOrderGrandTotal) }}</strong>
+          </div>
+        </div>
+
         <p v-if="error" class="form-error span-2">{{ error }}</p>
         <div class="modal-actions span-2"><button type="button" class="secondary-button" @click="showForm = false">Cancel</button><button class="primary-button">{{ editingId ? 'Save Changes' : 'Save Booking' }}</button></div>
       </form>
@@ -598,6 +913,14 @@ const openProofZoom = (url: string) => {
         <div><span>Total Billing</span><strong>{{ formatCurrency(store.bookingTotal(selectedBooking.id)) }}</strong></div>
         <div><span>Remaining Balance</span><strong>{{ formatCurrency(store.bookingBalance(selectedBooking.id)) }}</strong></div>
         <div v-if="selectedBooking.notes" class="span-2"><span>Notes</span><strong>{{ selectedBooking.notes }}</strong></div>
+        <div v-if="store.bookingInvoice(selectedBooking.id)?.items.length" class="span-2">
+          <span>Ordered Services</span>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
+            <span v-for="item in store.bookingInvoice(selectedBooking.id)?.items" :key="item.id" class="item-pill">
+              {{ item.name }} ×{{ item.quantity }} ({{ formatCurrency(item.quantity * item.unitPrice) }})
+            </span>
+          </div>
+        </div>
       </div>
       <div class="modal-actions"><button class="secondary-button" @click="showDetail = false">Close</button><button class="primary-button" @click="showDetail = false; openEdit(selectedBooking!)"><Pencil :size="16" />Edit Booking</button></div>
     </UiModal>

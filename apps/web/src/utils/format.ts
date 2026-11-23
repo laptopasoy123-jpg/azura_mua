@@ -22,6 +22,31 @@ export const formatDate = (value: string, options?: Intl.DateTimeFormatOptions) 
     new Date(`${value}${value.length === 10 ? 'T00:00:00' : ''}`),
   )
 
+export const formatCodeEventDate = (isoDate: string): string => {
+  const clean = (isoDate ?? '').trim().slice(0, 10)
+  const match = clean.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`
+  const d = new Date(isoDate)
+  if (Number.isNaN(d.getTime())) return clean || '00/00/0000'
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+}
+
+export const buildBusinessDocCode = (
+  prefix: 'PO' | 'INV' | 'KWT',
+  customerName: string,
+  eventDate: string,
+  existingCodes: Iterable<string> = [],
+): string => {
+  const cleanName = customerName.trim().replace(/\s+/g, ' ') || 'Customer'
+  const datePart = formatCodeEventDate(eventDate)
+  const base = `${prefix}-${cleanName}-${datePart}`
+  const existing = new Set(Array.from(existingCodes, (code) => code.trim().toUpperCase()))
+  if (!existing.has(base.toUpperCase())) return base
+  let suffix = 2
+  while (existing.has(`${base} (${suffix})`.toUpperCase())) suffix += 1
+  return `${base} (${suffix})`
+}
+
 export const initials = (value: string) =>
   value
     .split(' ')

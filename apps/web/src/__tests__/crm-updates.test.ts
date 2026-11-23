@@ -292,16 +292,15 @@ describe('Wedding Portal — Acara, Domas/Manggolo & Softlens', () => {
       updatedAt: '',
     })
 
-    // Before event date (2026-11-20 -> 2026-11-22): status is Booked; on event day (2026-11-22): Terpakai
+    // Before event date (2026-11-20 -> 2026-11-22): Booked; on event day (2026-11-22): Terpakai; H+1 (2026-11-23): auto Laundry; H+2 (2026-11-24): Tersedia
     expect(store.effectiveAttireStatus(attire1, '2026-11-20')).toBe('Booked')
     expect(store.effectiveAttireStatus(attire1, '2026-11-22')).toBe('Terpakai')
+    expect(store.effectiveAttireStatus(attire1, '2026-11-23')).toBe('Laundry')
+    expect(store.effectiveAttireStatus(attire1, '2026-11-24')).toBe('Tersedia')
     const schedule = store.attireSchedule('attire-1', { referenceDate: '2026-11-20' })
     expect(schedule).toHaveLength(1)
     expect(schedule[0]!.eventDate).toBe('2026-11-22')
     expect(schedule[0]!.customerName).toBe('Nadya Prameswari')
-
-    // Automatically returns to Tersedia after eventDate has passed
-    expect(store.effectiveAttireStatus(attire1, '2026-11-23')).toBe('Tersedia')
 
     // No urgent alert when event is 2 days away (2026-11-20 -> 2026-11-22 = H-2)
     expect(store.urgentAttireSchedules('attire-1', '2026-11-20')).toHaveLength(0)
@@ -836,5 +835,53 @@ describe('Pengaturan Dropdown & Laporan Jadwal Busana PDF', () => {
     const header = new TextDecoder().decode(bytes.slice(0, 5))
     expect(header).toBe('%PDF-')
     expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(1)
+  })
+
+  it('uses PO/INV/KWT-NAMA-DD/MM/YYYY format and updates on booking edit', () => {
+    const store = useCrmStore()
+    const booking = store.addBooking({
+      name: 'Rara Sekar',
+      phone: '081234567890',
+      location: 'Hotel Mulia',
+      eventDate: '2026-12-25',
+      stylingType: 'Hijabdo',
+    })
+    expect(booking.poNumber).toBe('PO-Rara Sekar-25/12/2026')
+
+    const inv = store.createInvoiceFromOrder({
+      bookingId: booking.id,
+      kind: 'Utama',
+      issuedAt: '2026-11-23',
+      items: [{ catalogItemId: store.catalog[0]!.id, quantity: 1, customerPrice: 2000000 }],
+    })
+    expect(inv.invoiceNumber).toBe('INV-Rara Sekar-25/12/2026')
+
+    const pay1 = store.addPayment({
+      bookingId: booking.id,
+      amount: 500000,
+      method: 'Transfer',
+      paidAt: '2026-11-23',
+    })
+    const pay2 = store.addPayment({
+      bookingId: booking.id,
+      amount: 500000,
+      method: 'QRIS',
+      paidAt: '2026-11-24',
+    })
+    expect(pay1.receiptNumber).toBe('KWT-Rara Sekar-25/12/2026')
+    expect(pay2.receiptNumber).toBe('KWT-Rara Sekar-25/12/2026 (2)')
+
+    store.updateBooking(booking.id, {
+      name: 'Rara Putri',
+      phone: '081234567890',
+      location: 'Hotel Mulia',
+      eventDate: '2026-12-26',
+      stylingType: 'Hijabdo',
+      status: 'Terkonfirmasi',
+    })
+    expect(booking.poNumber).toBe('PO-Rara Putri-26/12/2026')
+    expect(inv.invoiceNumber).toBe('INV-Rara Putri-26/12/2026')
+    expect(pay1.receiptNumber).toBe('KWT-Rara Putri-26/12/2026')
+    expect(pay2.receiptNumber).toBe('KWT-Rara Putri-26/12/2026 (2)')
   })
 })

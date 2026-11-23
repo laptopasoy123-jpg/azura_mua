@@ -1108,6 +1108,13 @@ watch(() => route.query.catalog, (catalog) => {
     </section>
 
     <template v-if="module === 'invoices'">
+      <section class="portal-tabs-bar">
+        <div class="segmented-tabs">
+          <RouterLink to="/invoices" class="segmented-tab-link active">Invoices ({{ store.invoices.length }})</RouterLink>
+          <RouterLink to="/payments" class="segmented-tab-link">Receipts &amp; Payments ({{ store.payments.length }})</RouterLink>
+        </div>
+      </section>
+
       <section class="summary-strip summary-strip--invoices">
         <div class="summary-card-featured"><span>Total Invoices</span><strong>{{ store.invoices.length }}</strong></div>
         <div><span>Total Billed</span><strong>{{ formatCurrency(store.totalBilling) }}</strong></div>
