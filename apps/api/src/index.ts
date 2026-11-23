@@ -137,6 +137,7 @@ function purposePrefix(purpose: FilePurpose) {
   return {
     catalog: 'catalog',
     'payment-proof': 'payments',
+    'invoice-pdf': 'invoices',
     'expense-proof': 'expenses',
     inventory: 'inventory',
     avatar: 'avatars',

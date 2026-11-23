@@ -625,9 +625,10 @@ export const resolveReceiptShareUrl = async (params: {
     body.append('purpose', 'payment-proof')
     body.append('visibility', 'public')
 
+    const apiBase = (import.meta.env.VITE_API_URL ?? '').trim().replace(/\/+$/, '')
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 1800)
-    const response = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/files`, {
+    const timer = setTimeout(() => controller.abort(), 8000)
+    const response = await fetch(`${apiBase}/api/files`, {
       method: 'POST',
       body,
       signal: controller.signal,
@@ -636,7 +637,9 @@ export const resolveReceiptShareUrl = async (params: {
     if (response.ok) {
       const json = await response.json() as { ok: boolean; data?: { url: string } }
       if (json.ok && json.data?.url) {
-        const absolute = json.data.url.startsWith('http') ? json.data.url : `${origin}${json.data.url}`
+        const absolute = json.data.url.startsWith('http')
+          ? json.data.url
+          : `${apiBase || origin}${json.data.url}`
         return { url: absolute, mode: 'r2' }
       }
     }

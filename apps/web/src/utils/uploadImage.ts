@@ -59,12 +59,17 @@ export const uploadImageWithFallback = async (
   body.append('purpose', purpose)
   body.append('visibility', 'public')
 
+  const apiBase = (import.meta.env.VITE_API_URL ?? '').trim().replace(/\/+$/, '')
+
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/files`, { method: 'POST', body })
+    const response = await fetch(`${apiBase}/api/files`, { method: 'POST', body })
     if (response.ok) {
       const payload = await response.json() as { ok: boolean; data?: { url: string } }
       if (payload.ok && payload.data?.url) {
-        return { url: payload.data.url, mode: 'r2' }
+        const resolvedUrl = payload.data.url.startsWith('http')
+          ? payload.data.url
+          : `${apiBase}${payload.data.url}`
+        return { url: resolvedUrl, mode: 'r2' }
       }
     }
   } catch {

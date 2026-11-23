@@ -34,6 +34,7 @@ export const recordPaymentSchema = z.object({
 export const filePurposeSchema = z.enum([
   'catalog',
   'payment-proof',
+  'invoice-pdf',
   'expense-proof',
   'inventory',
   'avatar',

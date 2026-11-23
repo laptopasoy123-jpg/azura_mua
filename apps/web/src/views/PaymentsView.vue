@@ -217,7 +217,10 @@ const hasWhatsAppPhone = (payment: Payment) => {
 const onSendWhatsApp = async (payment: Payment) => {
   const params = receiptParamsFor(payment)
   const waPhone = formatWhatsAppPhone(params.customer?.phone ?? '')
-  if (!waPhone) return
+  if (!waPhone) {
+    store.showActionToast('WhatsApp Unavailable', 'Customer phone number is missing for this PO.', 'amber')
+    return
+  }
 
   const waTab = window.open('about:blank', '_blank')
   sendingId.value = payment.id
@@ -258,7 +261,8 @@ const onSendWhatsApp = async (payment: Payment) => {
     if (waTab) {
       waTab.location.href = waUrl
     } else {
-      window.open(waUrl, '_blank', 'noopener,noreferrer')
+      const opened = window.open(waUrl, '_blank', 'noopener,noreferrer')
+      if (!opened) window.location.href = waUrl
     }
 
     waHint.value = shareResult.mode === 'r2'

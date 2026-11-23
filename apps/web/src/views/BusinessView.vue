@@ -419,7 +419,8 @@ const sendInvoiceWhatsApp = async (invoice: Invoice) => {
     if (waTab) {
       waTab.location.href = waUrl
     } else {
-      window.open(waUrl, '_blank', 'noopener,noreferrer')
+      const opened = window.open(waUrl, '_blank', 'noopener,noreferrer')
+      if (!opened) window.location.href = waUrl
     }
     store.showActionToast('WhatsApp Ready', `Opening WhatsApp invoice & PDF link for ${customer?.name ?? waPhone}.`, 'green')
   } catch (err) {
